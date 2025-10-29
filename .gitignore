@@ -1,0 +1,15 @@
+# Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+backend/venv/
+
+# macOS
+.DS_Store
+
+# Node
+vrite/node_modules/
+.vscode/
+.env
