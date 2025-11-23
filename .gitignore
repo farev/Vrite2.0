@@ -11,6 +11,7 @@ backend/venv/
 
 # Node
 vrite/node_modules/
+vrite/.next/
 .vscode/
 
 # Environment variables and secrets

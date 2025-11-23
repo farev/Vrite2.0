@@ -4,12 +4,15 @@ from pydantic import BaseModel
 from typing import Optional
 import openai
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="Vrite AI Backend", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
