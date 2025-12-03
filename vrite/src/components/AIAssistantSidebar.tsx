@@ -9,9 +9,7 @@ import {
   Copy,
   Check,
   Bot,
-  User,
-  ChevronRight,
-  ChevronLeft
+  User
 } from 'lucide-react';
 
 interface Message {
@@ -22,18 +20,29 @@ interface Message {
   isLoading?: boolean;
 }
 
+export interface ContextSnippet {
+  id: string;
+  text: string;
+}
+
 interface AIAssistantSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   documentContent: string;
   onApplyChanges?: (content: string) => void;
+  contextSnippets?: ContextSnippet[];
+  onRemoveContextSnippet?: (id: string) => void;
+  onClearContextSnippets?: () => void;
 }
 
 export default function AIAssistantSidebar({ 
   isOpen, 
   onToggle, 
   documentContent,
-  onApplyChanges 
+  onApplyChanges,
+  contextSnippets = [],
+  onRemoveContextSnippet,
+  onClearContextSnippets
 }: AIAssistantSidebarProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -51,6 +60,11 @@ export default function AIAssistantSidebar({
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const truncateContext = (text: string, limit = 160) => {
+    if (text.length <= limit) return text;
+    return `${text.slice(0, limit - 1)}…`;
   };
 
   useEffect(() => {
@@ -88,16 +102,27 @@ export default function AIAssistantSidebar({
           content: msg.content,
         }));
 
+      const requestBody: {
+        content: string;
+        instruction: string;
+        conversation_history: { role: string; content: string }[];
+        context_snippets?: string[];
+      } = {
+        content: documentContent,
+        instruction: inputMessage,
+        conversation_history: conversationHistory,
+      };
+
+      if (contextSnippets.length > 0) {
+        requestBody.context_snippets = contextSnippets.map((snippet) => snippet.text);
+      }
+
       const response = await fetch('http://localhost:8000/api/command', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          content: documentContent,
-          instruction: inputMessage,
-          conversation_history: conversationHistory,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -106,10 +131,16 @@ export default function AIAssistantSidebar({
 
       const data = await response.json();
       
+      // Automatically apply changes to the document
+      if (onApplyChanges && data.processed_content) {
+        onApplyChanges(data.processed_content);
+      }
+      
+      // Display only the summary in the chat
       setMessages(prev => 
         prev.map(msg => 
           msg.id === loadingMessage.id 
-            ? { ...msg, content: data.processed_content, isLoading: false }
+            ? { ...msg, content: data.summary || 'Changes applied successfully.', isLoading: false }
             : msg
         )
       );
@@ -246,15 +277,6 @@ export default function AIAssistantSidebar({
                               <Copy size={14} />
                             )}
                           </button>
-                          {onApplyChanges && (
-                            <button
-                              onClick={() => onApplyChanges(message.content)}
-                              className="ai-message-action-btn ai-apply-btn"
-                              title="Apply to document"
-                            >
-                              Apply
-                            </button>
-                          )}
                         </div>
                       )}
                     </>
@@ -279,6 +301,48 @@ export default function AIAssistantSidebar({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Context Panel */}
+          <div className="ai-context-panel">
+            <div className="ai-context-panel-header">
+              <span>Context ({contextSnippets.length})</span>
+              {contextSnippets.length > 0 && (
+                <button
+                  type="button"
+                  className="ai-context-clear-btn"
+                  onClick={() => onClearContextSnippets?.()}
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+            {contextSnippets.length === 0 ? (
+              <p className="ai-context-panel-note">
+                Highlight text in the editor and choose &quot;Add to AI context&quot; to pin it here for your next prompt.
+              </p>
+            ) : (
+              <>
+                <div className="ai-context-chip-list">
+                  {contextSnippets.map((snippet) => (
+                    <div key={snippet.id} className="ai-context-chip">
+                      <span>{truncateContext(snippet.text)}</span>
+                      <button
+                        type="button"
+                        className="ai-context-chip-remove"
+                        onClick={() => onRemoveContextSnippet?.(snippet.id)}
+                        aria-label="Remove context"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className="ai-context-panel-note">
+                  These snippets are sent with your prompt and prioritized by the assistant.
+                </p>
+              </>
+            )}
           </div>
 
           {/* Input */}

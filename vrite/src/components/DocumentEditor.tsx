@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import {
   $getRoot,
   $getSelection,
@@ -12,6 +13,8 @@ import {
   type EditorState,
   type LexicalEditor,
   $isRangeSelection,
+  SELECTION_CHANGE_COMMAND,
+  COMMAND_PRIORITY_LOW,
 } from 'lexical';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
@@ -28,6 +31,7 @@ import { LinkNode } from '@lexical/link';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
 import { TableNode, TableCellNode, TableRowNode } from '@lexical/table';
 import { CodeNode, CodeHighlightNode } from '@lexical/code';
+import { mergeRegister } from '@lexical/utils';
 import {
   Bold,
   Italic,
@@ -37,8 +41,10 @@ import {
   Sparkles,
   Check,
   X,
+  PlusCircle,
 } from 'lucide-react';
-import AIAssistantSidebar from './AIAssistantSidebar';
+import { createPortal } from 'react-dom';
+import AIAssistantSidebar, { type ContextSnippet } from './AIAssistantSidebar';
 import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
 import DocumentHeader from './DocumentHeader';
@@ -243,8 +249,118 @@ function EditorRefPlugin({ setEditorRef }: { setEditorRef: (editor: LexicalEdito
   return null;
 }
 
-function Placeholder() {
-  return <div className="document-placeholder">Start writing your engineering report...</div>;
+type SelectionRect = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+};
+
+type SelectionInfo = {
+  text: string;
+  rect: SelectionRect | null;
+};
+
+function SelectionContextPlugin({ onSelectionChange }: { onSelectionChange: (info: SelectionInfo) => void }) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const updateSelection = () => {
+      editor.getEditorState().read(() => {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection) && !selection.isCollapsed()) {
+          const text = selection.getTextContent().trim();
+          let rect: SelectionRect | null = null;
+          if (typeof window !== 'undefined') {
+            const domSelection = window.getSelection();
+            if (domSelection && domSelection.rangeCount > 0) {
+              const domRect = domSelection.getRangeAt(0).getBoundingClientRect();
+              rect = {
+                top: domRect.top + window.scrollY,
+                left: domRect.left + window.scrollX,
+                width: domRect.width,
+                height: domRect.height,
+              };
+            }
+          }
+          onSelectionChange({ text, rect });
+        } else {
+          onSelectionChange({ text: '', rect: null });
+        }
+      });
+    };
+
+    const unregister = mergeRegister(
+      editor.registerCommand(
+        SELECTION_CHANGE_COMMAND,
+        () => {
+          updateSelection();
+          return false;
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+      editor.registerUpdateListener(() => {
+        updateSelection();
+      })
+    );
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', updateSelection);
+      window.addEventListener('scroll', updateSelection, true);
+    }
+
+    return () => {
+      unregister();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', updateSelection);
+        window.removeEventListener('scroll', updateSelection, true);
+      }
+    };
+  }, [editor, onSelectionChange]);
+
+  return null;
+}
+
+function SelectionContextPopover({
+  selectionInfo,
+  onAddToContext,
+  onDismiss,
+}: {
+  selectionInfo: SelectionInfo;
+  onAddToContext: () => void;
+  onDismiss: () => void;
+}) {
+  if (!selectionInfo.text || !selectionInfo.rect || typeof document === 'undefined') {
+    return null;
+  }
+
+  const { rect } = selectionInfo;
+  const style = {
+    top: rect.top + rect.height + 8,
+    left: rect.left + rect.width / 2,
+  };
+
+  const preventMouseDown = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  return createPortal(
+    <div
+      className="ai-context-selection-popover"
+      style={{ top: `${style.top}px`, left: `${style.left}px` }}
+      onMouseDown={preventMouseDown}
+    >
+      <button type="button" className="ai-context-selection-popover-btn" onClick={onAddToContext}>
+        <PlusCircle size={14} />
+        Add to AI context
+      </button>
+      <button type="button" className="ai-context-selection-popover-dismiss" onClick={onDismiss}>
+        <X size={12} />
+      </button>
+    </div>,
+    document.body
+  );
 }
 
 function DocumentPage({ 
@@ -294,6 +410,9 @@ export default function DocumentEditor() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
+  const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
+  const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
+  const isDocumentEmpty = documentContent.trim().length === 0;
   
   const handleEditorChange = (editorState: EditorState, content: string) => {
     setDocumentContent(content);
@@ -477,6 +596,52 @@ export default function DocumentEditor() {
     }
   };
 
+  const handleAddSelectionToContext = useCallback(() => {
+    const normalized = selectionInfo.text.trim();
+    if (!normalized) {
+      return;
+    }
+
+    setContextSnippets((prev) => {
+      if (prev.some((snippet) => snippet.text === normalized)) {
+        return prev;
+      }
+
+      const id =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      return [...prev, { id, text: normalized }];
+    });
+    setSelectionInfo({ text: '', rect: null });
+    if (typeof window !== 'undefined') {
+      const domSelection = window.getSelection();
+      domSelection?.removeAllRanges();
+    }
+  }, [selectionInfo.text]);
+
+  const handleRemoveContextSnippet = useCallback((id: string) => {
+    setContextSnippets((prev) => prev.filter((snippet) => snippet.id !== id));
+  }, []);
+
+  const handleClearContextSnippets = useCallback(() => {
+    setContextSnippets([]);
+  }, []);
+
+  const hasPendingSelection = useMemo(
+    () => selectionInfo.text.trim().length > 0 && selectionInfo.rect !== null,
+    [selectionInfo]
+  );
+
+  const handleDismissSelection = useCallback(() => {
+    setSelectionInfo({ text: '', rect: null });
+    if (typeof window !== 'undefined') {
+      const domSelection = window.getSelection();
+      domSelection?.removeAllRanges();
+    }
+  }, []);
+
   return (
     <div className="document-editor-container">
       <DocumentHeader
@@ -516,11 +681,16 @@ export default function DocumentEditor() {
         <div className="document-editor-wrapper" style={{ position: 'relative' }}>
           <div className="document-pages-container">
             <DocumentPage pageNumber={currentPage} margins={documentMargins}>
-              <RichTextPlugin
-                contentEditable={<ContentEditable className="document-content-editable" />}
-                placeholder={<Placeholder />}
-                ErrorBoundary={LexicalErrorBoundary}
-              />
+              <div className="document-editor-surface">
+                {isDocumentEmpty && (
+                  <div className="document-placeholder">Start writing...</div>
+                )}
+                <RichTextPlugin
+                  contentEditable={<ContentEditable className="document-content-editable" />}
+                  placeholder={null}
+                  ErrorBoundary={LexicalErrorBoundary}
+                />
+              </div>
             </DocumentPage>
           </div>
 
@@ -539,6 +709,14 @@ export default function DocumentEditor() {
             onDiffComplete={handleDiffComplete}
             onAllResolved={handleAllDiffsResolved}
           />
+          <SelectionContextPlugin onSelectionChange={setSelectionInfo} />
+          {hasPendingSelection && (
+            <SelectionContextPopover
+              selectionInfo={selectionInfo}
+              onAddToContext={handleAddSelectionToContext}
+              onDismiss={handleDismissSelection}
+            />
+          )}
         </div>
       </LexicalComposer>
       
@@ -547,6 +725,9 @@ export default function DocumentEditor() {
         onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
         documentContent={documentContent}
         onApplyChanges={handleApplyChanges}
+        contextSnippets={contextSnippets}
+        onRemoveContextSnippet={handleRemoveContextSnippet}
+        onClearContextSnippets={handleClearContextSnippets}
       />
 
       <DiffViewer

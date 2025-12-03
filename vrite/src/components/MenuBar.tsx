@@ -18,14 +18,13 @@ interface MenuBarProps {
   onPrint: () => void;
 }
 
-export default function MenuBar({ 
-  onNewDocument, 
-  onSaveDocument, 
-  onExportDocument, 
-  onPrint 
+export default function MenuBar({
+  onNewDocument,
+  onSaveDocument,
+  onExportDocument,
+  onPrint
 }: MenuBarProps) {
-  const [fileMenuOpen, setFileMenuOpen] = useState(false);
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
   return (
     <div className="menu-bar">
@@ -36,13 +35,13 @@ export default function MenuBar({
       
       <div className="menu-bar-items">
         <div className="menu-item">
-          <button 
+          <button
             className="menu-button"
-            onClick={() => setFileMenuOpen(!fileMenuOpen)}
+            onClick={() => setOpenDropdown(openDropdown === 'file' ? null : 'file')}
           >
             File <ChevronDown size={14} />
           </button>
-          {fileMenuOpen && (
+          {openDropdown === 'file' && (
             <div className="menu-dropdown">
               <button className="menu-dropdown-item" onClick={onNewDocument}>
                 <File size={16} />
@@ -55,14 +54,14 @@ export default function MenuBar({
                 <span className="menu-shortcut">Ctrl+S</span>
               </button>
               <div className="menu-dropdown-divider" />
-              <button 
+              <button
                 className="menu-dropdown-item"
-                onClick={() => setExportMenuOpen(!exportMenuOpen)}
+                onClick={() => setOpenDropdown(openDropdown === 'export' ? null : 'export')}
               >
                 <Download size={16} />
                 Export as...
               </button>
-              {exportMenuOpen && (
+              {openDropdown === 'export' && (
                 <div className="menu-dropdown-submenu">
                   <button 
                     className="menu-dropdown-item"

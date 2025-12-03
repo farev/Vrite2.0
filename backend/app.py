@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import openai
 import os
 from dotenv import load_dotenv
@@ -21,6 +21,8 @@ app.add_middleware(
 class DocumentRequest(BaseModel):
     content: str
     instruction: str
+    conversation_history: Optional[list] = None
+    context_snippets: Optional[List[str]] = None
 
 class FormatRequest(BaseModel):
     content: str
@@ -100,24 +102,64 @@ async def process_ai_command(request: DocumentRequest):
     try:
         client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        prompt = f"""
-        Document content:
-        {request.content}
+        # Build messages array with conversation history
+        messages = []
         
-        User instruction: {request.instruction}
+        # Add system message
+        messages.append({
+            "role": "system",
+            "content": """You are an AI writing assistant. When the user asks you to modify their document:
+1. Apply the requested changes to the document content
+2. Return a JSON response with two fields:
+   - "summary": A brief, friendly summary of what changes you made (2-3 sentences max)
+   - "processed_content": The full modified document content
+3. If the user provides explicit context snippets, treat them as the highest-priority guidance and make sure your edits respect them.
+
+Always respond in valid JSON format with these two fields."""
+        })
         
-        Please apply the requested changes to the document and return the modified content.
-        """
+        # Add conversation history if provided
+        if request.conversation_history:
+            messages.extend(request.conversation_history)
+        
+        # Add current request
+        context_text = ""
+        if request.context_snippets:
+            cleaned_context = [snippet.strip() for snippet in request.context_snippets if snippet.strip()]
+            if cleaned_context:
+                formatted_snippets = "\n".join(f"- {snippet}" for snippet in cleaned_context)
+                context_text = f"""Priority context from the user:
+{formatted_snippets}
+
+"""
+
+        messages.append({
+            "role": "user",
+            "content": f"""{context_text}Document content:
+{request.content}
+
+User instruction: {request.instruction}
+
+Please apply the requested changes and return a JSON response with:
+1. "summary": A brief description of what you changed
+2. "processed_content": The modified document"""
+        })
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             max_tokens=2000,
-            temperature=0.3
+            temperature=0.3,
+            response_format={"type": "json_object"}
         )
         
+        # Parse the JSON response
+        import json
+        result = json.loads(response.choices[0].message.content)
+        
         return {
-            "processed_content": response.choices[0].message.content
+            "summary": result.get("summary", "Changes applied successfully."),
+            "processed_content": result.get("processed_content", request.content)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Command processing error: {str(e)}")

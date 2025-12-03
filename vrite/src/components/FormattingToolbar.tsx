@@ -66,14 +66,8 @@ export default function FormattingToolbar({
   const [textColor, setTextColor] = useState('#000000');
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
   
-  // Dropdown states
-  const [fontDropdownOpen, setFontDropdownOpen] = useState(false);
-  const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false);
-  const [lineSpacingDropdownOpen, setLineSpacingDropdownOpen] = useState(false);
-  const [styleDropdownOpen, setStyleDropdownOpen] = useState(false);
-  const [marginsDropdownOpen, setMarginsDropdownOpen] = useState(false);
-  const [colorDropdownOpen, setColorDropdownOpen] = useState(false);
-  const [formatDropdownOpen, setFormatDropdownOpen] = useState(false);
+  // Dropdown states - only one can be open at a time
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
   const fontSizes = ['8pt', '9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '18pt', '20pt', '24pt', '28pt', '36pt', '48pt', '72pt'];
   const fontFamilies = [
@@ -143,7 +137,7 @@ export default function FormattingToolbar({
         $setBlocksType(selection, () => $createHeadingNode(headingSize));
       }
     });
-    setStyleDropdownOpen(false);
+    setOpenDropdown(null);
   };
 
   const formatParagraph = () => {
@@ -153,7 +147,7 @@ export default function FormattingToolbar({
         $setBlocksType(selection, () => $createParagraphNode());
       }
     });
-    setStyleDropdownOpen(false);
+    setOpenDropdown(null);
   };
 
   const applyFontSize = (size: string) => {
@@ -169,7 +163,7 @@ export default function FormattingToolbar({
       }
     });
     setFontSize(size);
-    setSizeDropdownOpen(false);
+    setOpenDropdown(null);
   };
 
   const applyFontFamily = (family: string) => {
@@ -185,7 +179,7 @@ export default function FormattingToolbar({
       }
     });
     setFontFamily(family);
-    setFontDropdownOpen(false);
+    setOpenDropdown(null);
   };
 
   const applyLineHeight = (height: string) => {
@@ -204,7 +198,7 @@ export default function FormattingToolbar({
       }
     });
     setLineHeight(height);
-    setLineSpacingDropdownOpen(false);
+    setOpenDropdown(null);
   };
 
   const handleMarginChange = (side: 'top' | 'right' | 'bottom' | 'left', value: number) => {
@@ -214,7 +208,7 @@ export default function FormattingToolbar({
 
   const handleFormatSelection = (formatType: string) => {
     onFormatDocument?.(formatType);
-    setFormatDropdownOpen(false);
+    setOpenDropdown(null);
   };
 
   return (
@@ -223,14 +217,14 @@ export default function FormattingToolbar({
       <div className="toolbar-dropdown">
         <button
           className="toolbar-dropdown-button"
-          onClick={() => setStyleDropdownOpen(!styleDropdownOpen)}
+          onClick={() => setOpenDropdown(openDropdown === 'style' ? null : 'style')}
         >
           <span className="toolbar-dropdown-label">
             {blockType === 'paragraph' ? 'Normal' : blockType.toUpperCase()}
           </span>
           <ChevronDown size={14} />
         </button>
-        {styleDropdownOpen && (
+        {openDropdown === 'style' && (
           <div className="toolbar-dropdown-menu">
             <button onClick={formatParagraph} className="toolbar-dropdown-item">
               Normal Text
@@ -252,12 +246,12 @@ export default function FormattingToolbar({
       <div className="toolbar-dropdown">
         <button
           className="toolbar-dropdown-button"
-          onClick={() => setFontDropdownOpen(!fontDropdownOpen)}
+          onClick={() => setOpenDropdown(openDropdown === 'font' ? null : 'font')}
         >
           <span className="toolbar-dropdown-label">{fontFamily}</span>
           <ChevronDown size={14} />
         </button>
-        {fontDropdownOpen && (
+        {openDropdown === 'font' && (
           <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable">
             {fontFamilies.map((font) => (
               <button
@@ -277,12 +271,12 @@ export default function FormattingToolbar({
       <div className="toolbar-dropdown">
         <button
           className="toolbar-dropdown-button"
-          onClick={() => setSizeDropdownOpen(!sizeDropdownOpen)}
+          onClick={() => setOpenDropdown(openDropdown === 'size' ? null : 'size')}
         >
           <span className="toolbar-dropdown-label">{fontSize}</span>
           <ChevronDown size={14} />
         </button>
-        {sizeDropdownOpen && (
+        {openDropdown === 'size' && (
           <div className="toolbar-dropdown-menu">
             {fontSizes.map((size) => (
               <button
@@ -348,13 +342,13 @@ export default function FormattingToolbar({
       <div className="toolbar-dropdown">
         <button
           className="toolbar-dropdown-button"
-          onClick={() => setLineSpacingDropdownOpen(!lineSpacingDropdownOpen)}
+          onClick={() => setOpenDropdown(openDropdown === 'lineSpacing' ? null : 'lineSpacing')}
           title="Line Spacing"
         >
           <AlignVerticalJustifyStart size={18} />
           <ChevronDown size={14} />
         </button>
-        {lineSpacingDropdownOpen && (
+        {openDropdown === 'lineSpacing' && (
           <div className="toolbar-dropdown-menu">
             {lineSpacings.map((spacing) => (
               <button
@@ -373,13 +367,13 @@ export default function FormattingToolbar({
       <div className="toolbar-dropdown">
         <button
           className="toolbar-dropdown-button"
-          onClick={() => setMarginsDropdownOpen(!marginsDropdownOpen)}
+          onClick={() => setOpenDropdown(openDropdown === 'margins' ? null : 'margins')}
           title="Page Margins"
         >
           <Type size={18} />
           <ChevronDown size={14} />
         </button>
-        {marginsDropdownOpen && (
+        {openDropdown === 'margins' && (
           <div className="toolbar-dropdown-menu margins-dropdown">
             <div className="margin-control">
               <label>Top:</label>
@@ -433,13 +427,13 @@ export default function FormattingToolbar({
       <div className="toolbar-dropdown">
         <button
           className="toolbar-dropdown-button"
-          onClick={() => setFormatDropdownOpen(!formatDropdownOpen)}
+          onClick={() => setOpenDropdown(openDropdown === 'format' ? null : 'format')}
           title="Format Document"
         >
           <FileText size={18} />
           <ChevronDown size={14} />
         </button>
-        {formatDropdownOpen && (
+        {openDropdown === 'format' && (
           <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable format-dropdown">
             <div className="toolbar-dropdown-header">
               <strong>Format Document As...</strong>
