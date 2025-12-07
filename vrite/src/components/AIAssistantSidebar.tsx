@@ -167,8 +167,7 @@ export default function AIAssistantSidebar({
   ];
 
   return (
-    <>
-      {/* Toggle Button */}
+    <div className="ai-sidebar-shell">
       {!isOpen && (
         <button
           onClick={onToggle}
@@ -179,8 +178,7 @@ export default function AIAssistantSidebar({
         </button>
       )}
 
-      {/* Sidebar */}
-      <div className={`ai-sidebar ${isOpen ? 'ai-sidebar-open' : ''}`}>
+      <div className={`ai-sidebar ${isOpen ? 'ai-sidebar-open' : 'ai-sidebar-closed'}`}>
         <div className="ai-sidebar-header">
           <div className="ai-sidebar-title">
             <Bot size={20} />
@@ -304,6 +302,6 @@ export default function AIAssistantSidebar({
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

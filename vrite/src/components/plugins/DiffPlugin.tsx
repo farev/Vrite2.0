@@ -12,6 +12,7 @@ import {
 } from 'lexical';
 import * as Diff from 'diff';
 import { DiffNode, $createDiffNode, $isDiffNode } from '../nodes/DiffNode';
+import type { DiffType } from '../nodes/DiffNode';
 
 interface DiffPluginProps {
   originalContent: string | null;
@@ -64,8 +65,12 @@ export default function DiffPlugin({
           const originalText = node.getOriginalText();
 
           if (diffType === 'addition') {
-            // Reject addition: remove the diff node
-            node.remove();
+            // Reject addition: restore original text when available
+            if (originalText) {
+              node.replace($createTextNode(originalText));
+            } else {
+              node.remove();
+            }
           } else {
             // Reject deletion: restore original text
             if (originalText) {
@@ -129,35 +134,87 @@ export default function DiffPlugin({
       root.clear();
 
       // Compute word-level diff
-      const diff = Diff.diffWords(originalContent, suggestedContent);
+      const rawDiff = Diff.diffWords(originalContent, suggestedContent);
+
+      // Merge adjacent delete+add pairs into a single replacement chunk
+      const mergedDiff: Array<{
+        type: DiffType | 'unchanged';
+        value: string;
+        original?: string;
+      }> = [];
+
+      for (let i = 0; i < rawDiff.length; i++) {
+        const current = rawDiff[i];
+        const next = rawDiff[i + 1];
+
+        // deletion then addition -> replacement
+        if (current?.removed && next?.added) {
+          mergedDiff.push({
+            type: 'addition',
+            value: next.value,
+            original: current.value,
+          });
+          i++; // skip next
+          continue;
+        }
+
+        // addition then deletion (just in case order flips)
+        if (current?.added && next?.removed) {
+          mergedDiff.push({
+            type: 'addition',
+            value: current.value,
+            original: next.value,
+          });
+          i++; // skip next
+          continue;
+        }
+
+        if (current?.added) {
+          mergedDiff.push({ type: 'addition', value: current.value });
+          continue;
+        }
+
+        if (current?.removed) {
+          mergedDiff.push({
+            type: 'deletion',
+            value: current.value,
+            original: current.value,
+          });
+          continue;
+        }
+
+        mergedDiff.push({ type: 'unchanged', value: current.value });
+      }
 
       // Create a single paragraph to hold all content
       // In a more advanced implementation, we'd handle paragraph breaks
       const paragraph = $createParagraphNode();
 
-      diff.forEach((part) => {
-        if (part.added) {
-          // This is new text being added
-          const diffNode = $createDiffNode('addition', part.value);
+      mergedDiff.forEach((part) => {
+        if (part.type === 'addition') {
+          // New text or replacement
+          const diffNode = $createDiffNode('addition', part.value, part.original);
           paragraph.append(diffNode);
-        } else if (part.removed) {
-          // This is text being deleted
-          const diffNode = $createDiffNode('deletion', part.value, part.value);
-          paragraph.append(diffNode);
-        } else {
-          // Unchanged text - add as regular text node
-          // Handle newlines by creating new paragraphs
-          const lines = part.value.split('\n');
-          lines.forEach((line, index) => {
-            if (line) {
-              paragraph.append($createTextNode(line));
-            }
-            // Add newline representation (except for last segment)
-            if (index < lines.length - 1) {
-              paragraph.append($createTextNode('\n'));
-            }
-          });
+          return;
         }
+
+        if (part.type === 'deletion') {
+          const diffNode = $createDiffNode('deletion', part.value, part.original);
+          paragraph.append(diffNode);
+          return;
+        }
+
+        // Unchanged text - add as regular text node
+        const lines = part.value.split('\n');
+        lines.forEach((line, index) => {
+          if (line) {
+            paragraph.append($createTextNode(line));
+          }
+          // Add newline representation (except for last segment)
+          if (index < lines.length - 1) {
+            paragraph.append($createTextNode('\n'));
+          }
+        });
       });
 
       root.append(paragraph);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react';
 import {
   $getRoot,
   $getSelection,
@@ -244,7 +244,7 @@ function EditorRefPlugin({ setEditorRef }: { setEditorRef: (editor: LexicalEdito
 }
 
 function Placeholder() {
-  return <div className="document-placeholder">Start writing your engineering report...</div>;
+  return null;
 }
 
 function DocumentPage({ 
@@ -278,7 +278,7 @@ function DocumentPage({
 
 export default function DocumentEditor() {
   const [documentContent, setDocumentContent] = useState('');
-  const [isAISidebarOpen, setIsAISidebarOpen] = useState(false);
+  const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [documentMargins, setDocumentMargins] = useState({
     top: 72,
@@ -477,6 +477,13 @@ export default function DocumentEditor() {
     }
   };
 
+  const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
+  const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
+  const lexicalComposerKey = useMemo(
+    () => `lexical-${Math.random().toString(36).slice(2)}`,
+    [DiffNode]
+  );
+
   return (
     <div className="document-editor-container">
       <DocumentHeader
@@ -485,69 +492,80 @@ export default function DocumentEditor() {
         lastSaved={lastSaved}
         onSave={handleManualSave}
       />
-      <LexicalComposer initialConfig={initialConfig}>
-        <FormattingToolbar
-          onAIToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
-          documentMargins={documentMargins}
-          onMarginsChange={handleMarginsChange}
-          onFormatDocument={handleFormatDocument}
-        />
-        
-        {/* Diff Mode Banner - Shows when AI suggestions are being reviewed */}
-        {isDiffModeActive && (
-          <div className="diff-mode-banner">
-            <div className="diff-mode-info">
-              <Sparkles size={18} />
-              <span>Reviewing AI suggestions - click buttons on each change to accept or reject</span>
-            </div>
-            <div className="diff-mode-actions">
-              <button onClick={handleRejectAllChanges} className="diff-mode-btn diff-mode-reject-all">
-                <X size={16} />
-                Reject All
-              </button>
-              <button onClick={handleAcceptAllChanges} className="diff-mode-btn diff-mode-accept-all">
-                <Check size={16} />
-                Accept All
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="document-editor-wrapper" style={{ position: 'relative' }}>
-          <div className="document-pages-container">
-            <DocumentPage pageNumber={currentPage} margins={documentMargins}>
-              <RichTextPlugin
-                contentEditable={<ContentEditable className="document-content-editable" />}
-                placeholder={<Placeholder />}
-                ErrorBoundary={LexicalErrorBoundary}
+      <div
+        className="document-editor-body"
+        style={editorLayoutStyle}
+      >
+        <div className="document-main-column">
+          <LexicalComposer key={lexicalComposerKey} initialConfig={initialConfig}>
+            <div className="document-main-stack">
+              <FormattingToolbar
+                onAIToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
+                documentMargins={documentMargins}
+                onMarginsChange={handleMarginsChange}
+                onFormatDocument={handleFormatDocument}
               />
-            </DocumentPage>
-          </div>
+              
+              {/* Diff Mode Banner - Shows when AI suggestions are being reviewed */}
+              {isDiffModeActive && (
+                <div className="diff-mode-banner">
+                  <div className="diff-mode-info">
+                    <Sparkles size={18} />
+                    <span>Reviewing AI suggestions - click buttons on each change to accept or reject</span>
+                  </div>
+                  <div className="diff-mode-actions">
+                    <button onClick={handleRejectAllChanges} className="diff-mode-btn diff-mode-reject-all">
+                      <X size={16} />
+                      Reject All
+                    </button>
+                    <button onClick={handleAcceptAllChanges} className="diff-mode-btn diff-mode-accept-all">
+                      <Check size={16} />
+                      Accept All
+                    </button>
+                  </div>
+                </div>
+              )}
 
-          <MyOnChangePlugin onChange={handleEditorChange} />
-          <EditorRefPlugin setEditorRef={setEditorRef} />
-          <HistoryPlugin />
-          <ListPlugin />
-          <LinkPlugin />
-          <TabIndentationPlugin />
-          <KeyboardShortcutPlugin onCommandK={handleCommandK} />
+              <div className="document-editor-scroll">
+                <div className="document-editor-wrapper" style={{ position: 'relative' }}>
+                  <div className="document-pages-container">
+                    <DocumentPage pageNumber={currentPage} margins={documentMargins}>
+                      <RichTextPlugin
+                        contentEditable={<ContentEditable className="document-content-editable" />}
+                        placeholder={<Placeholder />}
+                        ErrorBoundary={LexicalErrorBoundary}
+                      />
+                    </DocumentPage>
+                  </div>
 
-          {/* DiffPlugin - Inserts diff nodes directly into the editor */}
-          <DiffPlugin
-            originalContent={originalContent}
-            suggestedContent={suggestedContent}
-            onDiffComplete={handleDiffComplete}
-            onAllResolved={handleAllDiffsResolved}
-          />
+                  <MyOnChangePlugin onChange={handleEditorChange} />
+                  <EditorRefPlugin setEditorRef={setEditorRef} />
+                  <HistoryPlugin />
+                  <ListPlugin />
+                  <LinkPlugin />
+                  <TabIndentationPlugin />
+                  <KeyboardShortcutPlugin onCommandK={handleCommandK} />
+
+                  {/* DiffPlugin - Inserts diff nodes directly into the editor */}
+                  <DiffPlugin
+                    originalContent={originalContent}
+                    suggestedContent={suggestedContent}
+                    onDiffComplete={handleDiffComplete}
+                    onAllResolved={handleAllDiffsResolved}
+                  />
+                </div>
+              </div>
+            </div>
+          </LexicalComposer>
         </div>
-      </LexicalComposer>
-      
-      <AIAssistantSidebar
-        isOpen={isAISidebarOpen}
-        onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
-        documentContent={documentContent}
-        onApplyChanges={handleApplyChanges}
-      />
+
+        <AIAssistantSidebar
+          isOpen={isAISidebarOpen}
+          onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
+          documentContent={documentContent}
+          onApplyChanges={handleApplyChanges}
+        />
+      </div>
 
       <DiffViewer
         isOpen={isDiffViewerOpen}

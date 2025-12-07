@@ -28,17 +28,40 @@ function DiffComponent({
   nodeKey,
   onAccept,
   onReject,
+  originalText,
 }: {
   text: string;
   diffType: DiffType;
   nodeKey: NodeKey;
   onAccept: (nodeKey: NodeKey) => void;
   onReject: (nodeKey: NodeKey) => void;
+  originalText?: string;
 }) {
   const isAddition = diffType === 'addition';
+  const isReplacement = isAddition && !!originalText;
+  const acceptTitle = isAddition
+    ? isReplacement
+      ? 'Accept change'
+      : 'Accept addition'
+    : 'Accept deletion';
+  const rejectTitle = isAddition
+    ? isReplacement
+      ? 'Keep original text'
+      : 'Reject addition'
+    : 'Keep original';
+  const classes = [
+    'diff-inline-node',
+    isAddition ? 'diff-inline-addition' : 'diff-inline-deletion',
+    isReplacement ? 'diff-inline-replacement' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <span className={`diff-inline-node ${isAddition ? 'diff-inline-addition' : 'diff-inline-deletion'}`}>
+    <span className={classes}>
+      {isReplacement && (
+        <span className="diff-inline-original">{originalText}</span>
+      )}
       <span className="diff-inline-text">{text}</span>
       <span className="diff-inline-actions">
         <button
@@ -48,7 +71,7 @@ function DiffComponent({
             onReject(nodeKey);
           }}
           className="diff-inline-btn diff-inline-reject"
-          title={isAddition ? 'Reject addition' : 'Keep original'}
+          title={rejectTitle}
         >
           <X size={12} />
         </button>
@@ -59,7 +82,7 @@ function DiffComponent({
             onAccept(nodeKey);
           }}
           className="diff-inline-btn diff-inline-accept"
-          title={isAddition ? 'Accept addition' : 'Accept deletion'}
+          title={acceptTitle}
         >
           <Check size={12} />
         </button>
@@ -150,8 +173,9 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
         text={this.__text}
         diffType={this.__diffType}
         nodeKey={this.__key}
+        originalText={this.__originalText}
         onAccept={DiffNode.__onAccept || (() => {})}
-        onReject={DiffNode.__onReject || (() => {})}
+          onReject={DiffNode.__onReject || (() => {})}
       />
     );
   }
