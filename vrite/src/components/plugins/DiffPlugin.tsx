@@ -29,6 +29,33 @@ export default function DiffPlugin({
 }: DiffPluginProps) {
   const [editor] = useLexicalComposerContext();
 
+  // Check if all diff nodes have been resolved
+  const checkAllResolved = useCallback(() => {
+    const root = $getRoot();
+    let hasDiffNodes = false;
+
+    const checkNode = (node: LexicalNode) => {
+      if ($isDiffNode(node)) {
+        hasDiffNodes = true;
+        return;
+      }
+      if ('getChildren' in node && typeof node.getChildren === 'function') {
+        const children = node.getChildren() as LexicalNode[];
+        for (const child of children) {
+          checkNode(child);
+          if (hasDiffNodes) return;
+        }
+      }
+    };
+
+    checkNode(root);
+
+    if (!hasDiffNodes && onAllResolved) {
+      const content = root.getTextContent();
+      onAllResolved(content);
+    }
+  }, [onAllResolved]);
+
   // Handle accepting a diff node
   const handleAccept = useCallback(
     (nodeKey: NodeKey) => {
@@ -52,7 +79,7 @@ export default function DiffPlugin({
         checkAllResolved();
       });
     },
-    [editor]
+    [editor, checkAllResolved]
   );
 
   // Handle rejecting a diff node
@@ -86,37 +113,8 @@ export default function DiffPlugin({
         checkAllResolved();
       });
     },
-    [editor]
+    [editor, checkAllResolved]
   );
-
-  // Check if all diff nodes have been resolved
-  const checkAllResolved = useCallback(() => {
-    editor.getEditorState().read(() => {
-      const root = $getRoot();
-      let hasDiffNodes = false;
-
-      const checkNode = (node: LexicalNode) => {
-        if ($isDiffNode(node)) {
-          hasDiffNodes = true;
-          return;
-        }
-        if ('getChildren' in node && typeof node.getChildren === 'function') {
-          const children = node.getChildren() as LexicalNode[];
-          for (const child of children) {
-            checkNode(child);
-            if (hasDiffNodes) return;
-          }
-        }
-      };
-
-      checkNode(root);
-
-      if (!hasDiffNodes && onAllResolved) {
-        const content = root.getTextContent();
-        onAllResolved(content);
-      }
-    });
-  }, [editor, onAllResolved]);
 
   // Set up callbacks on the DiffNode class
   useEffect(() => {

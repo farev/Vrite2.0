@@ -18,14 +18,18 @@ interface MenuBarProps {
   onPrint: () => void;
 }
 
-export default function MenuBar({ 
-  onNewDocument, 
-  onSaveDocument, 
-  onExportDocument, 
-  onPrint 
+export default function MenuBar({
+  onNewDocument,
+  onSaveDocument,
+  onExportDocument,
+  onPrint
 }: MenuBarProps) {
-  const [fileMenuOpen, setFileMenuOpen] = useState(false);
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  type DropdownKey = 'file' | 'export';
+  const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
+
+  const toggleDropdown = (key: DropdownKey) => {
+    setOpenDropdown((prev) => (prev === key ? null : key));
+  };
 
   return (
     <div className="menu-bar">
@@ -38,11 +42,11 @@ export default function MenuBar({
         <div className="menu-item">
           <button 
             className="menu-button"
-            onClick={() => setFileMenuOpen(!fileMenuOpen)}
+            onClick={() => toggleDropdown('file')}
           >
             File <ChevronDown size={14} />
           </button>
-          {fileMenuOpen && (
+          {(openDropdown === 'file' || openDropdown === 'export') && (
             <div className="menu-dropdown">
               <button className="menu-dropdown-item" onClick={onNewDocument}>
                 <File size={16} />
@@ -55,14 +59,14 @@ export default function MenuBar({
                 <span className="menu-shortcut">Ctrl+S</span>
               </button>
               <div className="menu-dropdown-divider" />
-              <button 
+              <button
                 className="menu-dropdown-item"
-                onClick={() => setExportMenuOpen(!exportMenuOpen)}
+                onClick={() => toggleDropdown('export')}
               >
                 <Download size={16} />
                 Export as...
               </button>
-              {exportMenuOpen && (
+              {openDropdown === 'export' && (
                 <div className="menu-dropdown-submenu">
                   <button 
                     className="menu-dropdown-item"
