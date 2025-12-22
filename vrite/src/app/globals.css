@@ -656,38 +656,250 @@ body {
 }
 
 /* Print Styles */
+@page {
+  size: letter;
+  margin: 0;
+}
+
 @media print {
+  /* Hide UI elements */
   .menu-bar,
-  .toolbar {
+  .toolbar,
+  .formatting-toolbar,
+  .ai-sidebar,
+  .ai-sidebar-shell,
+  .document-header {
     display: none !important;
+  }
+  
+  /* Reset body and container */
+  body {
+    background: white;
+    margin: 0;
+    padding: 0;
   }
   
   .document-editor-container {
     background: white;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .document-editor-body {
+    display: block;
+    width: 100%;
+  }
+  
+  .document-main-column {
+    width: 100%;
+    max-width: none;
   }
   
   .document-editor-wrapper {
     padding: 0;
+    margin: 0;
   }
   
+  .document-pages-container {
+    display: block;
+  }
+  
+  /* Page styling */
   .document-page {
     box-shadow: none;
     border-radius: 0;
     page-break-after: always;
     margin: 0;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
   }
   
   .document-page:last-child {
     page-break-after: avoid;
   }
   
-  .document-page-footer {
-    border-top: none;
+  .document-page-content {
+    width: 100%;
+    height: auto;
   }
   
-  body {
-    background: white;
+  .document-page-footer {
+    border-top: none;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
   }
+  
+  /* Content styling */
+  .document-content-editable {
+    width: 100%;
+  }
+  
+  /* Ensure proper text rendering */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* Autocomplete Styles */
+.autocomplete-suggestion {
+  display: inline;
+}
+
+.autocomplete-ghost-text {
+  color: #9ca3af;
+  font-style: italic;
+  opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Equation Styles */
+.equation-inline-wrapper,
+.equation-block-wrapper {
+  position: relative;
+  display: inline-block;
+  padding: 4px 8px;
+  margin: 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.equation-block-wrapper {
+  display: block;
+  text-align: center;
+  margin: 12px 0;
+}
+
+.equation-inline-wrapper:hover,
+.equation-block-wrapper:hover {
+  background-color: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.equation-content {
+  display: inline-block;
+}
+
+.equation-edit-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.equation-inline-wrapper:hover .equation-edit-btn,
+.equation-block-wrapper:hover .equation-edit-btn {
+  opacity: 1;
+}
+
+.equation-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+}
+
+.equation-input {
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  min-width: 200px;
+}
+
+.equation-btn {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.equation-btn-save {
+  background: #22c55e;
+  color: white;
+}
+
+.equation-btn-save:hover {
+  background: #16a34a;
+}
+
+.equation-btn-cancel {
+  background: #ef4444;
+  color: white;
+}
+
+.equation-btn-cancel:hover {
+  background: #dc2626;
+}
+
+.equation-error {
+  color: #cc0000;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.equation-loading {
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Color Picker Styles */
+.color-picker-menu {
+  padding: 12px;
+  min-width: 200px;
+}
+
+.color-picker-input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.color-presets {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.color-preset {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.color-preset:hover {
+  transform: scale(1.1);
+  border-color: #2563eb;
 }
 
 /* AI Assistant Sidebar */

@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@lexical/code": "^0.35.0",
+    "@lexical/html": "^0.39.0",
     "@lexical/link": "^0.35.0",
     "@lexical/list": "^0.35.0",
+    "@lexical/markdown": "^0.39.0",
     "@lexical/plain-text": "^0.35.0",
     "@lexical/react": "^0.35.0",
     "@lexical/rich-text": "^0.35.0",
@@ -20,8 +22,11 @@
     "@lexical/utils": "^0.35.0",
     "@types/diff": "^7.0.2",
     "diff": "^8.0.2",
+    "docx": "^9.5.1",
+    "katex": "^0.16.27",
     "lucide-react": "^0.542.0",
     "next": "15.5.2",
+    "puppeteer": "^24.34.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },

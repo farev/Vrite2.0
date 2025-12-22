@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import MenuBar from '@/components/MenuBar';
 
@@ -10,6 +10,7 @@ const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), {
 
 export default function Home() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
+  const editorRef = useRef<any>(null);
 
   const handleNewDocument = () => {
     if (confirm('Create a new document? Any unsaved changes will be lost.')) {
@@ -18,12 +19,65 @@ export default function Home() {
   };
 
   const handleSaveDocument = () => {
-    // For now, just show a message - you can implement actual saving later
-    alert('Save functionality will be implemented with backend storage');
+    // Auto-save is already implemented in DocumentEditor
+    alert('Document is auto-saved to local storage');
   };
 
-  const handleExportDocument = (format: 'pdf' | 'docx' | 'txt') => {
-    alert(`Export as ${format.toUpperCase()} functionality will be implemented`);
+  const handleExportDocument = async (format: 'pdf' | 'docx' | 'txt') => {
+    try {
+      if (format === 'pdf') {
+        // For PDF, use browser print
+        window.print();
+        return;
+      }
+
+      if (format === 'txt') {
+        // Export as plain text
+        const content = document.querySelector('.document-content-editable')?.textContent || '';
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${documentTitle}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      if (format === 'docx') {
+        // Get HTML content from editor
+        const contentElement = document.querySelector('.document-content-editable');
+        const html = contentElement?.innerHTML || '';
+
+        // Call DOCX export API
+        const response = await fetch('/api/export/docx', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            html,
+            title: documentTitle,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Export failed');
+        }
+
+        // Download the file
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${documentTitle}.docx`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      alert(`Failed to export as ${format.toUpperCase()}`);
+    }
   };
 
   const handlePrint = () => {
