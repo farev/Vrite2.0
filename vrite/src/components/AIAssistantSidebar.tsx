@@ -1,16 +1,17 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { 
-  Send, 
-  Sparkles, 
-  X, 
+import {
+  Send,
+  Sparkles,
+  X,
   RefreshCw,
   Copy,
   Check,
   Bot,
   User
 } from 'lucide-react';
+import { DeltaApplicator } from '@/lib/deltaApplicator';
 
 interface Message {
   id: string;
@@ -30,6 +31,9 @@ interface AIAssistantSidebarProps {
   onToggle: () => void;
   documentContent: string;
   onApplyChanges?: (content: string) => void;
+  isDiffModeActive?: boolean;
+  onAcceptAllChanges?: () => void;
+  onRejectAllChanges?: () => void;
   contextSnippets?: ContextSnippet[];
   onRemoveContextSnippet?: (id: string) => void;
   onClearContextSnippets?: () => void;
@@ -40,6 +44,9 @@ export default function AIAssistantSidebar({
   onToggle, 
   documentContent,
   onApplyChanges,
+  isDiffModeActive = false,
+  onAcceptAllChanges,
+  onRejectAllChanges,
   contextSnippets = [],
   onRemoveContextSnippet,
   onClearContextSnippets
@@ -130,17 +137,39 @@ export default function AIAssistantSidebar({
       }
 
       const data = await response.json();
-      
-      // Automatically apply changes to the document
-      if (onApplyChanges && data.processed_content) {
+
+      // Handle tool-based changes or fall back to full document
+      if (data.type === 'tool_based' && data.changes && data.changes.length > 0) {
+        // Apply tool-based text replacements
+        console.log('Received tool-based changes:', data.changes);
+
+        const suggestedContent = DeltaApplicator.applyDeltas(
+          documentContent,
+          data.changes
+        );
+
+        console.log('Content changed:', suggestedContent !== documentContent);
+
+        if (onApplyChanges) {
+          onApplyChanges(suggestedContent);
+        }
+      } else if (onApplyChanges && data.processed_content) {
+        // Fallback: full document mode
+        console.log('Using full document fallback mode');
         onApplyChanges(data.processed_content);
+      } else {
+        console.warn('No changes to apply:', data);
       }
-      
-      // Display only the summary in the chat
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === loadingMessage.id 
-            ? { ...msg, content: data.summary || 'Changes applied successfully.', isLoading: false }
+
+      // Display reasoning + summary if available
+      const displayMessage = data.reasoning
+        ? `**Reasoning:** ${data.reasoning}\n\n${data.summary || 'Changes applied.'}`
+        : data.summary || 'Changes applied successfully.';
+
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === loadingMessage.id
+            ? { ...msg, content: displayMessage, isLoading: false }
             : msg
         )
       );
@@ -187,15 +216,6 @@ export default function AIAssistantSidebar({
       timestamp: new Date()
     }]);
   };
-
-  const quickPrompts = [
-    'Format this document according to APA standards',
-    'Make this section more concise',
-    'Expand on this topic with more details',
-    'Fix grammar and spelling errors',
-    'Improve the flow and readability',
-    'Generate a conclusion for this report',
-  ];
 
   return (
     <div className="ai-sidebar-shell">
@@ -285,22 +305,6 @@ export default function AIAssistantSidebar({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick Prompts */}
-          <div className="ai-quick-prompts">
-            <div className="ai-quick-prompts-title">Quick actions:</div>
-            <div className="ai-quick-prompts-list">
-              {quickPrompts.map((prompt, index) => (
-                <button
-                  key={index}
-                  onClick={() => setInputMessage(prompt)}
-                  className="ai-quick-prompt"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Context Panel */}
           <div className="ai-context-panel">
             <div className="ai-context-panel-header">
@@ -342,6 +346,29 @@ export default function AIAssistantSidebar({
               </>
             )}
           </div>
+
+          {isDiffModeActive && (
+            <div className="ai-diff-actions">
+              <div className="diff-mode-actions">
+                <button
+                  onClick={() => onRejectAllChanges?.()}
+                  className="diff-mode-btn diff-mode-reject-all"
+                  title="Reject all changes"
+                >
+                  <X size={16} />
+                  Reject All
+                </button>
+                <button
+                  onClick={() => onAcceptAllChanges?.()}
+                  className="diff-mode-btn diff-mode-accept-all"
+                  title="Accept all changes"
+                >
+                  <Check size={16} />
+                  Accept All
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Input */}
           <div className="ai-input-container">

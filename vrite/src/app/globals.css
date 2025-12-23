@@ -1124,6 +1124,19 @@ body {
   line-height: 1.4;
 }
 
+.ai-diff-actions {
+  padding: 12px 16px 8px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ai-diff-actions .diff-mode-actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
 .ai-input-container {
   border-top: 1px solid #e2e8f0;
   padding: 16px;

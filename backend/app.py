@@ -24,6 +24,21 @@ class DocumentRequest(BaseModel):
     conversation_history: Optional[list] = None
     context_snippets: Optional[List[str]] = None
 
+class DeltaChange(BaseModel):
+    operation: str  # "insert" | "delete" | "replace"
+    position: int
+    old_text: Optional[str] = None
+    new_text: Optional[str] = None
+    context_before: Optional[str] = None
+    context_after: Optional[str] = None
+
+class DeltaResponse(BaseModel):
+    type: str  # "delta" | "full"
+    reasoning: Optional[str] = None
+    changes: Optional[List[DeltaChange]] = None
+    summary: str
+    processed_content: Optional[str] = None
+
 class FormatRequest(BaseModel):
     content: str
     format_type: str = "APA"
@@ -31,6 +46,39 @@ class FormatRequest(BaseModel):
 class WriteRequest(BaseModel):
     prompt: str
     context: Optional[str] = None
+
+# System prompts for AI agent
+EDITOR_SYSTEM_PROMPT = """You are a professional document editing agent. Your role is to apply precise edits to documents efficiently.
+
+CRITICAL RULES:
+1. NO conversational fluff (no "Certainly!", "I'd be happy to", etc.)
+2. Use the replace_text tool to make changes to the document
+3. Be surgical and precise - change only what's necessary
+4. Call replace_text multiple times for multiple changes
+
+HOW TO USE replace_text TOOL:
+- Find the EXACT text that needs to be changed (old_text)
+- Specify what it should be replaced with (new_text)
+- The tool will find and replace the text automatically
+- You can call the tool multiple times for multiple changes
+
+EDITING PRINCIPLES:
+- Preserve the author's voice and style
+- Make minimal necessary changes
+- Maintain document structure unless explicitly asked to restructure
+- Double newlines (\\n\\n) indicate paragraph breaks - preserve them
+
+AFTER using tools, provide:
+- "reasoning": Brief analysis of what changes were made and why (1-3 sentences)
+- "summary": Concise statement of what was changed (no pleasantries)
+"""
+
+FORMATTING_STANDARDS = """
+APA 7th: Title page (bold title), running head, Level 1-2 headings (centered/left bold), double-space, 0.5" indent
+MLA 9th: Header (last name + page), first page heading, centered title, double-space, 0.5" indent
+Chicago 17th: Title page (title 1/3 down), footnotes/endnotes, bibliography hanging indent
+IEEE: Section numbering, column format, citation brackets
+"""
 
 @app.get("/health")
 async def health_check():
@@ -97,30 +145,47 @@ async def enhance_writing(request: WriteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Enhancement error: {str(e)}")
 
+# Define replace_text tool for OpenAI function calling
+REPLACE_TEXT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "replace_text",
+        "description": "Replace exact text in the document. Call this multiple times to make multiple changes.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "old_text": {
+                    "type": "string",
+                    "description": "The exact text to find and replace in the document"
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "The replacement text"
+                }
+            },
+            "required": ["old_text", "new_text"]
+        }
+    }
+}
+
 @app.post("/api/command")
 async def process_ai_command(request: DocumentRequest):
     try:
         client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        
+
         # Build messages array with conversation history
         messages = []
-        
-        # Add system message
+
+        # Add system message with new prompts
         messages.append({
             "role": "system",
-            "content": """You are an AI writing assistant. When the user asks you to modify their document:
-1. Apply the requested changes to the document content
-2. Return a JSON response with two fields:
-   - "summary": A brief, friendly summary of what changes you made (2-3 sentences max)
-   - "processed_content": The full modified document content
-3. If the user provides explicit context snippets, treat them as the highest-priority guidance and make sure your edits respect them.
-
-Always respond in valid JSON format with these two fields."""
+            "content": EDITOR_SYSTEM_PROMPT + "\n\n" + FORMATTING_STANDARDS
         })
-        
-        # Add conversation history if provided
+
+        # Add conversation history if provided (limit to last 7 exchanges)
         if request.conversation_history:
-            messages.extend(request.conversation_history)
+            recent_history = request.conversation_history[-14:]  # Last 7 exchanges (14 messages)
+            messages.extend(recent_history)
         
         # Add current request
         context_text = ""
@@ -140,27 +205,84 @@ Always respond in valid JSON format with these two fields."""
 
 User instruction: {request.instruction}
 
-Please apply the requested changes and return a JSON response with:
-1. "summary": A brief description of what you changed
-2. "processed_content": The modified document"""
+Use the replace_text tool to make changes, then provide reasoning and summary."""
         })
-        
+
+        # Make API call with tools
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
+            tools=[REPLACE_TEXT_TOOL],
+            tool_choice="auto",
             max_tokens=2000,
-            temperature=0.3,
-            response_format={"type": "json_object"}
+            temperature=0.3
         )
-        
-        # Parse the JSON response
-        import json
-        result = json.loads(response.choices[0].message.content)
-        
-        return {
-            "summary": result.get("summary", "Changes applied successfully."),
-            "processed_content": result.get("processed_content", request.content)
-        }
+
+        message = response.choices[0].message
+
+        # Extract tool calls
+        tool_calls = message.tool_calls if message.tool_calls else []
+
+        # Convert tool calls to our change format
+        changes = []
+        for tool_call in tool_calls:
+            if tool_call.function.name == "replace_text":
+                import json
+                args = json.loads(tool_call.function.arguments)
+                changes.append({
+                    "old_text": args.get("old_text", ""),
+                    "new_text": args.get("new_text", "")
+                })
+
+        # If we have tool calls, we need to get the final response
+        reasoning = ""
+        summary = ""
+
+        if tool_calls:
+            # Add tool responses and get final summary
+            messages.append(message.dict())
+
+            # Add tool responses (all successful)
+            for tool_call in tool_calls:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": "Text replaced successfully"
+                })
+
+            # Get final response with reasoning and summary
+            final_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=500,
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+
+            import json
+            result = json.loads(final_response.choices[0].message.content)
+            reasoning = result.get("reasoning", "")
+            summary = result.get("summary", "Changes applied.")
+        else:
+            # No tool calls - fallback to direct JSON response
+            summary = message.content if message.content else "Changes applied."
+
+        # Return changes
+        if changes:
+            return {
+                "type": "tool_based",
+                "reasoning": reasoning,
+                "changes": changes,
+                "summary": summary
+            }
+        else:
+            # Fallback - no tools used
+            return {
+                "type": "full",
+                "summary": summary,
+                "processed_content": request.content,
+                "reasoning": reasoning
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Command processing error: {str(e)}")
 

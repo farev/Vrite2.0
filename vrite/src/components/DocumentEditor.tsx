@@ -39,7 +39,6 @@ import {
   Undo,
   Redo,
   Sparkles,
-  Check,
   X,
   PlusCircle,
 } from 'lucide-react';
@@ -675,26 +674,6 @@ export default function DocumentEditor() {
                 onFormatDocument={handleFormatDocument}
               />
               
-              {/* Diff Mode Banner - Shows when AI suggestions are being reviewed */}
-              {isDiffModeActive && (
-                <div className="diff-mode-banner">
-                  <div className="diff-mode-info">
-                    <Sparkles size={18} />
-                    <span>Reviewing AI suggestions - click buttons on each change to accept or reject</span>
-                  </div>
-                  <div className="diff-mode-actions">
-                    <button onClick={handleRejectAllChanges} className="diff-mode-btn diff-mode-reject-all">
-                      <X size={16} />
-                      Reject All
-                    </button>
-                    <button onClick={handleAcceptAllChanges} className="diff-mode-btn diff-mode-accept-all">
-                      <Check size={16} />
-                      Accept All
-                    </button>
-                  </div>
-                </div>
-              )}
-
               <div className="document-editor-scroll">
                 <div className="document-editor-wrapper" style={{ position: 'relative' }}>
                   <div className="document-pages-container">
@@ -746,6 +725,9 @@ export default function DocumentEditor() {
           contextSnippets={contextSnippets}
           onRemoveContextSnippet={handleRemoveContextSnippet}
           onClearContextSnippets={handleClearContextSnippets}
+          isDiffModeActive={isDiffModeActive}
+          onAcceptAllChanges={handleAcceptAllChanges}
+          onRejectAllChanges={handleRejectAllChanges}
         />
       </div>
 
