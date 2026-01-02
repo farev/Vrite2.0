@@ -18,6 +18,9 @@ export type SerializedDiffNode = Spread<
     diffType: DiffType;
     text: string;
     originalText?: string;
+    isBold?: boolean;
+    isItalic?: boolean;
+    headingLevel?: number;
   },
   SerializedLexicalNode
 >;
@@ -29,6 +32,9 @@ function DiffComponent({
   onAccept,
   onReject,
   originalText,
+  isBold,
+  isItalic,
+  headingLevel,
 }: {
   text: string;
   diffType: DiffType;
@@ -36,6 +42,9 @@ function DiffComponent({
   onAccept: (nodeKey: NodeKey) => void;
   onReject: (nodeKey: NodeKey) => void;
   originalText?: string;
+  isBold?: boolean;
+  isItalic?: boolean;
+  headingLevel?: number;
 }) {
   const isAddition = diffType === 'addition';
   const isReplacement = isAddition && !!originalText;
@@ -57,12 +66,19 @@ function DiffComponent({
     .filter(Boolean)
     .join(' ');
 
+  // Apply text formatting styles
+  const textStyle: React.CSSProperties = {
+    fontWeight: isBold ? 'bold' : undefined,
+    fontStyle: isItalic ? 'italic' : undefined,
+    fontSize: headingLevel ? `${2.5 - headingLevel * 0.3}em` : undefined,
+  };
+
   return (
     <span className={classes}>
       {isReplacement && (
         <span className="diff-inline-original">{originalText}</span>
       )}
-      <span className="diff-inline-text">{text}</span>
+      <span className="diff-inline-text" style={textStyle}>{text}</span>
       <span className="diff-inline-actions">
         <button
           onClick={(e) => {
@@ -95,6 +111,9 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
   __diffType: DiffType;
   __text: string;
   __originalText?: string;
+  __isBold?: boolean;
+  __isItalic?: boolean;
+  __headingLevel?: number;
 
   // Static callbacks for accept/reject - will be set by the plugin
   static __onAccept: ((nodeKey: NodeKey) => void) | null = null;
@@ -105,7 +124,15 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
   }
 
   static clone(node: DiffNode): DiffNode {
-    return new DiffNode(node.__diffType, node.__text, node.__originalText, node.__key);
+    return new DiffNode(
+      node.__diffType,
+      node.__text,
+      node.__originalText,
+      node.__isBold,
+      node.__isItalic,
+      node.__headingLevel,
+      node.__key
+    );
   }
 
   static setCallbacks(
@@ -116,11 +143,22 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
     DiffNode.__onReject = onReject;
   }
 
-  constructor(diffType: DiffType, text: string, originalText?: string, key?: NodeKey) {
+  constructor(
+    diffType: DiffType,
+    text: string,
+    originalText?: string,
+    isBold?: boolean,
+    isItalic?: boolean,
+    headingLevel?: number,
+    key?: NodeKey
+  ) {
     super(key);
     this.__diffType = diffType;
     this.__text = text;
     this.__originalText = originalText;
+    this.__isBold = isBold;
+    this.__isItalic = isItalic;
+    this.__headingLevel = headingLevel;
   }
 
   createDOM(config: EditorConfig): HTMLElement {
@@ -136,7 +174,10 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
     return new DiffNode(
       serializedNode.diffType,
       serializedNode.text,
-      serializedNode.originalText
+      serializedNode.originalText,
+      serializedNode.isBold,
+      serializedNode.isItalic,
+      serializedNode.headingLevel
     );
   }
 
@@ -147,6 +188,9 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
       diffType: this.__diffType,
       text: this.__text,
       originalText: this.__originalText,
+      isBold: this.__isBold,
+      isItalic: this.__isItalic,
+      headingLevel: this.__headingLevel,
     };
   }
 
@@ -174,8 +218,11 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
         diffType={this.__diffType}
         nodeKey={this.__key}
         originalText={this.__originalText}
+        isBold={this.__isBold}
+        isItalic={this.__isItalic}
+        headingLevel={this.__headingLevel}
         onAccept={DiffNode.__onAccept || (() => {})}
-          onReject={DiffNode.__onReject || (() => {})}
+        onReject={DiffNode.__onReject || (() => {})}
       />
     );
   }
@@ -185,8 +232,15 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
   }
 }
 
-export function $createDiffNode(diffType: DiffType, text: string, originalText?: string): DiffNode {
-  return new DiffNode(diffType, text, originalText);
+export function $createDiffNode(
+  diffType: DiffType,
+  text: string,
+  originalText?: string,
+  isBold?: boolean,
+  isItalic?: boolean,
+  headingLevel?: number
+): DiffNode {
+  return new DiffNode(diffType, text, originalText, isBold, isItalic, headingLevel);
 }
 
 export function $isDiffNode(node: LexicalNode | null | undefined): node is DiffNode {

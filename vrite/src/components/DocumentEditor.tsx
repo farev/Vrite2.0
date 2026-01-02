@@ -415,6 +415,7 @@ export default function DocumentEditor() {
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
+  const [pendingFormattingOps, setPendingFormattingOps] = useState<any[]>([]);
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const handleEditorChange = (editorState: EditorState, content: string) => {
@@ -483,11 +484,16 @@ export default function DocumentEditor() {
     setIsAISidebarOpen(true);
   }, []);
 
-  const handleApplyChanges = (content: string) => {
+  const handleApplyChanges = (content: string, formattingOps: any[] = []) => {
     // Store the current and suggested content to trigger inline diff in editor
     setOriginalContent(documentContent);
     setSuggestedContent(content);
     setIsDiffModeActive(true);
+
+    // Store formatting operations to apply after diff resolution
+    if (formattingOps.length > 0) {
+      setPendingFormattingOps(formattingOps);
+    }
   };
 
   const handleDiffComplete = useCallback(() => {
@@ -501,6 +507,9 @@ export default function DocumentEditor() {
     setOriginalContent(null);
     setSuggestedContent(null);
     setDocumentContent(finalContent);
+
+    // Clear pending formatting operations (already applied in diff)
+    setPendingFormattingOps([]);
   }, []);
 
   const handleAcceptAllChanges = useCallback(() => {
@@ -589,10 +598,21 @@ export default function DocumentEditor() {
 
       const data = await response.json();
 
-      // Show the formatted content in diff viewer
-      setOriginalContent(documentContent);
-      setSuggestedContent(data.formatted_content);
-      setIsDiffViewerOpen(true);
+      // Handle tool-based response (new format)
+      if (data.type === 'tool_based' && data.changes) {
+        // Apply changes using DeltaApplicator
+        const { DeltaApplicator } = await import('@/lib/deltaApplicator');
+        const result = DeltaApplicator.applyDeltas(documentContent, data.changes);
+
+        // Use the same inline diff UI as regular edits, passing formatting ops
+        handleApplyChanges(result.content, result.formattingOps);
+
+        console.log('Formatting applied:', data.reasoning, data.summary);
+        console.log('Formatting operations:', result.formattingOps);
+      } else if (data.formatted_content) {
+        // Fallback: old format - also use inline diff
+        handleApplyChanges(data.formatted_content);
+      }
     } catch (error) {
       console.error('Error formatting document:', error);
       alert('Failed to format document. Please make sure the backend server is running.');
@@ -700,6 +720,7 @@ export default function DocumentEditor() {
                   <DiffPlugin
                     originalContent={originalContent}
                     suggestedContent={suggestedContent}
+                    formattingOps={pendingFormattingOps}
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
                   />

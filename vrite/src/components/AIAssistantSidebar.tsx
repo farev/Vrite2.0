@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Copy,
   Check,
-  Bot,
   User
 } from 'lucide-react';
 import { DeltaApplicator } from '@/lib/deltaApplicator';
@@ -30,7 +29,7 @@ interface AIAssistantSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   documentContent: string;
-  onApplyChanges?: (content: string) => void;
+  onApplyChanges?: (content: string, formattingOps?: any[]) => void;
   isDiffModeActive?: boolean;
   onAcceptAllChanges?: () => void;
   onRejectAllChanges?: () => void;
@@ -140,18 +139,19 @@ export default function AIAssistantSidebar({
 
       // Handle tool-based changes or fall back to full document
       if (data.type === 'tool_based' && data.changes && data.changes.length > 0) {
-        // Apply tool-based text replacements
+        // Apply tool-based text replacements and formatting
         console.log('Received tool-based changes:', data.changes);
 
-        const suggestedContent = DeltaApplicator.applyDeltas(
+        const result = DeltaApplicator.applyDeltas(
           documentContent,
           data.changes
         );
 
-        console.log('Content changed:', suggestedContent !== documentContent);
+        console.log('Content changed:', result.content !== documentContent);
+        console.log('Formatting operations:', result.formattingOps);
 
         if (onApplyChanges) {
-          onApplyChanges(suggestedContent);
+          onApplyChanges(result.content, result.formattingOps);
         }
       } else if (onApplyChanges && data.processed_content) {
         // Fallback: full document mode
@@ -232,7 +232,6 @@ export default function AIAssistantSidebar({
       <div className={`ai-sidebar ${isOpen ? 'ai-sidebar-open' : 'ai-sidebar-closed'}`}>
         <div className="ai-sidebar-header">
           <div className="ai-sidebar-title">
-            <Bot size={20} />
             <span>AI Assistant</span>
           </div>
           <div className="ai-sidebar-controls">
@@ -260,13 +259,11 @@ export default function AIAssistantSidebar({
                 key={message.id}
                 className={`ai-message ai-message-${message.type}`}
               >
-                <div className="ai-message-icon">
-                  {message.type === 'user' ? (
+                {message.type === 'user' && (
+                  <div className="ai-message-icon">
                     <User size={16} />
-                  ) : (
-                    <Bot size={16} />
-                  )}
-                </div>
+                  </div>
+                )}
                 <div className="ai-message-content">
                   {message.isLoading ? (
                     <div className="ai-message-loading">

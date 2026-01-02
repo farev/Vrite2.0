@@ -10,13 +10,16 @@ import {
   type NodeKey,
   type LexicalNode,
 } from 'lexical';
+import { $createHeadingNode } from '@lexical/rich-text';
 import * as Diff from 'diff';
 import { DiffNode, $createDiffNode, $isDiffNode } from '../nodes/DiffNode';
 import type { DiffType } from '../nodes/DiffNode';
+import type { FormattingOperation } from '@/lib/deltaApplicator';
 
 interface DiffPluginProps {
   originalContent: string | null;
   suggestedContent: string | null;
+  formattingOps?: FormattingOperation[];
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
 }
@@ -24,6 +27,7 @@ interface DiffPluginProps {
 export default function DiffPlugin({
   originalContent,
   suggestedContent,
+  formattingOps = [],
   onDiffComplete,
   onAllResolved,
 }: DiffPluginProps) {
@@ -64,11 +68,38 @@ export default function DiffPlugin({
         if ($isDiffNode(node)) {
           const diffType = node.getDiffType();
           const text = node.getText();
+          const formatting = node.exportJSON(); // Get isBold, isItalic, headingLevel
 
           if (diffType === 'addition') {
-            // Accept addition: replace diff node with regular text
+            // Accept addition: replace diff node with formatted text
             const textNode = $createTextNode(text);
+
+            // Apply text formatting
+            if (formatting.isBold) {
+              textNode.toggleFormat('bold');
+            }
+            if (formatting.isItalic) {
+              textNode.toggleFormat('italic');
+            }
+
             node.replace(textNode);
+
+            // For headings, convert the parent paragraph to a heading
+            if (formatting.headingLevel) {
+              const parent = textNode.getParent();
+              if (parent && parent.getType() === 'paragraph') {
+                const headingTag = `h${Math.min(Math.max(formatting.headingLevel, 1), 6)}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+                const headingNode = $createHeadingNode(headingTag);
+
+                // Transfer all children from paragraph to heading
+                const children = parent.getChildren();
+                for (const child of children) {
+                  headingNode.append(child);
+                }
+
+                parent.replace(headingNode);
+              }
+            }
           } else {
             // Accept deletion: remove the diff node entirely
             node.remove();
@@ -185,13 +216,34 @@ export default function DiffPlugin({
       }
 
       // Create a single paragraph to hold all content
-      // In a more advanced implementation, we'd handle paragraph breaks
-      const paragraph = $createParagraphNode();
+      // Handle paragraph breaks by detecting \n\n
+      let paragraph = $createParagraphNode();
+
+      // Helper function to find formatting for a given text
+      const findFormatting = (text: string) => {
+        const formats = { isBold: false, isItalic: false, headingLevel: undefined as number | undefined };
+        for (const op of formattingOps) {
+          if (text.includes(op.text)) {
+            if (op.type === 'bold') formats.isBold = true;
+            if (op.type === 'italic') formats.isItalic = true;
+            if (op.type === 'heading') formats.headingLevel = op.level;
+          }
+        }
+        return formats;
+      };
 
       mergedDiff.forEach((part) => {
         if (part.type === 'addition') {
-          // New text or replacement
-          const diffNode = $createDiffNode('addition', part.value, part.original);
+          // New text or replacement - check for formatting
+          const formatting = findFormatting(part.value);
+          const diffNode = $createDiffNode(
+            'addition',
+            part.value,
+            part.original,
+            formatting.isBold,
+            formatting.isItalic,
+            formatting.headingLevel
+          );
           paragraph.append(diffNode);
           return;
         }
@@ -202,16 +254,24 @@ export default function DiffPlugin({
           return;
         }
 
-        // Unchanged text - add as regular text node
-        const lines = part.value.split('\n');
-        lines.forEach((line, index) => {
-          if (line) {
-            paragraph.append($createTextNode(line));
+        // Unchanged text - preserve paragraph breaks by detecting \n\n
+        const paragraphs = part.value.split('\n\n');
+        paragraphs.forEach((paraText, paraIndex) => {
+          if (paraIndex > 0) {
+            // Create new paragraph node for each \n\n
+            paragraph = $createParagraphNode();
+            root.append(paragraph);
           }
-          // Add newline representation (except for last segment)
-          if (index < lines.length - 1) {
-            paragraph.append($createTextNode('\n'));
-          }
+
+          const lines = paraText.split('\n');
+          lines.forEach((line, lineIndex) => {
+            if (line) {
+              paragraph.append($createTextNode(line));
+            }
+            if (lineIndex < lines.length - 1) {
+              paragraph.append($createTextNode('\n'));
+            }
+          });
         });
       });
 
