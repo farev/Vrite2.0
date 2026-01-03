@@ -25,11 +25,16 @@ export interface ContextSnippet {
   text: string;
 }
 
+interface DeltaChange {
+  old_text: string;
+  new_text: string;
+}
+
 interface AIAssistantSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   documentContent: string;
-  onApplyChanges?: (content: string, formattingOps?: any[]) => void;
+  onApplyChanges?: (content: string, changes?: DeltaChange[]) => void;
   isDiffModeActive?: boolean;
   onAcceptAllChanges?: () => void;
   onRejectAllChanges?: () => void;
@@ -139,19 +144,19 @@ export default function AIAssistantSidebar({
 
       // Handle tool-based changes or fall back to full document
       if (data.type === 'tool_based' && data.changes && data.changes.length > 0) {
-        // Apply tool-based text replacements and formatting
+        // Apply markdown text replacements
         console.log('Received tool-based changes:', data.changes);
 
-        const result = DeltaApplicator.applyDeltas(
+        const suggestedContent = DeltaApplicator.applyDeltas(
           documentContent,
           data.changes
         );
 
-        console.log('Content changed:', result.content !== documentContent);
-        console.log('Formatting operations:', result.formattingOps);
+        console.log('Content changed:', suggestedContent !== documentContent);
 
         if (onApplyChanges) {
-          onApplyChanges(result.content, result.formattingOps);
+          // Pass both the suggested content AND the individual changes
+          onApplyChanges(suggestedContent, data.changes);
         }
       } else if (onApplyChanges && data.processed_content) {
         // Fallback: full document mode

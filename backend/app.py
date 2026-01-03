@@ -52,29 +52,35 @@ EDITOR_SYSTEM_PROMPT = """You are a professional document editing agent. Your ro
 
 CRITICAL RULES:
 1. NO conversational fluff (no "Certainly!", "I'd be happy to", etc.)
-2. Use the available tools to make changes to the document
-3. Be surgical and precise - change only what's necessary
-4. Call tools multiple times for multiple changes
-5. NEVER use markdown syntax (**bold** or *italic*) - always use the formatting tools instead
+2. Documents are provided in MARKDOWN format
+3. Use the replace_text tool to make changes
+4. ALWAYS use markdown syntax for formatting: **bold**, *italic*, # headings
+5. Be surgical and precise - change only what's necessary
 
-AVAILABLE TOOLS:
-- replace_text: Change text content (wording, capitalization, etc.)
-- apply_bold: Make text bold (use this instead of **text**)
-- apply_italic: Make text italic (use this instead of *text*)
-- apply_heading: Convert text to a heading (level 1, 2, or 3)
+MARKDOWN FORMAT:
+The document uses markdown formatting:
+- **bold text** for bold
+- *italic text* for italic
+- # Heading 1, ## Heading 2, ### Heading 3 for headings
+- Blank lines separate paragraphs
 
-HOW TO USE TOOLS:
-- replace_text: Find the EXACT text that needs to be changed (old_text), specify replacement (new_text)
-- apply_bold: Specify the EXACT text that should be bold
-- apply_italic: Specify the EXACT text that should be italic
-- apply_heading: Specify the EXACT text and heading level (1=largest, 2=medium, 3=smallest)
-- You can call any tool multiple times for multiple changes
+HOW TO USE replace_text TOOL:
+- Find the EXACT text that needs to be changed (old_text including markdown syntax)
+- Specify what it should be replaced with (new_text with proper markdown)
+- The tool will find and replace the text automatically
+- You can call the tool multiple times for multiple changes
+
+EXAMPLES:
+- To make "Education" bold: replace_text("Education", "**Education**")
+- To change "WORK EXPERIENCE" to bold heading: replace_text("WORK EXPERIENCE", "## Work Experience")
+- To italicize a book title: replace_text("The Great Gatsby", "*The Great Gatsby*")
+- To fix capitalization AND make bold: replace_text("education", "**Education**")
 
 EDITING PRINCIPLES:
 - Preserve the author's voice and style
 - Make minimal necessary changes
-- Maintain document structure unless explicitly asked to restructure
-- Double newlines (\\n\\n) indicate paragraph breaks - preserve them
+- Maintain existing markdown formatting unless explicitly asked to change
+- Preserve paragraph breaks (double newlines)
 
 AFTER using tools, provide:
 - "reasoning": Brief analysis of what changes were made and why (1-3 sentences)
@@ -99,62 +105,44 @@ async def format_document(request: FormatRequest):
 
         # Formatting-specific system prompts
         format_instructions = {
-            "APA": """Apply APA 7th Edition formatting:
-- Title page: Title (bold, centered, title case), Author, Affiliation centered
-- Running head: Page numbers top right starting from title page
-- Headings: Level 1 (Centered Bold Title Case), Level 2 (Left Aligned Bold Title Case)
-- Body: Double-space everything, first line indent 0.5"
-- References: Separate page, "References" centered, hanging indent 0.5"
+            "APA": """Apply APA 7th Edition formatting using MARKDOWN:
+- Title: Use **Title** for bold title (Title Case)
+- Headings: ## Level 1 Heading (Bold Title Case), ### Level 2 Heading
+- References: Use "## References" for the heading
+- Emphasis: Use **bold** for emphasis
 
-CRITICAL - Tool Usage Rules:
-1. NEVER use markdown (**text** or *text*)
-2. For bold text: Call apply_bold with the exact text
-3. For headings: Call apply_heading with exact text and level (1, 2, or 3)
-4. For text changes: Call replace_text to change capitalization/wording
+Examples:
+- Title: replace_text("my document title", "**My Document Title**")
+- Section heading: replace_text("EDUCATION", "## Education")
+- Bold text: replace_text("Bachelor of Science", "**Bachelor of Science**")
 
-Example for "EDUCATION" that should be a bold heading:
-- Call replace_text("EDUCATION", "Education") to fix capitalization
-- Call apply_heading("Education", 2) to make it a level 2 heading
-- Call apply_bold("Education") to make it bold
+Use replace_text tool with proper markdown syntax.""",
 
-If text is already correctly capitalized, only call the formatting tools (apply_bold, apply_heading).""",
+            "MLA": """Apply MLA 9th Edition formatting using MARKDOWN:
+- Title: Use # Title (standard capitalization, not bold)
+- Works Cited: Use "# Works Cited" for the heading
+- No bold/italic in title
+- Book titles in text: Use *italic* for book titles
 
-            "MLA": """Apply MLA 9th Edition formatting:
-- Header: Last name and page number top right on every page
-- First page: Your Name, Instructor Name, Course, Date (top left, double-spaced)
-- Title: Centered, standard capitalization (not bold or underlined)
-- Body: Double-space, first line indent 0.5"
-- Works Cited: Separate page, "Works Cited" centered, hanging indent 0.5"
+Examples:
+- Title: replace_text("the great gatsby", "# The Great Gatsby")
+- Works Cited heading: replace_text("works cited", "# Works Cited")
+- Book title in text: replace_text("The Great Gatsby", "*The Great Gatsby*")
 
-CRITICAL - Tool Usage Rules:
-1. NEVER use markdown (**text** or *text*)
-2. For titles: Call apply_heading with exact text and level 1
-3. For text changes: Call replace_text to change capitalization/wording
-4. MLA titles should NOT be bold - just use apply_heading
+Use replace_text tool with proper markdown syntax.""",
 
-Example for document title "the great gatsby" that should be a heading:
-- Call replace_text("the great gatsby", "The Great Gatsby") to fix capitalization
-- Call apply_heading("The Great Gatsby", 1) to make it a title
+            "Chicago": """Apply Chicago 17th Edition formatting using MARKDOWN:
+- Title: Use # Title for title page
+- Bibliography: Use "# Bibliography" for the heading
+- Book titles in text: Use *italic* for book titles
+- Emphasis: Use *italic* for foreign phrases
 
-For adding spacing, use replace_text to insert newlines between sections.""",
+Examples:
+- Title: replace_text("my thesis", "# My Thesis")
+- Bibliography heading: replace_text("bibliography", "# Bibliography")
+- Book title in text: replace_text("The Great Gatsby", "*The Great Gatsby*")
 
-            "Chicago": """Apply Chicago 17th Edition formatting:
-- Title page: Title centered 1/3 down page, Author and course info bottom third
-- Body: Double-space, first line indent 0.5"
-- Footnotes for citations (bottom of page, single-space)
-- Bibliography: Separate page, hanging indent, alphabetical
-
-CRITICAL - Tool Usage Rules:
-1. NEVER use markdown (**text** or *text*)
-2. For title: Call apply_heading with exact text and level 1
-3. For "Bibliography" heading: Call apply_heading with exact text and level 1
-4. For book titles in text: Call apply_italic with exact title text
-5. For text changes: Call replace_text to change capitalization/wording
-
-Example for formatting book title in text:
-- If text contains "The Great Gatsby", call apply_italic("The Great Gatsby")
-
-For adding spacing, use replace_text to insert newlines between sections."""
+Use replace_text tool with proper markdown syntax."""
         }
 
         instruction = format_instructions.get(request.format_type, f"Apply {request.format_type} formatting standards")
@@ -169,11 +157,11 @@ For adding spacing, use replace_text to insert newlines between sections."""
 Use the replace_text tool to make formatting changes, then provide reasoning and summary."""}
         ]
 
-        # Make API call with all formatting tools
+        # Make API call with replace_text tool
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            tools=ALL_FORMATTING_TOOLS,
+            tools=[REPLACE_TEXT_TOOL],
             tool_choice="auto",
             max_tokens=2000,
             temperature=0.1
@@ -182,7 +170,7 @@ Use the replace_text tool to make formatting changes, then provide reasoning and
         message = response.choices[0].message
         tool_calls = message.tool_calls if message.tool_calls else []
 
-        # Convert tool calls to formatting operations
+        # Convert tool calls to changes
         changes = []
         for tool_call in tool_calls:
             import json
@@ -190,25 +178,8 @@ Use the replace_text tool to make formatting changes, then provide reasoning and
 
             if tool_call.function.name == "replace_text":
                 changes.append({
-                    "type": "replace",
                     "old_text": args.get("old_text", ""),
                     "new_text": args.get("new_text", "")
-                })
-            elif tool_call.function.name == "apply_bold":
-                changes.append({
-                    "type": "bold",
-                    "text": args.get("text", "")
-                })
-            elif tool_call.function.name == "apply_italic":
-                changes.append({
-                    "type": "italic",
-                    "text": args.get("text", "")
-                })
-            elif tool_call.function.name == "apply_heading":
-                changes.append({
-                    "type": "heading",
-                    "text": args.get("text", ""),
-                    "level": args.get("level", 1)
                 })
 
         # Get final response
@@ -460,14 +431,14 @@ async def process_ai_command(request: DocumentRequest):
 
 User instruction: {request.instruction}
 
-Use the appropriate tools (replace_text, apply_bold, apply_italic, apply_heading) to make changes, then provide reasoning and summary."""
+Use the replace_text tool to make changes (remember to use markdown for formatting), then provide reasoning and summary."""
         })
 
         # Make API call with tools
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            tools=ALL_FORMATTING_TOOLS,
+            tools=[REPLACE_TEXT_TOOL],
             tool_choice="auto",
             max_tokens=2000,
             temperature=0.3
@@ -486,25 +457,8 @@ Use the appropriate tools (replace_text, apply_bold, apply_italic, apply_heading
 
             if tool_call.function.name == "replace_text":
                 changes.append({
-                    "type": "replace",
                     "old_text": args.get("old_text", ""),
                     "new_text": args.get("new_text", "")
-                })
-            elif tool_call.function.name == "apply_bold":
-                changes.append({
-                    "type": "bold",
-                    "text": args.get("text", "")
-                })
-            elif tool_call.function.name == "apply_italic":
-                changes.append({
-                    "type": "italic",
-                    "text": args.get("text", "")
-                })
-            elif tool_call.function.name == "apply_heading":
-                changes.append({
-                    "type": "heading",
-                    "text": args.get("text", ""),
-                    "level": args.get("level", 1)
                 })
 
         # If we have tool calls, we need to get the final response

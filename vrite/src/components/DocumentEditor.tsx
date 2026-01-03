@@ -26,6 +26,7 @@ import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { ListPlugin } from '@lexical/react/LexicalListPlugin';
 import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin';
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin';
+import { $convertToMarkdownString, $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
 import { ListItemNode, ListNode } from '@lexical/list';
 import { LinkNode } from '@lexical/link';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
@@ -223,16 +224,17 @@ function KeyboardShortcutPlugin({ onCommandK }: { onCommandK: () => void }) {
 }
 
 function MyOnChangePlugin({ onChange }: { onChange: (editorState: EditorState, content: string) => void }) {
-  const [editor] = useLexicalComposerContext();
-
   return (
     <OnChangePlugin
-      onChange={(editorState) => {
-        editorState.read(() => {
-          const root = $getRoot();
-          const textContent = root.getTextContent();
-          onChange(editorState, textContent);
+      onChange={(editorState, editor) => {
+        // Convert editor content to markdown (preserves formatting)
+        let markdownContent = '';
+
+        editor.read(() => {
+          markdownContent = $convertToMarkdownString(TRANSFORMERS);
         });
+
+        onChange(editorState, markdownContent);
       }}
     />
   );
@@ -415,7 +417,6 @@ export default function DocumentEditor() {
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
-  const [pendingFormattingOps, setPendingFormattingOps] = useState<any[]>([]);
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const handleEditorChange = (editorState: EditorState, content: string) => {
@@ -484,15 +485,16 @@ export default function DocumentEditor() {
     setIsAISidebarOpen(true);
   }, []);
 
-  const handleApplyChanges = (content: string, formattingOps: any[] = []) => {
+  const handleApplyChanges = (content: string, changes?: Array<{old_text: string, new_text: string}>) => {
     // Store the current and suggested content to trigger inline diff in editor
+    // Content is markdown format
     setOriginalContent(documentContent);
     setSuggestedContent(content);
     setIsDiffModeActive(true);
 
-    // Store formatting operations to apply after diff resolution
-    if (formattingOps.length > 0) {
-      setPendingFormattingOps(formattingOps);
+    // Store changes for DiffPlugin to use
+    if (changes) {
+      (window as unknown as Record<string, unknown>).__vriteChanges = changes;
     }
   };
 
@@ -503,30 +505,37 @@ export default function DocumentEditor() {
 
   const handleAllDiffsResolved = useCallback((finalContent: string) => {
     // Called when all diff nodes have been accepted/rejected
+    // finalContent is markdown, need to convert to Lexical
+    if (editorRef) {
+      editorRef.update(() => {
+        const root = $getRoot();
+        root.clear();
+
+        // Convert markdown to Lexical nodes
+        $convertFromMarkdownString(finalContent, TRANSFORMERS);
+      });
+    }
+
     setIsDiffModeActive(false);
     setOriginalContent(null);
     setSuggestedContent(null);
     setDocumentContent(finalContent);
-
-    // Clear pending formatting operations (already applied in diff)
-    setPendingFormattingOps([]);
-  }, []);
+  }, [editorRef]);
 
   const handleAcceptAllChanges = useCallback(() => {
     // Accept all changes - apply the suggested content directly
+    // suggestedContent is markdown, convert to Lexical
     if (editorRef && suggestedContent) {
       editorRef.update(() => {
         const root = $getRoot();
         root.clear();
 
-        // Split content into paragraphs and create nodes
-        const paragraphs = suggestedContent.split('\n');
-        paragraphs.forEach((text) => {
-          const paragraph = $createParagraphNode();
-          paragraph.append($createTextNode(text));
-          root.append(paragraph);
-        });
+        // Convert markdown to Lexical nodes
+        $convertFromMarkdownString(suggestedContent, TRANSFORMERS);
       });
+
+      // Update document content state
+      setDocumentContent(suggestedContent);
     }
     setIsDiffModeActive(false);
     setOriginalContent(null);
@@ -535,18 +544,18 @@ export default function DocumentEditor() {
 
   const handleRejectAllChanges = useCallback(() => {
     // Reject all changes - restore original content
+    // originalContent is markdown, convert to Lexical
     if (editorRef && originalContent) {
       editorRef.update(() => {
         const root = $getRoot();
         root.clear();
 
-        const paragraphs = originalContent.split('\n');
-        paragraphs.forEach((text) => {
-          const paragraph = $createParagraphNode();
-          paragraph.append($createTextNode(text));
-          root.append(paragraph);
-        });
+        // Convert markdown to Lexical nodes
+        $convertFromMarkdownString(originalContent, TRANSFORMERS);
       });
+
+      // Update document content state
+      setDocumentContent(originalContent);
     }
     setIsDiffModeActive(false);
     setOriginalContent(null);
@@ -600,15 +609,14 @@ export default function DocumentEditor() {
 
       // Handle tool-based response (new format)
       if (data.type === 'tool_based' && data.changes) {
-        // Apply changes using DeltaApplicator
+        // Apply markdown changes using DeltaApplicator
         const { DeltaApplicator } = await import('@/lib/deltaApplicator');
-        const result = DeltaApplicator.applyDeltas(documentContent, data.changes);
+        const suggestedContent = DeltaApplicator.applyDeltas(documentContent, data.changes);
 
-        // Use the same inline diff UI as regular edits, passing formatting ops
-        handleApplyChanges(result.content, result.formattingOps);
+        // Use the same inline diff UI as regular edits
+        handleApplyChanges(suggestedContent);
 
         console.log('Formatting applied:', data.reasoning, data.summary);
-        console.log('Formatting operations:', result.formattingOps);
       } else if (data.formatted_content) {
         // Fallback: old format - also use inline diff
         handleApplyChanges(data.formatted_content);
@@ -720,7 +728,6 @@ export default function DocumentEditor() {
                   <DiffPlugin
                     originalContent={originalContent}
                     suggestedContent={suggestedContent}
-                    formattingOps={pendingFormattingOps}
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
                   />

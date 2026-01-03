@@ -4,22 +4,19 @@ import { useEffect, useCallback } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
   $getRoot,
-  $createParagraphNode,
   $createTextNode,
   $getNodeByKey,
   type NodeKey,
   type LexicalNode,
+  type TextNode,
 } from 'lexical';
-import { $createHeadingNode } from '@lexical/rich-text';
-import * as Diff from 'diff';
+import { $convertFromMarkdownString, $convertToMarkdownString, TRANSFORMERS } from '@lexical/markdown';
 import { DiffNode, $createDiffNode, $isDiffNode } from '../nodes/DiffNode';
-import type { DiffType } from '../nodes/DiffNode';
-import type { FormattingOperation } from '@/lib/deltaApplicator';
+import { parseMarkdown } from '@/lib/markdownParser';
 
 interface DiffPluginProps {
   originalContent: string | null;
   suggestedContent: string | null;
-  formattingOps?: FormattingOperation[];
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
 }
@@ -27,7 +24,6 @@ interface DiffPluginProps {
 export default function DiffPlugin({
   originalContent,
   suggestedContent,
-  formattingOps = [],
   onDiffComplete,
   onAllResolved,
 }: DiffPluginProps) {
@@ -55,8 +51,9 @@ export default function DiffPlugin({
     checkNode(root);
 
     if (!hasDiffNodes && onAllResolved) {
-      const content = root.getTextContent();
-      onAllResolved(content);
+      // Serialize current editor state to markdown (preserves formatting)
+      const markdownContent = $convertToMarkdownString(TRANSFORMERS);
+      onAllResolved(markdownContent);
     }
   }, [onAllResolved]);
 
@@ -66,47 +63,23 @@ export default function DiffPlugin({
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
-          const diffType = node.getDiffType();
           const text = node.getText();
-          const formatting = node.exportJSON(); // Get isBold, isItalic, headingLevel
+          const nodeData = node.exportJSON();
 
-          if (diffType === 'addition') {
-            // Accept addition: replace diff node with formatted text
-            const textNode = $createTextNode(text);
+          // Create formatted text node
+          const textNode = $createTextNode(text);
 
-            // Apply text formatting
-            if (formatting.isBold) {
-              textNode.toggleFormat('bold');
-            }
-            if (formatting.isItalic) {
-              textNode.toggleFormat('italic');
-            }
-
-            node.replace(textNode);
-
-            // For headings, convert the parent paragraph to a heading
-            if (formatting.headingLevel) {
-              const parent = textNode.getParent();
-              if (parent && parent.getType() === 'paragraph') {
-                const headingTag = `h${Math.min(Math.max(formatting.headingLevel, 1), 6)}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
-                const headingNode = $createHeadingNode(headingTag);
-
-                // Transfer all children from paragraph to heading
-                const children = parent.getChildren();
-                for (const child of children) {
-                  headingNode.append(child);
-                }
-
-                parent.replace(headingNode);
-              }
-            }
-          } else {
-            // Accept deletion: remove the diff node entirely
-            node.remove();
+          // Apply formatting
+          if (nodeData.isBold) {
+            textNode.toggleFormat('bold');
           }
+          if (nodeData.isItalic) {
+            textNode.toggleFormat('italic');
+          }
+
+          node.replace(textNode);
         }
 
-        // Check if all diff nodes are resolved
         checkAllResolved();
       });
     },
@@ -119,28 +92,16 @@ export default function DiffPlugin({
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
-          const diffType = node.getDiffType();
           const originalText = node.getOriginalText();
 
-          if (diffType === 'addition') {
-            // Reject addition: restore original text when available
-            if (originalText) {
-              node.replace($createTextNode(originalText));
-            } else {
-              node.remove();
-            }
+          if (originalText) {
+            const textNode = $createTextNode(originalText);
+            node.replace(textNode);
           } else {
-            // Reject deletion: restore original text
-            if (originalText) {
-              const textNode = $createTextNode(originalText);
-              node.replace(textNode);
-            } else {
-              node.remove();
-            }
+            node.remove();
           }
         }
 
-        // Check if all diff nodes are resolved
         checkAllResolved();
       });
     },
@@ -152,7 +113,7 @@ export default function DiffPlugin({
     DiffNode.setCallbacks(handleAccept, handleReject);
   }, [handleAccept, handleReject]);
 
-  // Apply diff when content changes
+  // Apply changes with inline diffs
   useEffect(() => {
     if (originalContent === null || suggestedContent === null) {
       return;
@@ -162,120 +123,62 @@ export default function DiffPlugin({
       const root = $getRoot();
       root.clear();
 
-      // Compute word-level diff
-      const rawDiff = Diff.diffWords(originalContent, suggestedContent);
+      // First, apply original content to get baseline
+      $convertFromMarkdownString(originalContent, TRANSFORMERS);
 
-      // Merge adjacent delete+add pairs into a single replacement chunk
-      const mergedDiff: Array<{
-        type: DiffType | 'unchanged';
-        value: string;
-        original?: string;
-      }> = [];
+      // Get the changes from the backend (stored in window)
+      const changes = (window as unknown as Record<string, unknown>).__vriteChanges as Array<{old_text: string, new_text: string}> | undefined;
 
-      for (let i = 0; i < rawDiff.length; i++) {
-        const current = rawDiff[i];
-        const next = rawDiff[i + 1];
+      if (changes && changes.length > 0) {
+        console.log('Applying inline diffs for changes:', changes);
 
-        // deletion then addition -> replacement
-        if (current?.removed && next?.added) {
-          mergedDiff.push({
-            type: 'addition',
-            value: next.value,
-            original: current.value,
-          });
-          i++; // skip next
-          continue;
-        }
+        // Walk through all text nodes and find matches for old_text
+        const textNodes: TextNode[] = [];
+        root.getChildren().forEach((child) => {
+          if ('getChildren' in child && typeof child.getChildren === 'function') {
+            const descendants = child.getChildren() as LexicalNode[];
+            descendants.forEach((desc) => {
+              if (desc.getType() === 'text') {
+                textNodes.push(desc as TextNode);
+              }
+            });
+          }
+        });
 
-        // addition then deletion (just in case order flips)
-        if (current?.added && next?.removed) {
-          mergedDiff.push({
-            type: 'addition',
-            value: current.value,
-            original: next.value,
-          });
-          i++; // skip next
-          continue;
-        }
+        // For each change, find and replace with DiffNode
+        changes.forEach((change) => {
+          const { old_text, new_text } = change;
 
-        if (current?.added) {
-          mergedDiff.push({ type: 'addition', value: current.value });
-          continue;
-        }
+          // Parse markdown from new_text to get formatting
+          const parsed = parseMarkdown(new_text);
 
-        if (current?.removed) {
-          mergedDiff.push({
-            type: 'deletion',
-            value: current.value,
-            original: current.value,
-          });
-          continue;
-        }
+          // Find text node containing old_text
+          for (const textNode of textNodes) {
+            const nodeText = textNode.getTextContent();
+            if (nodeText.includes(old_text)) {
+              // Create a diff node showing the formatted change
+              const diffNode = $createDiffNode(
+                'addition',
+                parsed.text,
+                old_text,
+                parsed.isBold,
+                parsed.isItalic,
+                parsed.headingLevel
+              );
 
-        mergedDiff.push({ type: 'unchanged', value: current.value });
+              // Replace the text node with diff node
+              textNode.replace(diffNode);
+              break;
+            }
+          }
+        });
+      } else {
+        // No specific changes, just apply suggested content
+        root.clear();
+        $convertFromMarkdownString(suggestedContent, TRANSFORMERS);
       }
 
-      // Create a single paragraph to hold all content
-      // Handle paragraph breaks by detecting \n\n
-      let paragraph = $createParagraphNode();
-
-      // Helper function to find formatting for a given text
-      const findFormatting = (text: string) => {
-        const formats = { isBold: false, isItalic: false, headingLevel: undefined as number | undefined };
-        for (const op of formattingOps) {
-          if (text.includes(op.text)) {
-            if (op.type === 'bold') formats.isBold = true;
-            if (op.type === 'italic') formats.isItalic = true;
-            if (op.type === 'heading') formats.headingLevel = op.level;
-          }
-        }
-        return formats;
-      };
-
-      mergedDiff.forEach((part) => {
-        if (part.type === 'addition') {
-          // New text or replacement - check for formatting
-          const formatting = findFormatting(part.value);
-          const diffNode = $createDiffNode(
-            'addition',
-            part.value,
-            part.original,
-            formatting.isBold,
-            formatting.isItalic,
-            formatting.headingLevel
-          );
-          paragraph.append(diffNode);
-          return;
-        }
-
-        if (part.type === 'deletion') {
-          const diffNode = $createDiffNode('deletion', part.value, part.original);
-          paragraph.append(diffNode);
-          return;
-        }
-
-        // Unchanged text - preserve paragraph breaks by detecting \n\n
-        const paragraphs = part.value.split('\n\n');
-        paragraphs.forEach((paraText, paraIndex) => {
-          if (paraIndex > 0) {
-            // Create new paragraph node for each \n\n
-            paragraph = $createParagraphNode();
-            root.append(paragraph);
-          }
-
-          const lines = paraText.split('\n');
-          lines.forEach((line, lineIndex) => {
-            if (line) {
-              paragraph.append($createTextNode(line));
-            }
-            if (lineIndex < lines.length - 1) {
-              paragraph.append($createTextNode('\n'));
-            }
-          });
-        });
-      });
-
-      root.append(paragraph);
+      console.log('Applied changes with inline diffs');
 
       if (onDiffComplete) {
         onDiffComplete();
