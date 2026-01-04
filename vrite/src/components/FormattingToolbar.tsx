@@ -18,6 +18,7 @@ import {
 import { $setBlocksType } from '@lexical/selection';
 import { $createParagraphNode, $isTextNode } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { $createEquationNode } from './nodes/EquationNode';
 import {
   Bold,
   Italic,
@@ -35,6 +36,12 @@ import {
   Type,
   AlignVerticalJustifyStart,
   FileText,
+  Strikethrough,
+  Subscript,
+  Superscript,
+  RemoveFormatting,
+  IndentIncrease,
+  IndentDecrease,
 } from 'lucide-react';
 
 interface FormattingToolbarProps {
@@ -47,24 +54,32 @@ interface FormattingToolbarProps {
   };
   onMarginsChange?: (margins: { top: number; right: number; bottom: number; left: number }) => void;
   onFormatDocument?: (formatType: string) => void;
+  pageSize?: string;
+  onPageSizeChange?: (size: string) => void;
 }
 
 export default function FormattingToolbar({
   onAIToggle,
   documentMargins = { top: 72, right: 72, bottom: 72, left: 72 },
   onMarginsChange,
-  onFormatDocument
+  onFormatDocument,
+  pageSize = 'letter',
+  onPageSizeChange
 }: FormattingToolbarProps) {
   const [editor] = useLexicalComposerContext();
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
   const [isUnderline, setIsUnderline] = useState(false);
+  const [isStrikethrough, setIsStrikethrough] = useState(false);
+  const [isSubscript, setIsSubscript] = useState(false);
+  const [isSuperscript, setIsSuperscript] = useState(false);
   const [fontSize, setFontSize] = useState('12pt');
   const [fontFamily, setFontFamily] = useState('Times New Roman');
   const [lineHeight, setLineHeight] = useState('1.5');
   const [blockType, setBlockType] = useState('paragraph');
   const [textColor, setTextColor] = useState('#000000');
-  const [backgroundColor, setBackgroundColor] = useState('#ffffff');
+  const [highlightColor, setHighlightColor] = useState('transparent');
+  const [textAlign, setTextAlign] = useState('left');
   
   // Dropdown states - only one can be open at a time
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
@@ -106,8 +121,11 @@ export default function FormattingToolbar({
       setIsBold(selection.hasFormat('bold'));
       setIsItalic(selection.hasFormat('italic'));
       setIsUnderline(selection.hasFormat('underline'));
+      setIsStrikethrough(selection.hasFormat('strikethrough'));
+      setIsSubscript(selection.hasFormat('subscript'));
+      setIsSuperscript(selection.hasFormat('superscript'));
       
-      // Get block type
+      // Get block type and alignment
       const anchorNode = selection.anchor.getNode();
       const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
       const elementDOM = editor.getElementByKey(element.getKey());
@@ -118,6 +136,10 @@ export default function FormattingToolbar({
         } else {
           setBlockType('paragraph');
         }
+        
+        // Get text alignment from element
+        const align = elementDOM.style.textAlign || 'left';
+        setTextAlign(align);
       }
     }
   }, [editor]);
@@ -199,6 +221,128 @@ export default function FormattingToolbar({
     });
     setLineHeight(height);
     setOpenDropdown(null);
+  };
+
+  const applyTextAlign = (align: 'left' | 'center' | 'right' | 'justify') => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const anchorNode = selection.anchor.getNode();
+        const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
+        if (element) {
+          const elementDOM = editor.getElementByKey(element.getKey());
+          if (elementDOM) {
+            elementDOM.style.textAlign = align;
+          }
+        }
+      }
+    });
+    setTextAlign(align);
+  };
+
+  const applyTextColor = (color: string) => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const nodes = selection.getNodes();
+        nodes.forEach((node) => {
+          if ($isTextNode(node)) {
+            const currentStyle = node.getStyle();
+            const newStyle = currentStyle
+              ? `${currentStyle}; color: ${color}`
+              : `color: ${color}`;
+            node.setStyle(newStyle);
+          }
+        });
+      }
+    });
+    setTextColor(color);
+    setOpenDropdown(null);
+  };
+
+  const applyHighlight = (color: string) => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const nodes = selection.getNodes();
+        nodes.forEach((node) => {
+          if ($isTextNode(node)) {
+            const currentStyle = node.getStyle();
+            const newStyle = currentStyle
+              ? `${currentStyle}; background-color: ${color}`
+              : `background-color: ${color}`;
+            node.setStyle(newStyle);
+          }
+        });
+      }
+    });
+    setHighlightColor(color);
+    setOpenDropdown(null);
+  };
+
+  const clearFormatting = () => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        // Remove all text formats
+        selection.formatText(0);
+        
+        // Clear inline styles from text nodes
+        const nodes = selection.getNodes();
+        nodes.forEach((node) => {
+          if ($isTextNode(node)) {
+            node.setStyle('');
+          }
+        });
+        
+        // Reset block to paragraph
+        $setBlocksType(selection, () => $createParagraphNode());
+      }
+    });
+  };
+
+  const indentIncrease = () => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const anchorNode = selection.anchor.getNode();
+        const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
+        if (element) {
+          const elementDOM = editor.getElementByKey(element.getKey());
+          if (elementDOM) {
+            const currentIndent = parseInt(elementDOM.style.marginLeft || '0');
+            elementDOM.style.marginLeft = `${currentIndent + 36}pt`;
+          }
+        }
+      }
+    });
+  };
+
+  const indentDecrease = () => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const anchorNode = selection.anchor.getNode();
+        const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
+        if (element) {
+          const elementDOM = editor.getElementByKey(element.getKey());
+          if (elementDOM) {
+            const currentIndent = parseInt(elementDOM.style.marginLeft || '0');
+            elementDOM.style.marginLeft = `${Math.max(0, currentIndent - 36)}pt`;
+          }
+        }
+      }
+    });
+  };
+
+  const insertEquation = () => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        const equationNode = $createEquationNode('E = mc^2', true);
+        selection.insertNodes([equationNode]);
+      }
+    });
   };
 
   const handleMarginChange = (side: 'top' | 'right' | 'bottom' | 'left', value: number) => {
@@ -316,23 +460,153 @@ export default function FormattingToolbar({
         >
           <Underline size={18} />
         </button>
+        <button
+          className={`toolbar-button ${isStrikethrough ? 'active' : ''}`}
+          onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough')}
+          title="Strikethrough"
+        >
+          <Strikethrough size={18} />
+        </button>
+        <button
+          className={`toolbar-button ${isSubscript ? 'active' : ''}`}
+          onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'subscript')}
+          title="Subscript"
+        >
+          <Subscript size={18} />
+        </button>
+        <button
+          className={`toolbar-button ${isSuperscript ? 'active' : ''}`}
+          onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'superscript')}
+          title="Superscript"
+        >
+          <Superscript size={18} />
+        </button>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      {/* Text Color and Highlight */}
+      <div className="toolbar-section">
+        <div className="toolbar-dropdown">
+          <button
+            className="toolbar-dropdown-button"
+            onClick={() => setOpenDropdown(openDropdown === 'textColor' ? null : 'textColor')}
+            title="Text Color"
+          >
+            <Palette size={18} />
+            <ChevronDown size={14} />
+          </button>
+          {openDropdown === 'textColor' && (
+            <div className="toolbar-dropdown-menu color-picker-menu">
+              <input
+                type="color"
+                value={textColor}
+                onChange={(e) => applyTextColor(e.target.value)}
+                className="color-picker-input"
+              />
+              <div className="color-presets">
+                {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map(color => (
+                  <button
+                    key={color}
+                    className="color-preset"
+                    style={{ backgroundColor: color }}
+                    onClick={() => applyTextColor(color)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="toolbar-dropdown">
+          <button
+            className="toolbar-dropdown-button"
+            onClick={() => setOpenDropdown(openDropdown === 'highlight' ? null : 'highlight')}
+            title="Highlight"
+          >
+            <Highlighter size={18} />
+            <ChevronDown size={14} />
+          </button>
+          {openDropdown === 'highlight' && (
+            <div className="toolbar-dropdown-menu color-picker-menu">
+              <button
+                className="toolbar-dropdown-item"
+                onClick={() => applyHighlight('transparent')}
+              >
+                No Highlight
+              </button>
+              <div className="color-presets">
+                {['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FFA500', '#FFB6C1'].map(color => (
+                  <button
+                    key={color}
+                    className="color-preset"
+                    style={{ backgroundColor: color }}
+                    onClick={() => applyHighlight(color)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <button
+          className="toolbar-button"
+          onClick={clearFormatting}
+          title="Clear Formatting"
+        >
+          <RemoveFormatting size={18} />
+        </button>
       </div>
 
       <div className="toolbar-divider" />
 
       {/* Alignment */}
       <div className="toolbar-section">
-        <button className="toolbar-button" title="Align Left">
+        <button
+          className={`toolbar-button ${textAlign === 'left' ? 'active' : ''}`}
+          onClick={() => applyTextAlign('left')}
+          title="Align Left"
+        >
           <AlignLeft size={18} />
         </button>
-        <button className="toolbar-button" title="Align Center">
+        <button
+          className={`toolbar-button ${textAlign === 'center' ? 'active' : ''}`}
+          onClick={() => applyTextAlign('center')}
+          title="Align Center"
+        >
           <AlignCenter size={18} />
         </button>
-        <button className="toolbar-button" title="Align Right">
+        <button
+          className={`toolbar-button ${textAlign === 'right' ? 'active' : ''}`}
+          onClick={() => applyTextAlign('right')}
+          title="Align Right"
+        >
           <AlignRight size={18} />
         </button>
-        <button className="toolbar-button" title="Justify">
+        <button
+          className={`toolbar-button ${textAlign === 'justify' ? 'active' : ''}`}
+          onClick={() => applyTextAlign('justify')}
+          title="Justify"
+        >
           <AlignJustify size={18} />
+        </button>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      {/* Indentation */}
+      <div className="toolbar-section">
+        <button
+          className="toolbar-button"
+          onClick={indentDecrease}
+          title="Decrease Indent"
+        >
+          <IndentDecrease size={18} />
+        </button>
+        <button
+          className="toolbar-button"
+          onClick={indentIncrease}
+          title="Increase Indent"
+        >
+          <IndentIncrease size={18} />
         </button>
       </div>
 
@@ -357,6 +631,42 @@ export default function FormattingToolbar({
                 className="toolbar-dropdown-item"
               >
                 {spacing.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Page Size */}
+      <div className="toolbar-dropdown">
+        <button
+          className="toolbar-dropdown-button"
+          onClick={() => setOpenDropdown(openDropdown === 'pageSize' ? null : 'pageSize')}
+          title="Page Size"
+        >
+          <FileText size={18} />
+          <ChevronDown size={14} />
+        </button>
+        {openDropdown === 'pageSize' && (
+          <div className="toolbar-dropdown-menu">
+            <div className="toolbar-dropdown-header">
+              <strong>Page Size</strong>
+            </div>
+            {[
+              { value: 'letter', label: 'Letter (8.5" × 11")' },
+              { value: 'a4', label: 'A4 (210mm × 297mm)' },
+              { value: 'legal', label: 'Legal (8.5" × 14")' },
+              { value: 'tabloid', label: 'Tabloid (11" × 17")' },
+            ].map((size) => (
+              <button
+                key={size.value}
+                onClick={() => {
+                  onPageSizeChange?.(size.value);
+                  setOpenDropdown(null);
+                }}
+                className={`toolbar-dropdown-item ${pageSize === size.value ? 'active' : ''}`}
+              >
+                {size.label}
               </button>
             ))}
           </div>
@@ -469,6 +779,19 @@ export default function FormattingToolbar({
           title="Redo (Ctrl+Y)"
         >
           <Redo size={18} />
+        </button>
+      </div>
+
+      <div className="toolbar-divider" />
+
+      {/* Insert */}
+      <div className="toolbar-section">
+        <button
+          className="toolbar-button"
+          onClick={insertEquation}
+          title="Insert Equation"
+        >
+          <span style={{ fontFamily: 'serif', fontWeight: 'bold' }}>∑</span>
         </button>
       </div>
 
