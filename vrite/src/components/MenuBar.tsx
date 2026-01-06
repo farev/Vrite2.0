@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { 
   File, 
   Save, 
@@ -10,32 +10,103 @@ import {
   Settings,
   ChevronDown 
 } from 'lucide-react';
+import { getLastModifiedString } from '../lib/storage';
 
 interface MenuBarProps {
   onNewDocument: () => void;
   onSaveDocument: () => void;
   onExportDocument: (format: 'pdf' | 'docx' | 'txt') => void;
   onPrint: () => void;
+  documentTitle: string;
+  onTitleChange: (title: string) => void;
+  lastSaved: number | null;
 }
 
 export default function MenuBar({
   onNewDocument,
   onSaveDocument,
   onExportDocument,
-  onPrint
+  onPrint,
+  documentTitle,
+  onTitleChange,
+  lastSaved,
 }: MenuBarProps) {
   type DropdownKey = 'file' | 'export';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(documentTitle);
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const toggleDropdown = (key: DropdownKey) => {
     setOpenDropdown((prev) => (prev === key ? null : key));
   };
 
+  useEffect(() => {
+    setDraftTitle(documentTitle);
+  }, [documentTitle]);
+
+  useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [isEditingTitle]);
+
+  const commitTitleChange = () => {
+    const trimmed = draftTitle.trim();
+    setIsEditingTitle(false);
+    if (trimmed && trimmed !== documentTitle) {
+      onTitleChange(trimmed);
+      return;
+    }
+    setDraftTitle(documentTitle);
+  };
+
+  const handleTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitTitleChange();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setDraftTitle(documentTitle);
+      setIsEditingTitle(false);
+    }
+  };
+
   return (
     <div className="menu-bar">
-      <div className="menu-bar-brand">
-        <FileText className="menu-brand-icon" />
-        <span className="menu-brand-text">Vrite</span>
+      <div className="menu-bar-left">
+        <div className="menu-bar-brand">
+          <FileText className="menu-brand-icon" />
+          <span className="menu-brand-text">Vrite</span>
+        </div>
+        <div className="menu-bar-title">
+          {isEditingTitle ? (
+            <input
+              ref={titleInputRef}
+              type="text"
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onBlur={commitTitleChange}
+              onKeyDown={handleTitleKeyDown}
+              className="document-title-input menu-title-input"
+              maxLength={100}
+            />
+          ) : (
+            <h1
+              className="document-title menu-bar-title-text"
+              onClick={() => setIsEditingTitle(true)}
+              title="Click to edit title"
+            >
+              {documentTitle}
+            </h1>
+          )}
+          {lastSaved && (
+            <span className="last-saved-text">
+              Last saved {getLastModifiedString(lastSaved)}
+            </span>
+          )}
+        </div>
       </div>
       
       <div className="menu-bar-items">

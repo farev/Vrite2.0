@@ -47,7 +47,6 @@ import { createPortal } from 'react-dom';
 import AIAssistantSidebar, { type ContextSnippet } from './AIAssistantSidebar';
 import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
-import DocumentHeader from './DocumentHeader';
 import DiffPlugin from './plugins/DiffPlugin';
 import { DiffNode } from './nodes/DiffNode';
 import {
@@ -397,7 +396,17 @@ function DocumentPage({
   );
 }
 
-export default function DocumentEditor() {
+interface DocumentEditorProps {
+  documentTitle: string;
+  onTitleChange: (title: string) => void;
+  onLastSavedChange: (timestamp: number) => void;
+}
+
+export default function DocumentEditor({
+  documentTitle,
+  onTitleChange,
+  onLastSavedChange,
+}: DocumentEditorProps) {
   const [documentContent, setDocumentContent] = useState('');
   const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -412,11 +421,10 @@ export default function DocumentEditor() {
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   const [suggestedContent, setSuggestedContent] = useState<string | null>(null);
   const [editorRef, setEditorRef] = useState<LexicalEditor | null>(null);
-  const [documentTitle, setDocumentTitle] = useState('Untitled Document');
-  const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
+  const [isDocumentAtTop, setIsDocumentAtTop] = useState(true);
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const handleEditorChange = (editorState: EditorState, content: string) => {
@@ -433,19 +441,19 @@ export default function DocumentEditor() {
       editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
     };
     saveDocument(documentData);
-    setLastSaved(Date.now());
-  }, [documentTitle, documentContent, editorState]);
+    onLastSavedChange(Date.now());
+  }, [documentTitle, documentContent, editorState, onLastSavedChange]);
 
   // Load document on mount
   useEffect(() => {
     const savedDoc = loadDocument();
     if (savedDoc && savedDoc.content) {
-      setDocumentTitle(savedDoc.title);
-      setLastSaved(savedDoc.lastModified);
+      onTitleChange(savedDoc.title);
+      onLastSavedChange(savedDoc.lastModified);
       // Note: We'll need to restore the editor state through Lexical
       // For now, we're just loading the text content
     }
-  }, []);
+  }, [onLastSavedChange, onTitleChange]);
 
   // Auto-save effect
   useEffect(() => {
@@ -483,6 +491,12 @@ export default function DocumentEditor() {
 
   const handleCommandK = useCallback(() => {
     setIsAISidebarOpen(true);
+  }, []);
+
+  const handleDocumentScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const scrollTop = event.currentTarget.scrollTop;
+    const isAtTop = scrollTop <= 1;
+    setIsDocumentAtTop((prev) => (prev === isAtTop ? prev : isAtTop));
   }, []);
 
   const handleApplyChanges = (content: string, changes?: Array<{old_text: string, new_text: string}>) => {
@@ -682,12 +696,6 @@ export default function DocumentEditor() {
 
   return (
     <div className="document-editor-container">
-      <DocumentHeader
-        title={documentTitle}
-        onTitleChange={setDocumentTitle}
-        lastSaved={lastSaved}
-        onSave={handleManualSave}
-      />
       <div
         className="document-editor-body"
         style={editorLayoutStyle}
@@ -702,7 +710,10 @@ export default function DocumentEditor() {
                 onFormatDocument={handleFormatDocument}
               />
               
-              <div className="document-editor-scroll">
+              <div
+                className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
+                onScroll={handleDocumentScroll}
+              >
                 <div className="document-editor-wrapper" style={{ position: 'relative' }}>
                   <div className="document-pages-container">
                     <DocumentPage pageNumber={currentPage} margins={documentMargins}>

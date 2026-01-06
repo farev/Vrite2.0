@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --app-top-bar-height: 56px;
 }
 
 @theme inline {
@@ -33,6 +34,16 @@ body {
   overflow: hidden;
 }
 
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
+  background: #ffffff;
+}
+
 /* Menu Bar Styles */
 .menu-bar {
   background: #f8f9fa;
@@ -41,7 +52,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 24px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.menu-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-width: 0;
+  flex: 1;
 }
 
 .menu-bar-brand {
@@ -59,6 +79,24 @@ body {
 
 .menu-brand-text {
   font-size: 18px;
+}
+
+.menu-bar-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.menu-bar-title-text {
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-title-input {
+  max-width: 360px;
 }
 
 .menu-bar-items {
@@ -149,10 +187,9 @@ body {
 /* Document Editor Styles - Word-like Interface */
 .document-editor-container {
   background: #f3f4f6;
-  min-height: 100vh;
-  height: 100vh;
   overflow: hidden;
-  --header-height: 64px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -160,13 +197,13 @@ body {
 .document-editor-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--ai-panel-width, 380px);
-  gap: 16px;
+  gap: 0;
   padding: 0 0 0 16px;
   box-sizing: border-box;
   align-items: stretch;
   flex: 1;
   min-height: 0;
-  height: calc(100vh - var(--header-height, 64px));
+  height: auto;
   overflow: hidden;
 }
 
@@ -182,7 +219,7 @@ body {
 .document-main-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   height: 100%;
   min-height: 0;
 }
@@ -194,11 +231,16 @@ body {
   padding-right: 4px;
 }
 
+.document-editor-scroll.is-at-top .document-editor-wrapper {
+  padding-top: 20px;
+}
+
 /* Toolbar */
 .toolbar {
   background: white;
   border-bottom: 1px solid #e5e7eb;
-  padding: 8px 16px;
+  min-height: var(--app-top-bar-height);
+  padding: 0 16px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -259,13 +301,13 @@ body {
 .formatting-toolbar {
   background: white;
   border-bottom: 1px solid #e5e7eb;
-  padding: 8px 16px;
+  min-height: var(--app-top-bar-height);
+  padding: 0 16px;
   display: flex;
   align-items: center;
   gap: 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: none;
   flex-wrap: wrap;
-  min-height: 56px;
 }
 
 .toolbar-dropdown {
@@ -454,7 +496,7 @@ body {
 /* Responsive adjustments */
 @media (max-width: 1024px) {
   .formatting-toolbar {
-    padding: 6px 12px;
+    padding: 0 12px;
     gap: 2px;
   }
   
@@ -474,7 +516,7 @@ body {
   flex: 1;
   display: flex;
   justify-content: center;
-  padding: 20px;
+  padding: 0 20px 20px;
   overflow: visible;
 }
 
@@ -759,7 +801,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  min-height: var(--app-top-bar-height);
+  padding: 0 16px;
   border-bottom: 1px solid #e2e8f0;
   background: white;
 }
@@ -1241,6 +1284,23 @@ body {
     flex-direction: column;
     gap: 8px;
     align-items: flex-start;
+  }
+
+  .menu-bar-left {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .menu-bar-title {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .menu-bar-title-text,
+  .menu-title-input {
+    max-width: 100%;
   }
   
   .menu-bar-items {
