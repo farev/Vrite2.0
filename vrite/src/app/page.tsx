@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import MenuBar from '@/components/MenuBar';
 
@@ -10,7 +10,7 @@ const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), {
 
 export default function Home() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
-  const editorRef = useRef<any>(null);
+  const [lastSaved, setLastSaved] = useState<number | null>(null);
 
   const handleNewDocument = () => {
     if (confirm('Create a new document? Any unsaved changes will be lost.')) {
@@ -85,14 +85,21 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="app-shell">
       <MenuBar 
         onNewDocument={handleNewDocument}
         onSaveDocument={handleSaveDocument}
         onExportDocument={handleExportDocument}
         onPrint={handlePrint}
+        documentTitle={documentTitle}
+        onTitleChange={setDocumentTitle}
+        lastSaved={lastSaved}
       />
-      <DocumentEditor />
+      <DocumentEditor
+        documentTitle={documentTitle}
+        onTitleChange={setDocumentTitle}
+        onLastSavedChange={setLastSaved}
+      />
     </div>
   );
 }

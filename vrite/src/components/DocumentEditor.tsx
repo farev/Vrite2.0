@@ -49,7 +49,6 @@ import { createPortal } from 'react-dom';
 import AIAssistantSidebar, { type ContextSnippet } from './AIAssistantSidebar';
 import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
-import DocumentHeader from './DocumentHeader';
 import DiffPlugin from './plugins/DiffPlugin';
 import ClipboardPlugin from './plugins/ClipboardPlugin';
 import PaginationPlugin from './plugins/PaginationPlugin';
@@ -426,7 +425,17 @@ const PAGE_SIZES = {
   tabloid: { width: 1056, height: 1632, label: 'Tabloid (11" × 17")' },
 };
 
-export default function DocumentEditor() {
+interface DocumentEditorProps {
+  documentTitle: string;
+  onTitleChange: (title: string) => void;
+  onLastSavedChange: (timestamp: number) => void;
+}
+
+export default function DocumentEditor({
+  documentTitle,
+  onTitleChange,
+  onLastSavedChange,
+}: DocumentEditorProps) {
   const [documentContent, setDocumentContent] = useState('');
   const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
   const [pageCount, setPageCount] = useState(1);
@@ -442,13 +451,10 @@ export default function DocumentEditor() {
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   const [suggestedContent, setSuggestedContent] = useState<string | null>(null);
   const [editorRef, setEditorRef] = useState<LexicalEditor | null>(null);
-  const [documentTitle, setDocumentTitle] = useState('Untitled Document');
-  const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
-  const [savedEditorState, setSavedEditorState] = useState<string | undefined>(undefined);
-  const [isEditorReady, setIsEditorReady] = useState(false);
+  const [isDocumentAtTop, setIsDocumentAtTop] = useState(true);
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const currentPageSize = PAGE_SIZES[pageSize];
@@ -467,22 +473,19 @@ export default function DocumentEditor() {
       editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
     };
     saveDocument(documentData);
-    setLastSaved(Date.now());
-  }, [documentTitle, documentContent, editorState]);
+    onLastSavedChange(Date.now());
+  }, [documentTitle, documentContent, editorState, onLastSavedChange]);
 
   // Load document on mount
   useEffect(() => {
     const savedDoc = loadDocument();
-    if (savedDoc) {
-      setDocumentTitle(savedDoc.title);
-      setLastSaved(savedDoc.lastModified);
-      // Load the Lexical editor state if available
-      if (savedDoc.editorState) {
-        setSavedEditorState(savedDoc.editorState);
-      }
+    if (savedDoc && savedDoc.content) {
+      onTitleChange(savedDoc.title);
+      onLastSavedChange(savedDoc.lastModified);
+      // Note: We'll need to restore the editor state through Lexical
+      // For now, we're just loading the text content
     }
-    setIsEditorReady(true);
-  }, []);
+  }, [onTitleChange, onLastSavedChange]);
 
   // Auto-save effect
   useEffect(() => {
@@ -520,6 +523,12 @@ export default function DocumentEditor() {
 
   const handleCommandK = useCallback(() => {
     setIsAISidebarOpen(true);
+  }, []);
+
+  const handleDocumentScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const scrollTop = event.currentTarget.scrollTop;
+    const isAtTop = scrollTop <= 1;
+    setIsDocumentAtTop((prev) => (prev === isAtTop ? prev : isAtTop));
   }, []);
 
   const handleApplyChanges = (content: string, changes?: Array<{old_text: string, new_text: string}>) => {
@@ -771,26 +780,16 @@ export default function DocumentEditor() {
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
   const lexicalComposerKey = useMemo(
     () => `lexical-${Math.random().toString(36).slice(2)}`,
-    [savedEditorState]
+    []
   );
 
   const initialConfig = useMemo(
-    () => createInitialConfig(savedEditorState),
-    [savedEditorState]
+    () => createInitialConfig(),
+    []
   );
-
-  if (!isEditorReady) {
-    return <div className="document-editor-container">Loading...</div>;
-  }
 
   return (
     <div className="document-editor-container">
-      <DocumentHeader
-        title={documentTitle}
-        onTitleChange={setDocumentTitle}
-        lastSaved={lastSaved}
-        onSave={handleManualSave}
-      />
       <div
         className="document-editor-body"
         style={editorLayoutStyle}
@@ -807,7 +806,10 @@ export default function DocumentEditor() {
                 onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
               />
               
-              <div className="document-editor-scroll">
+              <div
+                className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
+                onScroll={handleDocumentScroll}
+              >
                 <div className="document-editor-wrapper" style={{ position: 'relative' }}>
                   <div className="document-pages-container">
                     {/* Render all pages */}
