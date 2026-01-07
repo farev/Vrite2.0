@@ -514,8 +514,7 @@ body {
 /* Document Container */
 .document-editor-wrapper {
   flex: 1;
-  display: flex;
-  justify-content: center;
+  position: relative;
   padding: 0 20px 20px;
   overflow: visible;
 }
@@ -523,9 +522,19 @@ body {
 .document-pages-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  max-width: 8.5in;
+  gap: var(--page-gap, 20px);
+  align-items: center;
   width: 100%;
+  pointer-events: none;
+}
+
+.document-editor-layer {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--page-width, 8.5in);
+  z-index: 1;
 }
 
 /* Document Page */
@@ -563,7 +572,7 @@ body {
 /* Content Editable */
 .document-content-editable {
   position: relative;
-  min-height: calc(11in - 1.5in);
+  min-height: var(--page-content-height, calc(11in - 1.5in));
   outline: none;
   font-family: 'Times New Roman', serif;
   font-size: 12pt;
@@ -574,6 +583,14 @@ body {
 
 .document-editor-surface {
   position: relative;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.page-break {
+  display: block;
+  width: 100%;
+  pointer-events: none;
 }
 
 .document-placeholder {
@@ -743,35 +760,23 @@ body {
   }
   
   .document-pages-container {
-    display: block;
+    display: none;
+  }
+
+  .document-editor-layer {
+    position: static;
+    transform: none;
+    width: 100%;
+  }
+
+  .page-break {
+    height: 0 !important;
+    break-after: page;
   }
   
   /* Page styling */
   .document-page {
-    box-shadow: none;
-    border-radius: 0;
-    page-break-after: always;
-    margin: 0;
-    width: 100% !important;
-    height: auto !important;
-    min-height: 0 !important;
-  }
-  
-  .document-page:last-child {
-    page-break-after: avoid;
-  }
-  
-  .document-page-content {
-    width: 100%;
-    height: auto;
-  }
-  
-  .document-page-footer {
-    border-top: none;
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    display: none;
   }
   
   /* Content styling */

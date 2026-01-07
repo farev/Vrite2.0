@@ -56,6 +56,7 @@ import AutocompletePlugin from './plugins/AutocompletePlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
+import { PageBreakNode } from './nodes/PageBreakNode';
 import {
   saveDocument,
   loadDocument,
@@ -110,6 +111,7 @@ const createInitialConfig = (savedEditorState?: string) => ({
     DiffNode,
     EquationNode,
     AutocompleteNode,
+    PageBreakNode,
   ],
   editorState: savedEditorState,
 });
@@ -379,13 +381,11 @@ function SelectionContextPopover({
 }
 
 function DocumentPage({ 
-  children, 
   pageNumber,
   margins = { top: 72, right: 72, bottom: 72, left: 72 },
   width,
   height,
 }: { 
-  children: React.ReactNode; 
   pageNumber: number;
   margins?: { top: number; right: number; bottom: number; left: number };
   width: number;
@@ -407,9 +407,7 @@ function DocumentPage({
           paddingBottom: `${margins.bottom}pt`,
           paddingLeft: `${margins.left}pt`,
         }}
-      >
-        {children}
-      </div>
+      />
       <div className="document-page-footer">
         <span className="document-page-number">Page {pageNumber}</span>
       </div>
@@ -424,6 +422,11 @@ const PAGE_SIZES = {
   legal: { width: 816, height: 1344, label: 'Legal (8.5" × 14")' },
   tabloid: { width: 1056, height: 1632, label: 'Tabloid (11" × 17")' },
 };
+
+const PAGE_GAP = 20;
+const PAGE_FOOTER_HEIGHT_PX = 72;
+const PAGE_FOOTER_HEIGHT_PT = 54;
+const PT_TO_PX = 4 / 3;
 
 interface DocumentEditorProps {
   documentTitle: string;
@@ -458,6 +461,46 @@ export default function DocumentEditor({
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const currentPageSize = PAGE_SIZES[pageSize];
+  const pageStackHeight = useMemo(() => {
+    if (pageCount <= 1) {
+      return currentPageSize.height;
+    }
+    return pageCount * currentPageSize.height + (pageCount - 1) * PAGE_GAP;
+  }, [currentPageSize.height, pageCount]);
+
+  const marginsInPx = useMemo(() => ({
+    top: documentMargins.top * PT_TO_PX,
+    right: documentMargins.right * PT_TO_PX,
+    bottom: documentMargins.bottom * PT_TO_PX,
+    left: documentMargins.left * PT_TO_PX,
+  }), [documentMargins]);
+
+  const pageContentHeight = useMemo(
+    () => currentPageSize.height - marginsInPx.top - marginsInPx.bottom - PAGE_FOOTER_HEIGHT_PX,
+    [currentPageSize.height, marginsInPx.bottom, marginsInPx.top]
+  );
+
+  const editorWrapperStyle = useMemo(
+    () =>
+      ({
+        '--page-width': `${currentPageSize.width}px`,
+        '--page-height': `${currentPageSize.height}px`,
+        '--page-gap': `${PAGE_GAP}px`,
+        '--page-content-height': `${Math.max(pageContentHeight, 0)}px`,
+        minHeight: `${pageStackHeight}px`,
+      }) as CSSProperties,
+    [currentPageSize.height, currentPageSize.width, pageContentHeight, pageStackHeight]
+  );
+
+  const editorSurfaceStyle = useMemo(
+    () => ({
+      paddingTop: `${documentMargins.top}pt`,
+      paddingRight: `${documentMargins.right}pt`,
+      paddingBottom: `${documentMargins.bottom + PAGE_FOOTER_HEIGHT_PT}pt`,
+      paddingLeft: `${documentMargins.left}pt`,
+    }),
+    [documentMargins]
+  );
   
   const handleEditorChange = (editorState: EditorState, content: string) => {
     setDocumentContent(content);
@@ -810,7 +853,7 @@ export default function DocumentEditor({
                 className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
                 onScroll={handleDocumentScroll}
               >
-                <div className="document-editor-wrapper" style={{ position: 'relative' }}>
+                <div className="document-editor-wrapper" style={editorWrapperStyle}>
                   <div className="document-pages-container">
                     {/* Render all pages */}
                     {Array.from({ length: pageCount }, (_, i) => (
@@ -820,18 +863,18 @@ export default function DocumentEditor({
                         margins={documentMargins}
                         width={currentPageSize.width}
                         height={currentPageSize.height}
-                      >
-                        {i === 0 && (
-                          <div className="document-editor-surface">
-                            <RichTextPlugin
-                              contentEditable={<ContentEditable className="document-content-editable" />}
-                              placeholder={null}
-                              ErrorBoundary={LexicalErrorBoundary}
-                            />
-                          </div>
-                        )}
-                      </DocumentPage>
+                      />
                     ))}
+                  </div>
+
+                  <div className="document-editor-layer">
+                    <div className="document-editor-surface" style={editorSurfaceStyle}>
+                      <RichTextPlugin
+                        contentEditable={<ContentEditable className="document-content-editable" />}
+                        placeholder={null}
+                        ErrorBoundary={LexicalErrorBoundary}
+                      />
+                    </div>
                   </div>
 
                   <MyOnChangePlugin onChange={handleEditorChange} />
@@ -847,7 +890,9 @@ export default function DocumentEditor({
                   <PaginationPlugin
                     pageHeight={currentPageSize.height}
                     pageWidth={currentPageSize.width}
-                    margins={documentMargins}
+                    margins={marginsInPx}
+                    pageGap={PAGE_GAP}
+                    footerHeight={PAGE_FOOTER_HEIGHT_PX}
                     onPageCountChange={setPageCount}
                   />
 
