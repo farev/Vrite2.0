@@ -128,9 +128,22 @@ export default function AIAssistantSidebar({
         requestBody.context_snippets = contextSnippets.map((snippet) => snippet.text);
       }
 
-      const response = await fetch('http://localhost:8000/api/command', {
+      // Get auth token for Supabase Edge Function
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('Not authenticated. Please log in to use AI features.');
+      }
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const endpoint = `${supabaseUrl}/functions/v1/ai-command`;
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),

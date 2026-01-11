@@ -429,14 +429,22 @@ interface DocumentEditorProps {
   documentTitle: string;
   onTitleChange: (title: string) => void;
   onLastSavedChange: (timestamp: number) => void;
+  onSaveCallbackReady?: (callback: () => void) => void;
+  initialDocumentId?: string | null;
 }
+
+// Track previous title to detect changes
+let previousTitle = '';
 
 export default function DocumentEditor({
   documentTitle,
   onTitleChange,
   onLastSavedChange,
+  onSaveCallbackReady,
+  initialDocumentId,
 }: DocumentEditorProps) {
   const [documentContent, setDocumentContent] = useState('');
+  const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
   const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
   const [pageCount, setPageCount] = useState(1);
   const [pageSize, setPageSize] = useState<keyof typeof PAGE_SIZES>('letter');
@@ -455,48 +463,116 @@ export default function DocumentEditor({
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
   const [isDocumentAtTop, setIsDocumentAtTop] = useState(true);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const currentPageSize = PAGE_SIZES[pageSize];
   
+  // Detect title changes
+  useEffect(() => {
+    if (previousTitle && previousTitle !== documentTitle) {
+      setHasUnsavedChanges(true);
+    }
+    previousTitle = documentTitle;
+  }, [documentTitle]);
+  
   const handleEditorChange = (editorState: EditorState, content: string) => {
     setDocumentContent(content);
     setEditorState(editorState);
+    setHasUnsavedChanges(true); // Mark document as having unsaved changes
   };
 
   // Manual save function
-  const handleManualSave = useCallback(() => {
-    const documentData: DocumentData = {
-      title: documentTitle,
-      content: documentContent,
-      lastModified: Date.now(),
-      editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
-    };
-    saveDocument(documentData);
-    onLastSavedChange(Date.now());
-  }, [documentTitle, documentContent, editorState, onLastSavedChange]);
+  const handleManualSave = useCallback(async () => {
+    console.log('[Editor] Manual save triggered');
+    try {
+      const documentData: DocumentData = {
+        id: documentId,
+        title: documentTitle,
+        content: documentContent,
+        lastModified: Date.now(),
+        editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
+      };
+      
+      console.log('[Editor] Calling saveDocument...');
+      const savedDoc = await saveDocument(documentData);
+      console.log('[Editor] Save successful, Drive ID:', savedDoc.id);
+      
+      // Update local ID if it was a new document
+      if (!documentId && savedDoc.id) {
+        setDocumentId(savedDoc.id);
+        console.log('[Editor] New document created with ID:', savedDoc.id);
+      }
+      
+      onLastSavedChange(savedDoc.lastModified);
+      setHasUnsavedChanges(false); // Clear unsaved changes flag after successful save
+    } catch (error) {
+      console.error('[Editor] Save failed:', error);
+      
+      // Provide more helpful error messages
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      if (errorMessage.includes('access not available') || errorMessage.includes('provider access token')) {
+        alert(
+          '❌ Cannot Save Document\n\n' +
+          'Your session does not have access to Google Drive/OneDrive.\n\n' +
+          'Please log out and log in again to grant storage permissions.\n\n' +
+          'Make sure the OAuth provider is properly configured in Supabase.'
+        );
+      } else {
+        alert(`Failed to save document: ${errorMessage}\n\nPlease check your connection and try again.`);
+      }
+    }
+  }, [documentId, documentTitle, documentContent, editorState, onLastSavedChange]);
+
+  // Expose save callback to parent
+  useEffect(() => {
+    if (onSaveCallbackReady) {
+      onSaveCallbackReady(() => {
+        handleManualSave();
+      });
+    }
+  }, [handleManualSave, onSaveCallbackReady]);
 
   // Load document on mount
   useEffect(() => {
-    const savedDoc = loadDocument();
-    if (savedDoc && savedDoc.content) {
-      onTitleChange(savedDoc.title);
-      onLastSavedChange(savedDoc.lastModified);
-      // Note: We'll need to restore the editor state through Lexical
-      // For now, we're just loading the text content
-    }
+    const fetchDocument = async () => {
+      console.log('[Editor] Loading document on mount');
+      try {
+        const savedDoc = await loadDocument();
+        if (savedDoc) {
+          console.log('[Editor] Document loaded:', savedDoc.id);
+          setDocumentId(savedDoc.id);
+          onTitleChange(savedDoc.title);
+          onLastSavedChange(savedDoc.lastModified);
+          
+          if (savedDoc.content) {
+            setDocumentContent(savedDoc.content);
+          }
+          
+          // Note: Restoring Lexical state is complex - for now we just load content
+        } else {
+          console.log('[Editor] No saved document found');
+        }
+      } catch (error) {
+        console.error('[Editor] Failed to load document:', error);
+      }
+    };
+
+    fetchDocument();
   }, [onTitleChange, onLastSavedChange]);
 
-  // Auto-save effect
+  // Auto-save effect - only save if there are unsaved changes
   useEffect(() => {
     const autoSaveTimer = setInterval(() => {
-      if (documentContent) {
+      if (hasUnsavedChanges && documentContent) {
+        console.log('[Editor] Auto-save triggered (unsaved changes detected)');
         handleManualSave();
       }
     }, AUTO_SAVE_INTERVAL);
 
     return () => clearInterval(autoSaveTimer);
-  }, [documentContent, handleManualSave]);
+  }, [hasUnsavedChanges, documentContent, handleManualSave]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -693,9 +769,23 @@ export default function DocumentEditor({
 
   const handleFormatDocument = async (formatType: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/format', {
+      // Get auth token for Supabase Edge Function
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert('Please log in to use formatting features.');
+        return;
+      }
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const endpoint = `${supabaseUrl}/functions/v1/format-document`;
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -726,7 +816,7 @@ export default function DocumentEditor({
       }
     } catch (error) {
       console.error('Error formatting document:', error);
-      alert('Failed to format document. Please make sure the backend server is running.');
+      alert('Failed to format document. Please check your connection and try again.');
     }
   };
 

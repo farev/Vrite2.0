@@ -7,16 +7,18 @@ import {
   Download, 
   Printer, 
   FileText,
-  Settings,
-  ChevronDown 
+  ChevronDown,
+  Home
 } from 'lucide-react';
 import { getLastModifiedString } from '../lib/storage';
+import UserProfile from './auth/UserProfile';
 
 interface MenuBarProps {
   onNewDocument: () => void;
   onSaveDocument: () => void;
   onExportDocument: (format: 'pdf' | 'docx' | 'txt') => void;
   onPrint: () => void;
+  onBackToHome?: () => void;
   documentTitle: string;
   onTitleChange: (title: string) => void;
   lastSaved: number | null;
@@ -27,6 +29,7 @@ export default function MenuBar({
   onSaveDocument,
   onExportDocument,
   onPrint,
+  onBackToHome,
   documentTitle,
   onTitleChange,
   lastSaved,
@@ -76,10 +79,20 @@ export default function MenuBar({
   return (
     <div className="menu-bar">
       <div className="menu-bar-left">
-        <div className="menu-bar-brand">
-          <FileText className="menu-brand-icon" />
-          <span className="menu-brand-text">Vrite</span>
-        </div>
+        {onBackToHome ? (
+          <button 
+            className="menu-bar-brand menu-bar-brand-button" 
+            onClick={onBackToHome}
+            title="Back to home"
+          >
+            <Home className="menu-brand-icon" />
+          </button>
+        ) : (
+          <div className="menu-bar-brand">
+            <FileText className="menu-brand-icon" />
+            <span className="menu-brand-text">Vrite</span>
+          </div>
+        )}
         <div className="menu-bar-title">
           {isEditingTitle ? (
             <input
@@ -183,6 +196,12 @@ export default function MenuBar({
         
         <div className="menu-item">
           <button className="menu-button">Tools</button>
+        </div>
+        
+        <div className="menu-spacer" style={{ flex: 1 }}></div>
+        
+        <div className="menu-item">
+          <UserProfile />
         </div>
       </div>
     </div>

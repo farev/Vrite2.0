@@ -1,105 +1,84 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import MenuBar from '@/components/MenuBar';
+import { createClient } from '@/lib/supabase/client';
 
-const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), { 
+const HomePage = dynamic(() => import('@/components/HomePage'), { 
   ssr: false 
 });
 
 export default function Home() {
-  const [documentTitle, setDocumentTitle] = useState('Untitled Document');
-  const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const router = useRouter();
+  const supabase = createClient();
 
-  const handleNewDocument = () => {
-    if (confirm('Create a new document? Any unsaved changes will be lost.')) {
-      window.location.reload();
-    }
-  };
-
-  const handleSaveDocument = () => {
-    // Auto-save is already implemented in DocumentEditor
-    alert('Document is auto-saved to local storage');
-  };
-
-  const handleExportDocument = async (format: 'pdf' | 'docx' | 'txt') => {
-    try {
-      if (format === 'pdf') {
-        // For PDF, use browser print
-        window.print();
+  useEffect(() => {
+    // Check authentication status
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuthenticated(!!session);
+      
+      if (!session) {
+        console.log('[Home] No session, redirecting to login');
+        router.push('/login');
         return;
       }
-
-      if (format === 'txt') {
-        // Export as plain text
-        const content = document.querySelector('.document-content-editable')?.textContent || '';
-        const blob = new Blob([content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${documentTitle}.txt`;
-        a.click();
-        URL.revokeObjectURL(url);
-        return;
+      
+      // Verify cloud storage access
+      if (!session.provider_token) {
+        console.error('[Home] ⚠️ No cloud storage access token!');
+        
+        // Show a user-friendly alert
+        setTimeout(() => {
+          const shouldReauth = confirm(
+            '⚠️ Cloud Storage Access Missing\n\n' +
+            'Your session does not have access to cloud storage.\n' +
+            'You need to log out and log in again to grant permissions.\n\n' +
+            'Click OK to log out now, or Cancel to continue (saving will not work).'
+          );
+          
+          if (shouldReauth) {
+            supabase.auth.signOut().then(() => {
+              router.push('/login');
+            });
+          }
+        }, 1000);
+      } else {
+        console.log('[Home] ✅ User authenticated with cloud storage access');
       }
+    });
 
-      if (format === 'docx') {
-        // Get HTML content from editor
-        const contentElement = document.querySelector('.document-content-editable');
-        const html = contentElement?.innerHTML || '';
-
-        // Call DOCX export API
-        const response = await fetch('/api/export/docx', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            html,
-            title: documentTitle,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Export failed');
-        }
-
-        // Download the file
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${documentTitle}.docx`;
-        a.click();
-        URL.revokeObjectURL(url);
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session);
+      if (!session) {
+        console.log('[Home] Session lost, redirecting to login');
+        router.push('/login');
       }
-    } catch (error) {
-      console.error('Export error:', error);
-      alert(`Failed to export as ${format.toUpperCase()}`);
-    }
-  };
+    });
 
-  const handlePrint = () => {
-    window.print();
-  };
+    return () => subscription.unsubscribe();
+  }, [router, supabase]);
 
-  return (
-    <div className="app-shell">
-      <MenuBar 
-        onNewDocument={handleNewDocument}
-        onSaveDocument={handleSaveDocument}
-        onExportDocument={handleExportDocument}
-        onPrint={handlePrint}
-        documentTitle={documentTitle}
-        onTitleChange={setDocumentTitle}
-        lastSaved={lastSaved}
-      />
-      <DocumentEditor
-        documentTitle={documentTitle}
-        onTitleChange={setDocumentTitle}
-        onLastSavedChange={setLastSaved}
-      />
-    </div>
-  );
+  // Show loading state while checking authentication
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated (will redirect)
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  return <HomePage />;
 }

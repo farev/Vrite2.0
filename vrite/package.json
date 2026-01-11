@@ -20,6 +20,8 @@
     "@lexical/selection": "^0.39.0",
     "@lexical/table": "^0.39.0",
     "@lexical/utils": "^0.39.0",
+    "@supabase/ssr": "^0.5.1",
+    "@supabase/supabase-js": "^2.45.0",
     "@types/diff": "^7.0.2",
     "diff": "^8.0.2",
     "docx": "^9.5.1",
@@ -29,7 +31,8 @@
     "next": "15.5.2",
     "puppeteer": "^24.34.0",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
