@@ -422,8 +422,9 @@ export default function DocumentEditor({
   const editorPageStyle = useMemo(
     () => ({
       width: `${currentPageSize.width}px`,
+      minHeight: `${currentPageSize.height}px`,
     }),
-    [currentPageSize.width]
+    [currentPageSize.width, currentPageSize.height]
   );
 
   const editorSurfaceStyle = useMemo(

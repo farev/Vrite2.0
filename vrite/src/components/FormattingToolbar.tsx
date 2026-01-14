@@ -646,193 +646,191 @@ export default function FormattingToolbar({
         </button>
         {isMoreOpen && (
           <div className="toolbar-dropdown-menu toolbar-more-menu">
-            <div className="toolbar-more-stack">
-              <div className="toolbar-more-row">
-                <div className="toolbar-section">
-                  <button
-                    className={`toolbar-button ${isStrikethrough ? 'active' : ''}`}
-                    onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough')}
-                    title="Strikethrough"
-                  >
-                    <Strikethrough size={18} />
-                  </button>
-                  <button
-                    className={`toolbar-button ${isSubscript ? 'active' : ''}`}
-                    onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'subscript')}
-                    title="Subscript"
-                  >
-                    <Subscript size={18} />
-                  </button>
-                  <button
-                    className={`toolbar-button ${isSuperscript ? 'active' : ''}`}
-                    onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'superscript')}
-                    title="Superscript"
-                  >
-                    <Superscript size={18} />
-                  </button>
-                  <button
-                    className="toolbar-button"
-                    onClick={clearFormatting}
-                    title="Clear Formatting"
-                  >
-                    <RemoveFormatting size={18} />
-                  </button>
-                </div>
+            <div className="toolbar-more-bar">
+              <div className="toolbar-section">
+                <button
+                  className={`toolbar-button ${isStrikethrough ? 'active' : ''}`}
+                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough')}
+                  title="Strikethrough"
+                >
+                  <Strikethrough size={18} />
+                </button>
+                <button
+                  className={`toolbar-button ${isSubscript ? 'active' : ''}`}
+                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'subscript')}
+                  title="Subscript"
+                >
+                  <Subscript size={18} />
+                </button>
+                <button
+                  className={`toolbar-button ${isSuperscript ? 'active' : ''}`}
+                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'superscript')}
+                  title="Superscript"
+                >
+                  <Superscript size={18} />
+                </button>
+                <button
+                  className="toolbar-button"
+                  onClick={clearFormatting}
+                  title="Clear Formatting"
+                >
+                  <RemoveFormatting size={18} />
+                </button>
               </div>
 
-              <div className="toolbar-more-row">
-                <div className="toolbar-section">
-                  <button
-                    className="toolbar-button"
-                    onClick={indentDecrease}
-                    title="Decrease Indent"
-                  >
-                    <IndentDecrease size={18} />
-                  </button>
-                  <button
-                    className="toolbar-button"
-                    onClick={indentIncrease}
-                    title="Increase Indent"
-                  >
-                    <IndentIncrease size={18} />
-                  </button>
-                </div>
+              <div className="toolbar-divider" />
+
+              <div className="toolbar-section">
+                <button
+                  className="toolbar-button"
+                  onClick={indentDecrease}
+                  title="Decrease Indent"
+                >
+                  <IndentDecrease size={18} />
+                </button>
+                <button
+                  className="toolbar-button"
+                  onClick={indentIncrease}
+                  title="Increase Indent"
+                >
+                  <IndentIncrease size={18} />
+                </button>
               </div>
 
-              <div className="toolbar-more-row">
-                <div className="toolbar-dropdown">
-                  <button
-                    className="toolbar-dropdown-button toolbar-icon-button"
-                    onClick={() => toggleDropdown('pageSize')}
-                    title="Page Size"
-                  >
-                    <FileText size={18} />
-                    <ChevronDown size={14} />
-                  </button>
-                  {openDropdown === 'pageSize' && (
-                    <div className="toolbar-dropdown-menu">
-                      <div className="toolbar-dropdown-header">
-                        <strong>Page Size</strong>
-                      </div>
-                      {[
-                        { value: 'letter', label: 'Letter (8.5" × 11")' },
-                        { value: 'a4', label: 'A4 (210mm × 297mm)' },
-                        { value: 'legal', label: 'Legal (8.5" × 14")' },
-                        { value: 'tabloid', label: 'Tabloid (11" × 17")' },
-                      ].map((size) => (
-                        <button
-                          key={size.value}
-                          onClick={() => {
-                            onPageSizeChange?.(size.value);
-                            setOpenDropdown(null);
-                          }}
-                          className={`toolbar-dropdown-item ${pageSize === size.value ? 'active' : ''}`}
-                        >
-                          {size.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+              <div className="toolbar-divider" />
 
-                <div className="toolbar-dropdown">
-                  <button
-                    className="toolbar-dropdown-button toolbar-icon-button"
-                    onClick={() => toggleDropdown('margins')}
-                    title="Page Margins"
-                  >
-                    <Type size={18} />
-                    <ChevronDown size={14} />
-                  </button>
-                  {openDropdown === 'margins' && (
-                    <div className="toolbar-dropdown-menu margins-dropdown">
-                      <div className="margin-control">
-                        <label>Top:</label>
-                        <input
-                          type="number"
-                          value={documentMargins.top}
-                          onChange={(e) => handleMarginChange('top', Number(e.target.value))}
-                          min="36"
-                          max="144"
-                        />
-                        <span>pt</span>
-                      </div>
-                      <div className="margin-control">
-                        <label>Right:</label>
-                        <input
-                          type="number"
-                          value={documentMargins.right}
-                          onChange={(e) => handleMarginChange('right', Number(e.target.value))}
-                          min="36"
-                          max="144"
-                        />
-                        <span>pt</span>
-                      </div>
-                      <div className="margin-control">
-                        <label>Bottom:</label>
-                        <input
-                          type="number"
-                          value={documentMargins.bottom}
-                          onChange={(e) => handleMarginChange('bottom', Number(e.target.value))}
-                          min="36"
-                          max="144"
-                        />
-                        <span>pt</span>
-                      </div>
-                      <div className="margin-control">
-                        <label>Left:</label>
-                        <input
-                          type="number"
-                          value={documentMargins.left}
-                          onChange={(e) => handleMarginChange('left', Number(e.target.value))}
-                          min="36"
-                          max="144"
-                        />
-                        <span>pt</span>
-                      </div>
+              <div className="toolbar-dropdown">
+                <button
+                  className="toolbar-dropdown-button toolbar-icon-button"
+                  onClick={() => toggleDropdown('pageSize')}
+                  title="Page Size"
+                >
+                  <FileText size={18} />
+                  <ChevronDown size={14} />
+                </button>
+                {openDropdown === 'pageSize' && (
+                  <div className="toolbar-dropdown-menu">
+                    <div className="toolbar-dropdown-header">
+                      <strong>Page Size</strong>
                     </div>
-                  )}
-                </div>
-
-                <div className="toolbar-dropdown">
-                  <button
-                    className="toolbar-dropdown-button toolbar-icon-button"
-                    onClick={() => toggleDropdown('format')}
-                    title="Format Document"
-                  >
-                    <FileText size={18} />
-                    <ChevronDown size={14} />
-                  </button>
-                  {openDropdown === 'format' && (
-                    <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable format-dropdown">
-                      <div className="toolbar-dropdown-header">
-                        <strong>Format Document As...</strong>
-                      </div>
-                      {documentFormats.map((format) => (
-                        <button
-                          key={format.value}
-                          onClick={() => handleFormatSelection(format.value)}
-                          className="toolbar-dropdown-item format-item"
-                        >
-                          <div className="format-label">{format.label}</div>
-                          <div className="format-description">{format.description}</div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                    {[
+                      { value: 'letter', label: 'Letter (8.5" × 11")' },
+                      { value: 'a4', label: 'A4 (210mm × 297mm)' },
+                      { value: 'legal', label: 'Legal (8.5" × 14")' },
+                      { value: 'tabloid', label: 'Tabloid (11" × 17")' },
+                    ].map((size) => (
+                      <button
+                        key={size.value}
+                        onClick={() => {
+                          onPageSizeChange?.(size.value);
+                          setOpenDropdown(null);
+                        }}
+                        className={`toolbar-dropdown-item ${pageSize === size.value ? 'active' : ''}`}
+                      >
+                        {size.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <div className="toolbar-more-row">
-                <div className="toolbar-section">
-                  <button
-                    className="toolbar-button"
-                    onClick={insertEquation}
-                    title="Insert Equation"
-                  >
-                    <span style={{ fontFamily: 'serif', fontWeight: 'bold' }}>∑</span>
-                  </button>
-                </div>
+              <div className="toolbar-dropdown">
+                <button
+                  className="toolbar-dropdown-button toolbar-icon-button"
+                  onClick={() => toggleDropdown('margins')}
+                  title="Page Margins"
+                >
+                  <Type size={18} />
+                  <ChevronDown size={14} />
+                </button>
+                {openDropdown === 'margins' && (
+                  <div className="toolbar-dropdown-menu margins-dropdown">
+                    <div className="margin-control">
+                      <label>Top:</label>
+                      <input
+                        type="number"
+                        value={documentMargins.top}
+                        onChange={(e) => handleMarginChange('top', Number(e.target.value))}
+                        min="36"
+                        max="144"
+                      />
+                      <span>pt</span>
+                    </div>
+                    <div className="margin-control">
+                      <label>Right:</label>
+                      <input
+                        type="number"
+                        value={documentMargins.right}
+                        onChange={(e) => handleMarginChange('right', Number(e.target.value))}
+                        min="36"
+                        max="144"
+                      />
+                      <span>pt</span>
+                    </div>
+                    <div className="margin-control">
+                      <label>Bottom:</label>
+                      <input
+                        type="number"
+                        value={documentMargins.bottom}
+                        onChange={(e) => handleMarginChange('bottom', Number(e.target.value))}
+                        min="36"
+                        max="144"
+                      />
+                      <span>pt</span>
+                    </div>
+                    <div className="margin-control">
+                      <label>Left:</label>
+                      <input
+                        type="number"
+                        value={documentMargins.left}
+                        onChange={(e) => handleMarginChange('left', Number(e.target.value))}
+                        min="36"
+                        max="144"
+                      />
+                      <span>pt</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="toolbar-dropdown">
+                <button
+                  className="toolbar-dropdown-button toolbar-icon-button"
+                  onClick={() => toggleDropdown('format')}
+                  title="Format Document"
+                >
+                  <FileText size={18} />
+                  <ChevronDown size={14} />
+                </button>
+                {openDropdown === 'format' && (
+                  <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable format-dropdown">
+                    <div className="toolbar-dropdown-header">
+                      <strong>Format Document As...</strong>
+                    </div>
+                    {documentFormats.map((format) => (
+                      <button
+                        key={format.value}
+                        onClick={() => handleFormatSelection(format.value)}
+                        className="toolbar-dropdown-item format-item"
+                      >
+                        <div className="format-label">{format.label}</div>
+                        <div className="format-description">{format.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="toolbar-divider" />
+
+              <div className="toolbar-section">
+                <button
+                  className="toolbar-button"
+                  onClick={insertEquation}
+                  title="Insert Equation"
+                >
+                  <span style={{ fontFamily: 'serif', fontWeight: 'bold' }}>∑</span>
+                </button>
               </div>
             </div>
           </div>
