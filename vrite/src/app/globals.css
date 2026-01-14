@@ -303,10 +303,67 @@ body {
   border-bottom: 1px solid #e5e7eb;
   min-height: var(--app-top-bar-height);
   padding: 0 16px;
+  margin-left: -16px;
+  width: calc(100% + 16px);
   display: flex;
   align-items: center;
   gap: 4px;
   box-shadow: none;
+  flex-wrap: nowrap;
+}
+
+.formatting-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.toolbar-icon-button {
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.toolbar-more {
+  margin-left: auto;
+}
+
+.toolbar-more-button {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.toolbar-more-button:hover {
+  background: #e5e7eb;
+  border-color: #cbd5e1;
+}
+
+.toolbar-more-button.is-open {
+  background: #e5e7eb;
+  border-color: #94a3b8;
+}
+
+.toolbar-more-menu {
+  left: auto;
+  right: 0;
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 8px;
+  background: #f9fafb;
+}
+
+.toolbar-more-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolbar-more-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
@@ -499,11 +556,20 @@ body {
     padding: 0 12px;
     gap: 2px;
   }
+
+  .formatting-toolbar-main {
+    gap: 2px;
+  }
   
   .toolbar-dropdown-button {
     min-width: 70px;
     padding: 4px 8px;
     font-size: 12px;
+  }
+
+  .toolbar-icon-button {
+    min-width: 0;
+    padding: 4px 6px;
   }
   
   .toolbar-dropdown-label {
@@ -1439,6 +1505,11 @@ body {
     min-height: auto;
   }
   
+  .formatting-toolbar {
+    margin-left: -12px;
+    width: calc(100% + 12px);
+  }
+
   .toolbar {
     flex-wrap: wrap;
     gap: 2px;
