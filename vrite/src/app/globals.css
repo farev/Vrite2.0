@@ -514,65 +514,32 @@ body {
 /* Document Container */
 .document-editor-wrapper {
   flex: 1;
-  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
   padding: 0 20px 20px;
   overflow: visible;
 }
 
-.document-pages-container {
-  display: flex;
-  flex-direction: column;
-  gap: var(--page-gap, 20px);
-  align-items: center;
-  width: 100%;
-  pointer-events: none;
-}
-
-.document-editor-layer {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: var(--page-width, 8.5in);
-  z-index: 1;
-}
-
 /* Document Page */
 .document-page {
-  width: 8.5in;
-  min-height: 11in;
+  width: var(--page-width, 8.5in);
+  max-width: 100%;
   background: white;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border-radius: 4px;
   position: relative;
-  display: flex;
-  flex-direction: column;
 }
 
 .document-page-content {
-  flex: 1;
-  padding: 1in;
-  padding-bottom: 0.75in;
-}
-
-.document-page-footer {
-  height: 0.75in;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-top: 1px solid #f3f4f6;
-}
-
-.document-page-number {
-  font-size: 11px;
-  color: #6b7280;
-  font-family: 'Times New Roman', serif;
+  position: relative;
+  box-sizing: border-box;
 }
 
 /* Content Editable */
 .document-content-editable {
   position: relative;
-  min-height: var(--page-content-height, calc(11in - 1.5in));
+  min-height: 60vh;
   outline: none;
   font-family: 'Times New Roman', serif;
   font-size: 12pt;
