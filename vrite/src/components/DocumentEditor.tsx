@@ -51,7 +51,6 @@ import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
 import DiffPlugin from './plugins/DiffPlugin';
 import ClipboardPlugin from './plugins/ClipboardPlugin';
-import PaginationPlugin from './plugins/PaginationPlugin';
 import AutocompletePlugin from './plugins/AutocompletePlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode } from './nodes/EquationNode';
@@ -380,41 +379,6 @@ function SelectionContextPopover({
   );
 }
 
-function DocumentPage({ 
-  pageNumber,
-  margins = { top: 72, right: 72, bottom: 72, left: 72 },
-  width,
-  height,
-}: { 
-  pageNumber: number;
-  margins?: { top: number; right: number; bottom: number; left: number };
-  width: number;
-  height: number;
-}) {
-  return (
-    <div 
-      className="document-page"
-      style={{
-        width: `${width}px`,
-        height: `${height}px`,
-      }}
-    >
-      <div 
-        className="document-page-content"
-        style={{
-          paddingTop: `${margins.top}pt`,
-          paddingRight: `${margins.right}pt`,
-          paddingBottom: `${margins.bottom}pt`,
-          paddingLeft: `${margins.left}pt`,
-        }}
-      />
-      <div className="document-page-footer">
-        <span className="document-page-number">Page {pageNumber}</span>
-      </div>
-    </div>
-  );
-}
-
 // Page size presets (width x height in pixels at 96 DPI)
 const PAGE_SIZES = {
   letter: { width: 816, height: 1056, label: 'Letter (8.5" × 11")' },
@@ -422,11 +386,6 @@ const PAGE_SIZES = {
   legal: { width: 816, height: 1344, label: 'Legal (8.5" × 14")' },
   tabloid: { width: 1056, height: 1632, label: 'Tabloid (11" × 17")' },
 };
-
-const PAGE_GAP = 20;
-const PAGE_FOOTER_HEIGHT_PX = 72;
-const PAGE_FOOTER_HEIGHT_PT = 54;
-const PT_TO_PX = 4 / 3;
 
 interface DocumentEditorProps {
   documentTitle: string;
@@ -441,7 +400,6 @@ export default function DocumentEditor({
 }: DocumentEditorProps) {
   const [documentContent, setDocumentContent] = useState('');
   const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
-  const [pageCount, setPageCount] = useState(1);
   const [pageSize, setPageSize] = useState<keyof typeof PAGE_SIZES>('letter');
   const [documentMargins, setDocumentMargins] = useState({
     top: 72,
@@ -461,42 +419,18 @@ export default function DocumentEditor({
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const currentPageSize = PAGE_SIZES[pageSize];
-  const pageStackHeight = useMemo(() => {
-    if (pageCount <= 1) {
-      return currentPageSize.height;
-    }
-    return pageCount * currentPageSize.height + (pageCount - 1) * PAGE_GAP;
-  }, [currentPageSize.height, pageCount]);
-
-  const marginsInPx = useMemo(() => ({
-    top: documentMargins.top * PT_TO_PX,
-    right: documentMargins.right * PT_TO_PX,
-    bottom: documentMargins.bottom * PT_TO_PX,
-    left: documentMargins.left * PT_TO_PX,
-  }), [documentMargins]);
-
-  const pageContentHeight = useMemo(
-    () => currentPageSize.height - marginsInPx.top - marginsInPx.bottom - PAGE_FOOTER_HEIGHT_PX,
-    [currentPageSize.height, marginsInPx.bottom, marginsInPx.top]
-  );
-
-  const editorWrapperStyle = useMemo(
-    () =>
-      ({
-        '--page-width': `${currentPageSize.width}px`,
-        '--page-height': `${currentPageSize.height}px`,
-        '--page-gap': `${PAGE_GAP}px`,
-        '--page-content-height': `${Math.max(pageContentHeight, 0)}px`,
-        minHeight: `${pageStackHeight}px`,
-      }) as CSSProperties,
-    [currentPageSize.height, currentPageSize.width, pageContentHeight, pageStackHeight]
+  const editorPageStyle = useMemo(
+    () => ({
+      width: `${currentPageSize.width}px`,
+    }),
+    [currentPageSize.width]
   );
 
   const editorSurfaceStyle = useMemo(
     () => ({
       paddingTop: `${documentMargins.top}pt`,
       paddingRight: `${documentMargins.right}pt`,
-      paddingBottom: `${documentMargins.bottom + PAGE_FOOTER_HEIGHT_PT}pt`,
+      paddingBottom: `${documentMargins.bottom}pt`,
       paddingLeft: `${documentMargins.left}pt`,
     }),
     [documentMargins]
@@ -853,27 +787,16 @@ export default function DocumentEditor({
                 className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
                 onScroll={handleDocumentScroll}
               >
-                <div className="document-editor-wrapper" style={editorWrapperStyle}>
-                  <div className="document-pages-container">
-                    {/* Render all pages */}
-                    {Array.from({ length: pageCount }, (_, i) => (
-                      <DocumentPage 
-                        key={i} 
-                        pageNumber={i + 1} 
-                        margins={documentMargins}
-                        width={currentPageSize.width}
-                        height={currentPageSize.height}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="document-editor-layer">
-                    <div className="document-editor-surface" style={editorSurfaceStyle}>
-                      <RichTextPlugin
-                        contentEditable={<ContentEditable className="document-content-editable" />}
-                        placeholder={null}
-                        ErrorBoundary={LexicalErrorBoundary}
-                      />
+                <div className="document-editor-wrapper">
+                  <div className="document-page" style={editorPageStyle}>
+                    <div className="document-page-content" style={editorSurfaceStyle}>
+                      <div className="document-editor-surface">
+                        <RichTextPlugin
+                          contentEditable={<ContentEditable className="document-content-editable" />}
+                          placeholder={null}
+                          ErrorBoundary={LexicalErrorBoundary}
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -887,14 +810,6 @@ export default function DocumentEditor({
                   <ClipboardPlugin />
                   <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
                   <AutocompletePlugin enabled={false} />
-                  <PaginationPlugin
-                    pageHeight={currentPageSize.height}
-                    pageWidth={currentPageSize.width}
-                    margins={marginsInPx}
-                    pageGap={PAGE_GAP}
-                    footerHeight={PAGE_FOOTER_HEIGHT_PX}
-                    onPageCountChange={setPageCount}
-                  />
 
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}
                   <DiffPlugin
