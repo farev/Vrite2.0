@@ -514,65 +514,32 @@ body {
 /* Document Container */
 .document-editor-wrapper {
   flex: 1;
-  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
   padding: 0 20px 20px;
   overflow: visible;
 }
 
-.document-pages-container {
-  display: flex;
-  flex-direction: column;
-  gap: var(--page-gap, 20px);
-  align-items: center;
-  width: 100%;
-  pointer-events: none;
-}
-
-.document-editor-layer {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: var(--page-width, 8.5in);
-  z-index: 1;
-}
-
 /* Document Page */
 .document-page {
-  width: 8.5in;
-  min-height: 11in;
+  width: var(--page-width, 8.5in);
+  max-width: 100%;
   background: white;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border-radius: 4px;
   position: relative;
-  display: flex;
-  flex-direction: column;
 }
 
 .document-page-content {
-  flex: 1;
-  padding: 1in;
-  padding-bottom: 0.75in;
-}
-
-.document-page-footer {
-  height: 0.75in;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-top: 1px solid #f3f4f6;
-}
-
-.document-page-number {
-  font-size: 11px;
-  color: #6b7280;
-  font-family: 'Times New Roman', serif;
+  position: relative;
+  box-sizing: border-box;
 }
 
 /* Content Editable */
 .document-content-editable {
   position: relative;
-  min-height: var(--page-content-height, calc(11in - 1.5in));
+  min-height: 60vh;
   outline: none;
   font-family: 'Times New Roman', serif;
   font-size: 12pt;
@@ -602,12 +569,6 @@ body {
   font-family: 'Times New Roman', serif;
   font-size: 12pt;
   line-height: 1.5;
-}
-
-/* Dynamic content area based on margins */
-.document-page-content {
-  flex: 1;
-  position: relative;
 }
 
 /* Typography */
@@ -758,16 +719,6 @@ body {
     padding: 0;
     margin: 0;
   }
-  
-  .document-pages-container {
-    display: none;
-  }
-
-  .document-editor-layer {
-    position: static;
-    transform: none;
-    width: 100%;
-  }
 
   .page-break {
     height: 0 !important;
@@ -776,12 +727,16 @@ body {
   
   /* Page styling */
   .document-page {
-    display: none;
+    box-shadow: none;
+    border-radius: 0;
+    width: 100%;
+    max-width: none;
   }
   
   /* Content styling */
   .document-content-editable {
     width: 100%;
+    min-height: auto;
   }
   
   /* Ensure proper text rendering */
@@ -1482,14 +1437,6 @@ body {
   .document-page {
     width: 100%;
     min-height: auto;
-  }
-  
-  .document-pages-container {
-    max-width: 100%;
-  }
-  
-  .document-page-content {
-    padding: 16px;
   }
   
   .toolbar {
