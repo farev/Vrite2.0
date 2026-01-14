@@ -58,28 +58,109 @@ export function applyChangesWithDiff(
 ): void {
   const root = $getRoot();
 
-  for (const change of changes) {
+  // Pre-process to group consecutive list item insertions
+  const processedChanges = preprocessListInsertions(changes);
+
+  for (const change of processedChanges) {
     try {
-      switch (change.operation) {
-        case 'replace_block':
-          applyReplaceBlock(change, blockKeyMap);
-          break;
-        case 'insert_block':
-          applyInsertBlock(change, blockKeyMap, root);
-          break;
-        case 'delete_block':
-          applyDeleteBlock(change, blockKeyMap);
-          break;
-        case 'modify_segments':
-          applyModifySegments(change, blockKeyMap);
-          break;
-        default:
-          console.warn('Unknown change operation:', change);
+      if (change.operation === 'insert_list_group') {
+        // Handle grouped list items
+        applyInsertListGroup(change as InsertListGroupChange, blockKeyMap, root);
+      } else {
+        switch (change.operation) {
+          case 'replace_block':
+            applyReplaceBlock(change as ReplaceBlockChange, blockKeyMap);
+            break;
+          case 'insert_block':
+            applyInsertBlock(change as InsertBlockChange, blockKeyMap, root);
+            break;
+          case 'delete_block':
+            applyDeleteBlock(change as DeleteBlockChange, blockKeyMap);
+            break;
+          case 'modify_segments':
+            applyModifySegments(change as ModifySegmentsChange, blockKeyMap);
+            break;
+          default:
+            console.warn('Unknown change operation:', change);
+        }
       }
     } catch (error) {
       console.error('Error applying change:', change, error);
     }
   }
+}
+
+// Internal type for grouped list insertions
+interface InsertListGroupChange {
+  operation: 'insert_list_group';
+  afterBlockId: string | null;
+  listType: 'bullet' | 'number';
+  items: SimplifiedBlock[];
+}
+
+/**
+ * Pre-process changes to group consecutive list item insertions.
+ */
+function preprocessListInsertions(changes: LexicalChange[]): (LexicalChange | InsertListGroupChange)[] {
+  const result: (LexicalChange | InsertListGroupChange)[] = [];
+  let i = 0;
+
+  while (i < changes.length) {
+    const change = changes[i];
+
+    // Check if this is a list-item insert
+    if (change.operation === 'insert_block' && change.newBlock.type === 'list-item') {
+      const listType = change.newBlock.listType || 'bullet';
+      const group: InsertListGroupChange = {
+        operation: 'insert_list_group',
+        afterBlockId: change.afterBlockId,
+        listType: listType,
+        items: [change.newBlock],
+      };
+
+      // Collect consecutive list items of the same type
+      let j = i + 1;
+      while (j < changes.length) {
+        const nextChange = changes[j];
+        if (
+          nextChange.operation === 'insert_block' &&
+          nextChange.newBlock.type === 'list-item' &&
+          (nextChange.newBlock.listType || 'bullet') === listType
+        ) {
+          group.items.push(nextChange.newBlock);
+          j++;
+        } else {
+          break;
+        }
+      }
+
+      result.push(group);
+      i = j;
+    } else {
+      result.push(change);
+      i++;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Insert a group of list items as a single ListNode.
+ */
+function applyInsertListGroup(
+  change: InsertListGroupChange,
+  blockKeyMap: BlockKeyMap,
+  root: LexicalNode
+): void {
+  const listNode = $createListNode(change.listType);
+
+  for (const block of change.items) {
+    const listItemNode = createListItemNodeWithDiff(block);
+    listNode.append(listItemNode);
+  }
+
+  insertNodeIntoDocument(listNode, change.afterBlockId, blockKeyMap, root);
 }
 
 /**
@@ -114,10 +195,58 @@ function applyInsertBlock(
   blockKeyMap: BlockKeyMap,
   root: LexicalNode
 ): void {
-  // Create new block (as new content, no original)
-  const newNode = createBlockNodeWithDiff(change.newBlock, null);
+  const block = change.newBlock;
 
-  if (change.afterBlockId === null) {
+  // Handle list items specially - they need to be wrapped in a ListNode
+  if (block.type === 'list-item') {
+    const listType = block.listType || 'bullet';
+    const listNode = $createListNode(listType);
+    const listItemNode = createListItemNodeWithDiff(block);
+    listNode.append(listItemNode);
+
+    insertNodeIntoDocument(listNode, change.afterBlockId, blockKeyMap, root);
+  } else {
+    // Create regular block (paragraph, heading)
+    const newNode = createBlockNodeWithDiff(block, null);
+    insertNodeIntoDocument(newNode, change.afterBlockId, blockKeyMap, root);
+  }
+}
+
+/**
+ * Create a ListItemNode with diff highlighting.
+ */
+function createListItemNodeWithDiff(block: SimplifiedBlock): ListItemNode {
+  const listItemNode = $createListItemNode();
+  if (block.indent) {
+    listItemNode.setIndent(block.indent);
+  }
+
+  const newText = block.segments.map(s => s.text).join('');
+  const isBold = hasFormat(block.segments, 1);
+  const isItalic = hasFormat(block.segments, 2);
+
+  const diffNode = $createDiffNode(
+    'addition',
+    newText,
+    undefined,
+    isBold,
+    isItalic
+  );
+  listItemNode.append(diffNode);
+
+  return listItemNode;
+}
+
+/**
+ * Helper to insert a node into the document at the right position.
+ */
+function insertNodeIntoDocument(
+  newNode: LexicalNode,
+  afterBlockId: string | null,
+  blockKeyMap: BlockKeyMap,
+  root: LexicalNode
+): void {
+  if (afterBlockId === null) {
     // Insert at the beginning
     const firstChild = (root as { getFirstChild?: () => LexicalNode | null }).getFirstChild?.();
     if (firstChild) {
@@ -126,9 +255,9 @@ function applyInsertBlock(
       (root as { append?: (node: LexicalNode) => void }).append?.(newNode);
     }
   } else {
-    const afterKey = blockKeyMap[change.afterBlockId];
+    const afterKey = blockKeyMap[afterBlockId];
     if (!afterKey) {
-      console.warn(`After block not found: ${change.afterBlockId}, appending to end`);
+      console.warn(`After block not found: ${afterBlockId}, appending to end`);
       (root as { append?: (node: LexicalNode) => void }).append?.(newNode);
       return;
     }

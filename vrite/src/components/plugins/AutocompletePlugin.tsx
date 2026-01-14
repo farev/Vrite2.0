@@ -10,6 +10,7 @@ import {
   KEY_TAB_COMMAND,
   KEY_ESCAPE_COMMAND,
   $createTextNode,
+  type LexicalNode,
 } from 'lexical';
 import { $createAutocompleteNode, $isAutocompleteNode } from '../nodes/AutocompleteNode';
 
@@ -36,17 +37,17 @@ export default function AutocompletePlugin({
   const clearAutocomplete = useCallback(() => {
     editor.update(() => {
       const root = $getRoot();
-      const allNodes: any[] = [];
-      
-      const collectNodes = (node: any) => {
+      const allNodes: LexicalNode[] = [];
+
+      const collectNodes = (node: LexicalNode) => {
         allNodes.push(node);
         if ('getChildren' in node && typeof node.getChildren === 'function') {
-          const children = node.getChildren();
+          const children = node.getChildren() as LexicalNode[];
           children.forEach(collectNodes);
         }
       };
       collectNodes(root);
-      
+
       allNodes.forEach((node) => {
         if ($isAutocompleteNode(node)) {
           node.remove();
@@ -59,17 +60,17 @@ export default function AutocompletePlugin({
   const acceptSuggestion = useCallback(() => {
     editor.update(() => {
       const root = $getRoot();
-      const allNodes: any[] = [];
-      
-      const collectNodes = (node: any) => {
+      const allNodes: LexicalNode[] = [];
+
+      const collectNodes = (node: LexicalNode) => {
         allNodes.push(node);
         if ('getChildren' in node && typeof node.getChildren === 'function') {
-          const children = node.getChildren();
+          const children = node.getChildren() as LexicalNode[];
           children.forEach(collectNodes);
         }
       };
       collectNodes(root);
-      
+
       // Find autocomplete node
       const autocompleteNode = allNodes.find($isAutocompleteNode);
       if (autocompleteNode) {
@@ -124,8 +125,8 @@ export default function AutocompletePlugin({
           }
         });
       }
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
         console.error('Autocomplete error:', error);
       }
     } finally {
@@ -182,17 +183,17 @@ export default function AutocompletePlugin({
       (event) => {
         const hasAutocomplete = editor.getEditorState().read(() => {
           const root = $getRoot();
-          const allNodes: any[] = [];
-          
-          const collectNodes = (node: any) => {
+          const allNodes: LexicalNode[] = [];
+
+          const collectNodes = (node: LexicalNode) => {
             allNodes.push(node);
             if ('getChildren' in node && typeof node.getChildren === 'function') {
-              const children = node.getChildren();
+              const children = node.getChildren() as LexicalNode[];
               children.forEach(collectNodes);
             }
           };
           collectNodes(root);
-          
+
           return allNodes.some($isAutocompleteNode);
         });
 

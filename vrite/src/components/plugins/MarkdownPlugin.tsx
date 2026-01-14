@@ -7,7 +7,7 @@ import {
   $convertToMarkdownString,
   TRANSFORMERS,
 } from '@lexical/markdown';
-import { $getRoot, $getSelection } from 'lexical';
+import type { LexicalEditor } from 'lexical';
 
 /**
  * MarkdownPlugin - Enables markdown shortcuts and transformations
@@ -41,7 +41,7 @@ export default function MarkdownPlugin() {
 /**
  * Export current editor content as markdown
  */
-export function exportAsMarkdown(editor: any): string {
+export function exportAsMarkdown(editor: LexicalEditor): string {
   let markdown = '';
   editor.getEditorState().read(() => {
     markdown = $convertToMarkdownString(TRANSFORMERS);
@@ -52,7 +52,7 @@ export function exportAsMarkdown(editor: any): string {
 /**
  * Import markdown content into editor
  */
-export function importMarkdown(editor: any, markdown: string): void {
+export function importMarkdown(editor: LexicalEditor, markdown: string): void {
   editor.update(() => {
     $convertFromMarkdownString(markdown, TRANSFORMERS);
   });
