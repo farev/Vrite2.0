@@ -11,6 +11,7 @@ import {
   User
 } from 'lucide-react';
 import { DeltaApplicator } from '@/lib/deltaApplicator';
+import { createClient } from '@/lib/supabase/client';
 
 interface Message {
   id: string;
@@ -105,6 +106,38 @@ export default function AIAssistantSidebar({
     setIsLoading(true);
 
     try {
+      console.log('[AIAssistant] Starting AI command request...');
+      
+      const supabase = createClient();
+      
+      console.log('[AIAssistant] Getting Supabase session...');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        console.error('[AIAssistant] ❌ Auth Session Missing:', sessionError);
+        throw new Error('Not authenticated. Please log in again.');
+      }
+
+      // DEBUG: Inspect the token before sending
+      try {
+        const payload = JSON.parse(atob(session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        console.log('[AIAssistant] Token Debug Info:');
+        console.log('  - Role:', payload.role);
+        console.log('  - Email:', payload.email);
+        console.log('  - Exp:', new Date(payload.exp * 1000).toLocaleString());
+        
+        if (payload.role === 'anon') {
+          console.error('[AIAssistant] ❌ CRITICAL: Access token has "anon" role! This will be rejected by Edge Functions.');
+        }
+      } catch (e) {
+        console.warn('[AIAssistant] Could not parse token payload for debug');
+      }
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const endpoint = `${supabaseUrl}/functions/v1/ai-command`;
+      
+      console.log('[AIAssistant] Sending POST to:', endpoint);
+      
       // Build conversation history (exclude loading messages and current user message)
       const conversationHistory = messages
         .filter(msg => !msg.isLoading && msg.id !== userMessage.id)
@@ -113,12 +146,7 @@ export default function AIAssistantSidebar({
           content: msg.content,
         }));
 
-      const requestBody: {
-        content: string;
-        instruction: string;
-        conversation_history: { role: string; content: string }[];
-        context_snippets?: string[];
-      } = {
+      const requestBody: any = {
         content: documentContent,
         instruction: inputMessage,
         conversation_history: conversationHistory,
@@ -128,32 +156,46 @@ export default function AIAssistantSidebar({
         requestBody.context_snippets = contextSnippets.map((snippet) => snippet.text);
       }
 
-      // Get auth token for Supabase Edge Function
-      const { createClient } = await import('@/lib/supabase/client');
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        throw new Error('Not authenticated. Please log in to use AI features.');
+      // Check if anon key is available
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!anonKey) {
+        console.warn('[AIAssistant] ⚠️ NEXT_PUBLIC_SUPABASE_ANON_KEY is missing!');
       }
-
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const endpoint = `${supabaseUrl}/functions/v1/ai-command`;
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
+          'apikey': anonKey || '',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
       });
 
+      console.log('[AIAssistant] Response Status:', response.status);
+      
+      // Log headers for debugging (careful with sensitive info)
+      console.log('[AIAssistant] Request headers sent:', {
+        'Authorization': `Bearer ${session.access_token.substring(0, 10)}...`,
+        'apikey': anonKey ? `${anonKey.substring(0, 10)}...` : 'MISSING',
+      });
+
       if (!response.ok) {
-        throw new Error('Failed to get AI response');
+        const errorText = await response.text();
+        console.error('[AIAssistant] ❌ Request failed with status:', response.status);
+        console.error('[AIAssistant] Error response text:', errorText);
+        
+        // Extract x-request-id for Supabase support
+        const requestId = response.headers.get('x-request-id');
+        if (requestId) console.log('[AIAssistant] Supabase Request ID:', requestId);
+        
+        throw new Error(`Edge Function returned ${response.status}: ${errorText}`);
       }
 
+      console.log('[AIAssistant] ✅ Response received, parsing...');
       const data = await response.json();
+      console.log('[AIAssistant] Response type:', data.type);
+      console.log('[AIAssistant] Changes count:', data.changes?.length || 0);
 
       // Handle tool-based changes or fall back to full document
       if (data.type === 'tool_based' && data.changes && data.changes.length > 0) {
@@ -165,18 +207,13 @@ export default function AIAssistantSidebar({
           data.changes
         );
 
-        console.log('Content changed:', suggestedContent !== documentContent);
-
         if (onApplyChanges) {
           // Pass both the suggested content AND the individual changes
           onApplyChanges(suggestedContent, data.changes);
         }
       } else if (onApplyChanges && data.processed_content) {
         // Fallback: full document mode
-        console.log('Using full document fallback mode');
         onApplyChanges(data.processed_content);
-      } else {
-        console.warn('No changes to apply:', data);
       }
 
       // Display reasoning + summary if available
@@ -192,13 +229,47 @@ export default function AIAssistantSidebar({
         )
       );
     } catch (error) {
-      console.error('Error getting AI response:', error);
+      console.error('=== [AIAssistant] Error Getting AI Response ===');
+      console.error('[AIAssistant] ❌ Error:', error);
+      
+      let errorMessage = 'Sorry, I encountered an error processing your request.';
+      
+      // Try to extract more details from Supabase FunctionsHttpError
+      if (error && typeof error === 'object' && 'context' in error) {
+        try {
+          // FunctionsHttpError often has context.json() or similar
+          const errorDetails = error as any;
+          console.error('[AIAssistant] Error context:', errorDetails.context);
+          if (errorDetails.message) {
+            console.error('[AIAssistant] Error message from context:', errorDetails.message);
+          }
+        } catch (e) {
+          console.error('[AIAssistant] Could not parse error context');
+        }
+      }
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Not authenticated') || error.message.includes('Unauthorized')) {
+          errorMessage = '🔒 Authentication error. Please log out and log in again.';
+        } else if (error.message.includes('Rate limit')) {
+          errorMessage = '⏱️ Rate limit exceeded. Please wait a moment before trying again.';
+        } else if (error.message.includes('OpenAI')) {
+          errorMessage = '🤖 AI service error. Please try again in a moment.';
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+          errorMessage = '🌐 Network error. Please check your connection and try again.';
+        } else {
+          errorMessage = `❌ Error: ${error.message}`;
+        }
+      }
+      
+      console.error('[AIAssistant] Displaying error to user:', errorMessage);
+      
       setMessages(prev => 
         prev.map(msg => 
           msg.id === loadingMessage.id 
             ? { 
                 ...msg, 
-                content: 'Sorry, I encountered an error. Please make sure the backend server is running and you have configured your OpenAI API key.',
+                content: errorMessage,
                 isLoading: false
               }
             : msg
@@ -206,6 +277,7 @@ export default function AIAssistantSidebar({
       );
     } finally {
       setIsLoading(false);
+      console.log('[AIAssistant] Request completed');
     }
   };
 

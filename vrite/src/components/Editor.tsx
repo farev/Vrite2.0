@@ -10,6 +10,7 @@ import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import AICommandModal from './AICommandModal';
+import { createClient } from '../lib/supabase/client';
 
 const theme = {
   root: 'editor-root',
@@ -84,26 +85,22 @@ export default function Editor() {
 
   const handleAICommand = async (command: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/command', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const supabase = createClient();
+      const { data, error } = await supabase.functions.invoke('ai-command', {
+        body: {
           content: documentContent,
           instruction: command,
-        }),
+        },
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to process AI command');
+      if (error) {
+        throw new Error(error.message || 'Failed to process AI command');
       }
 
-      const data = await response.json();
-      console.log('AI processed content:', data.processed_content);
+      console.log('AI processed content:', data?.processed_content);
     } catch (error) {
       console.error('Error processing AI command:', error);
-      alert('Failed to process AI command. Make sure the backend server is running.');
+      alert('Failed to process AI command. Please try again.');
     }
   };
 

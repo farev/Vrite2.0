@@ -772,33 +772,17 @@ export default function DocumentEditor({
       // Get auth token for Supabase Edge Function
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
       
-      if (!session) {
-        alert('Please log in to use formatting features.');
-        return;
-      }
-
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const endpoint = `${supabaseUrl}/functions/v1/format-document`;
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const { data, error } = await supabase.functions.invoke('format-document', {
+        body: {
           content: documentContent,
           format_type: formatType,
-        }),
+        },
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to format document');
+      if (error) {
+        throw error;
       }
-
-      const data = await response.json();
 
       // Handle tool-based response (new format)
       if (data.type === 'tool_based' && data.changes) {

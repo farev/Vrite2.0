@@ -12,6 +12,7 @@ import {
   $createTextNode,
 } from 'lexical';
 import { $createAutocompleteNode, $isAutocompleteNode } from '../nodes/AutocompleteNode';
+import { createClient } from '../../lib/supabase/client';
 
 interface AutocompletePluginProps {
   enabled?: boolean;
@@ -95,24 +96,19 @@ export default function AutocompletePlugin({
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/autocomplete', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const supabase = createClient();
+      const { data, error } = await supabase.functions.invoke('autocomplete', {
+        body: {
           context,
           max_tokens: 50,
-        }),
-        signal: abortControllerRef.current.signal,
+        },
       });
 
-      if (!response.ok) {
-        throw new Error('Autocomplete request failed');
+      if (error) {
+        throw new Error(error.message || 'Autocomplete request failed');
       }
 
-      const data = await response.json();
-      const suggestion = data.suggestion || '';
+      const suggestion = data?.completion || '';
 
       if (suggestion) {
         // Insert autocomplete node

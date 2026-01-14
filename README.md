@@ -83,8 +83,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-key
 # Your app URL
 NEXT_PUBLIC_APP_URL=http://localhost:3001
 
-# OpenAI API key
-OPENAI_API_KEY=sk-your-key-here
+# OpenAI API key is now stored in Supabase Vault (see step 4)
 ```
 
 ### 4. Store OpenAI Key in Vault

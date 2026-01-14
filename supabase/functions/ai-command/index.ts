@@ -91,18 +91,30 @@ interface CommandResponse {
 }
 
 Deno.serve(async (req) => {
+  console.log('=== AI Command Function Started ===');
+  console.log('[ai-command] Request method:', req.method);
+  console.log('[ai-command] Request URL:', req.url);
+  
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
+    console.log('[ai-command] Handling CORS preflight request');
     return new Response('ok', { headers: corsHeaders });
   }
   
   try {
+    console.log('[ai-command] Starting authentication verification...');
     // Verify authentication
     const { user, supabase } = await verifyAuth(req);
+    console.log('[ai-command] ✅ Authentication successful for user:', user.id);
+    console.log('[ai-command] User email:', user.email);
     
     // Check rate limit (10 requests per minute)
+    console.log('[ai-command] Checking rate limit for user:', user.id);
     const isAllowed = await checkRateLimit(user.id, 'ai-command', supabase, 10, 60);
+    console.log('[ai-command] Rate limit check result:', isAllowed ? 'ALLOWED' : 'BLOCKED');
+    
     if (!isAllowed) {
+      console.warn('[ai-command] ⚠️ Rate limit exceeded for user:', user.id);
       return new Response(
         JSON.stringify({ error: 'Rate limit exceeded. Please wait before making more requests.' }),
         {
@@ -113,10 +125,18 @@ Deno.serve(async (req) => {
     }
     
     // Parse request body
+    console.log('[ai-command] Parsing request body...');
     const requestData: CommandRequest = await req.json();
     const { content, instruction, conversation_history, context_snippets } = requestData;
     
+    console.log('[ai-command] Request data received:');
+    console.log('  - Content length:', content?.length || 0, 'characters');
+    console.log('  - Instruction:', instruction?.substring(0, 100) || 'MISSING');
+    console.log('  - Conversation history length:', conversation_history?.length || 0);
+    console.log('  - Context snippets:', context_snippets?.length || 0);
+    
     if (!content || !instruction) {
+      console.error('[ai-command] ❌ Missing required fields - content:', !!content, 'instruction:', !!instruction);
       return new Response(
         JSON.stringify({ error: 'Missing required fields: content and instruction' }),
         {
@@ -127,7 +147,9 @@ Deno.serve(async (req) => {
     }
     
     // Get OpenAI client
+    console.log('[ai-command] Retrieving OpenAI configuration...');
     const openaiConfig = await getOpenAIClient();
+    console.log('[ai-command] ✅ OpenAI configuration retrieved successfully');
     
     // Build messages array
     const messages: ChatMessage[] = [];
@@ -137,6 +159,7 @@ Deno.serve(async (req) => {
       role: 'system',
       content: EDITOR_SYSTEM_PROMPT + '\n\n' + FORMATTING_STANDARDS,
     });
+    console.log('[ai-command] Added system message');
     
     // Add conversation history (limit to last 7 exchanges = 14 messages)
     if (conversation_history && conversation_history.length > 0) {
@@ -145,6 +168,7 @@ Deno.serve(async (req) => {
         role: msg.role as 'user' | 'assistant',
         content: msg.content,
       })));
+      console.log('[ai-command] Added', recentHistory.length, 'conversation history messages');
     }
     
     // Add current request with context
@@ -154,6 +178,7 @@ Deno.serve(async (req) => {
       if (cleanedSnippets.length > 0) {
         const formattedSnippets = cleanedSnippets.map(s => `- ${s}`).join('\n');
         contextText = `Priority context from the user:\n${formattedSnippets}\n\n`;
+        console.log('[ai-command] Added', cleanedSnippets.length, 'context snippets');
       }
     }
     
@@ -161,8 +186,10 @@ Deno.serve(async (req) => {
       role: 'user',
       content: `${contextText}Document content:\n${content}\n\nUser instruction: ${instruction}\n\nUse the replace_text tool to make changes (remember to use markdown for formatting), then provide reasoning and summary.`,
     });
+    console.log('[ai-command] Total messages prepared:', messages.length);
     
     // Make OpenAI API call
+    console.log('[ai-command] Making OpenAI API call with model: gpt-4o-mini');
     const response = await createChatCompletion(openaiConfig, {
       model: 'gpt-4o-mini',
       messages,
@@ -171,9 +198,11 @@ Deno.serve(async (req) => {
       max_tokens: 2000,
       temperature: 0.3,
     });
+    console.log('[ai-command] ✅ OpenAI API call completed successfully');
     
     const message = response.choices[0].message;
     const toolCalls = message.tool_calls || [];
+    console.log('[ai-command] Tool calls received:', toolCalls.length);
     
     // Convert tool calls to changes
     const changes: DeltaChange[] = [];
@@ -184,14 +213,17 @@ Deno.serve(async (req) => {
           old_text: args.old_text || '',
           new_text: args.new_text || '',
         });
+        console.log('[ai-command] Tool call:', toolCall.function.name, '- old_text length:', args.old_text?.length, 'new_text length:', args.new_text?.length);
       }
     }
+    console.log('[ai-command] Total changes extracted:', changes.length);
     
     // Get final response with reasoning and summary
     let reasoning = '';
     let summary = '';
     
     if (toolCalls.length > 0) {
+      console.log('[ai-command] Processing tool calls for reasoning and summary...');
       // Add tool call and responses to messages
       messages.push({
         role: 'assistant',
@@ -212,6 +244,7 @@ Deno.serve(async (req) => {
         content: 'Now provide your reasoning and summary in JSON format with fields: reasoning, summary',
       });
       
+      console.log('[ai-command] Requesting final reasoning/summary from OpenAI...');
       const finalResponse = await createChatCompletion(openaiConfig, {
         model: 'gpt-4o-mini',
         messages,
@@ -223,9 +256,13 @@ Deno.serve(async (req) => {
       const result = JSON.parse(finalResponse.choices[0].message.content || '{}');
       reasoning = result.reasoning || '';
       summary = result.summary || 'Changes applied.';
+      console.log('[ai-command] Reasoning:', reasoning?.substring(0, 100));
+      console.log('[ai-command] Summary:', summary?.substring(0, 100));
     } else {
       // No tool calls - fallback
+      console.log('[ai-command] No tool calls, using fallback mode');
       summary = message.content || 'Changes applied.';
+      console.log('[ai-command] Fallback summary:', summary?.substring(0, 100));
     }
     
     // Return response
@@ -243,16 +280,33 @@ Deno.serve(async (req) => {
           reasoning,
         };
     
+    console.log('[ai-command] Response type:', responseData.type);
+    console.log('[ai-command] Response changes count:', changes.length);
+    console.log('[ai-command] ✅ Request completed successfully');
+    console.log('=== AI Command Function Completed ===');
+    
     return new Response(JSON.stringify(responseData), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
     
   } catch (error) {
-    console.error('AI command error:', error);
+    console.error('=== AI Command Function ERROR ===');
+    console.error('[ai-command] ❌ Error type:', error?.constructor?.name);
+    console.error('[ai-command] ❌ Error message:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('[ai-command] ❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    console.error('[ai-command] ❌ Full error object:', JSON.stringify(error, null, 2));
+    
+    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
+    const statusCode = errorMessage.includes('Unauthorized') || errorMessage.includes('authorization') ? 401 : 500;
+    
+    console.error('[ai-command] Returning error response with status:', statusCode);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Internal server error' }),
+      JSON.stringify({ 
+        error: errorMessage,
+        details: error instanceof Error ? error.stack : undefined
+      }),
       {
-        status: 500,
+        status: statusCode,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
