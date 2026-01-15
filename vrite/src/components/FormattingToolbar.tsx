@@ -286,17 +286,16 @@ export default function FormattingToolbar({
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        // Remove all text formats
-        selection.formatText(0);
-        
-        // Clear inline styles from text nodes
+        // Clear formatting from text nodes
         const nodes = selection.getNodes();
         nodes.forEach((node) => {
           if ($isTextNode(node)) {
+            // Clear all formatting by setting format to 0
+            node.setFormat(0);
             node.setStyle('');
           }
         });
-        
+
         // Reset block to paragraph
         $setBlocksType(selection, () => $createParagraphNode());
       }
