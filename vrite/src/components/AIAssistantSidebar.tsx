@@ -13,6 +13,7 @@ import {
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
 import { createClient } from '@/lib/supabase/client';
+import { DeltaApplicator } from '@/lib/deltaApplicator';
 
 interface Message {
   id: string;
@@ -32,6 +33,9 @@ interface AIAssistantSidebarProps {
   onToggle: () => void;
   getSimplifiedDocument: () => SimplifiedDocument;
   onApplyLexicalChanges?: (changes: LexicalChange[]) => void;
+  // Legacy props for backward compatibility with Delta-based changes
+  documentContent?: string;
+  onApplyChanges?: (content: string, changes?: any[]) => void;
   isDiffModeActive?: boolean;
   onAcceptAllChanges?: () => void;
   onRejectAllChanges?: () => void;
@@ -45,6 +49,8 @@ export default function AIAssistantSidebar({
   onToggle,
   getSimplifiedDocument,
   onApplyLexicalChanges,
+  documentContent,
+  onApplyChanges,
   isDiffModeActive = false,
   onAcceptAllChanges,
   onRejectAllChanges,
@@ -145,8 +151,13 @@ export default function AIAssistantSidebar({
       // Get the document as simplified Lexical JSON
       const simplifiedDocument = getSimplifiedDocument();
 
+      // Use provided documentContent or convert Lexical document to plain text for Supabase Edge Function
+      const contentForAPI = documentContent || simplifiedDocument.blocks
+        .map(block => block.content || '')
+        .join('\n\n');
+
       const requestBody = {
-        document: simplifiedDocument,
+        content: contentForAPI,
         instruction: inputMessage,
         conversation_history: conversationHistory,
         context_snippets: contextSnippets.length > 0
@@ -200,18 +211,25 @@ export default function AIAssistantSidebar({
       console.log('[AIAssistant] Response type:', data.type);
       console.log('[AIAssistant] Changes count:', data.changes?.length || 0);
 
-      // Handle Lexical-based changes
-      if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
-        console.log('Received Lexical changes:', data.changes);
+      // Handle tool-based changes from Supabase Edge Function
+      if (data.type === 'tool_based' && data.changes && data.changes.length > 0) {
+        console.log('Received tool-based changes:', data.changes);
 
-        if (onApplyLexicalChanges) {
-          onApplyLexicalChanges(data.changes);
+        // For now, apply changes using the document editor's diff mode
+        // TODO: Convert DeltaChanges to LexicalChanges when Edge Function is updated
+        if (onApplyChanges) {
+          // Apply the changes to the document content and show diffs
+          const updatedContent = DeltaApplicator.applyDeltas(contentForAPI, data.changes);
+          onApplyChanges(updatedContent, data.changes);
         }
-      } else if (data.type === 'no_changes') {
-        console.log('No changes needed:', data.summary);
+      } else if (data.type === 'full' && data.processed_content) {
+        console.log('Received full document update');
+
+        if (onApplyChanges) {
+          onApplyChanges(data.processed_content);
+        }
       } else {
-        console.warn('Unexpected response type:', data);
-      }
+        console.warn('No changes or unexpected response type:', data.type);
       }
 
       // Display reasoning + summary if available
