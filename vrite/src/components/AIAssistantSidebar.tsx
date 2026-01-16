@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
+import config from '@/lib/config';
 
 interface Message {
   id: string;
@@ -126,7 +127,7 @@ export default function AIAssistantSidebar({
         instruction: inputMessage,
       });
 
-      const response = await fetch('http://localhost:8000/api/command/v2', {
+      const response = await fetch(`${config.backendApiUrl}/api/command/v2`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

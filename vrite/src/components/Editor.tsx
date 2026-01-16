@@ -10,6 +10,7 @@ import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import AICommandModal from './AICommandModal';
+import config from '@/lib/config';
 
 const theme = {
   root: 'editor-root',
@@ -84,7 +85,7 @@ export default function Editor() {
 
   const handleAICommand = async (command: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/command', {
+      const response = await fetch(`${config.backendApiUrl}/api/command`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

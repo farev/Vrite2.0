@@ -13,6 +13,7 @@ import {
   type LexicalNode,
 } from 'lexical';
 import { $createAutocompleteNode, $isAutocompleteNode } from '../nodes/AutocompleteNode';
+import config from '@/lib/config';
 
 interface AutocompletePluginProps {
   enabled?: boolean;
@@ -96,7 +97,7 @@ export default function AutocompletePlugin({
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/api/autocomplete', {
+      const response = await fetch(`${config.backendApiUrl}/api/autocomplete`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

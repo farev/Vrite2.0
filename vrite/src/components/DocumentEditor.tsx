@@ -56,6 +56,7 @@ import PaginationPlugin from './plugins/PaginationPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
+import config from '@/lib/config';
 import { PageBreakNode } from './nodes/PageBreakNode';
 import {
   saveDocument,
@@ -735,7 +736,7 @@ export default function DocumentEditor({
 
   const handleFormatDocument = async (formatType: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/format', {
+      const response = await fetch(`${config.backendApiUrl}/api/format`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
