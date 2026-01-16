@@ -11,7 +11,7 @@ import {
   type SerializedLexicalNode,
   type Spread,
 } from 'lexical';
-import { Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Edit2, Check, X } from 'lucide-react';
 
 export type SerializedEquationNode = Spread<
@@ -26,7 +26,7 @@ export type SerializedEquationNode = Spread<
  * EquationNode - Renders LaTeX equations using KaTeX
  * Note: KaTeX is loaded dynamically to avoid SSR issues
  */
-export class EquationNode extends DecoratorNode<ReactElement> {
+export class EquationNode extends DecoratorNode<JSX.Element> {
   __equation: string;
   __inline: boolean;
 
@@ -80,7 +80,7 @@ export class EquationNode extends DecoratorNode<ReactElement> {
     writable.__equation = equation;
   }
 
-  decorate(): ReactElement {
+  decorate(): JSX.Element {
     return (
       <Suspense fallback={<span>Loading equation...</span>}>
         <EquationComponent
@@ -163,7 +163,7 @@ function EquationComponent({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(equation);
-  const [katex, setKatex] = useState<typeof import('katex').default | null>(null);
+  const [katex, setKatex] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -192,7 +192,7 @@ function EquationComponent({
 
   const handleSave = useCallback(() => {
     // Update the node
-    const editor = (window as unknown as { __lexicalEditor?: { update: (cb: () => void) => void; getEditorState: () => { _nodeMap: Map<string, LexicalNode> } } }).__lexicalEditor;
+    const editor = (window as any).__lexicalEditor;
     if (editor) {
       editor.update(() => {
         const node = editor.getEditorState()._nodeMap.get(nodeKey);

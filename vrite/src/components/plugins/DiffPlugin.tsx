@@ -8,22 +8,20 @@ import {
   $getNodeByKey,
   type NodeKey,
   type LexicalNode,
-  type TextNode,
 } from 'lexical';
-import { $convertFromMarkdownString, $convertToMarkdownString, TRANSFORMERS } from '@lexical/markdown';
-import { DiffNode, $createDiffNode, $isDiffNode } from '../nodes/DiffNode';
-import { parseMarkdown } from '@/lib/markdownParser';
+import { $convertToMarkdownString, TRANSFORMERS } from '@lexical/markdown';
+import { DiffNode, $isDiffNode } from '../nodes/DiffNode';
+import { buildBlockKeyMap } from '@/lib/lexicalSerializer';
+import { applyChangesWithDiff, type LexicalChange } from '@/lib/lexicalChangeApplicator';
 
 interface DiffPluginProps {
-  originalContent: string | null;
-  suggestedContent: string | null;
+  changes: LexicalChange[] | null;
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
 }
 
 export default function DiffPlugin({
-  originalContent,
-  suggestedContent,
+  changes,
   onDiffComplete,
   onAllResolved,
 }: DiffPluginProps) {
@@ -51,7 +49,6 @@ export default function DiffPlugin({
     checkNode(root);
 
     if (!hasDiffNodes && onAllResolved) {
-      // Serialize current editor state to markdown (preserves formatting)
       const markdownContent = $convertToMarkdownString(TRANSFORMERS);
       onAllResolved(markdownContent);
     }
@@ -66,20 +63,12 @@ export default function DiffPlugin({
           const text = node.getText();
           const nodeData = node.exportJSON();
 
-          // Create formatted text node
           const textNode = $createTextNode(text);
-
-          // Apply formatting
-          if (nodeData.isBold) {
-            textNode.toggleFormat('bold');
-          }
-          if (nodeData.isItalic) {
-            textNode.toggleFormat('italic');
-          }
+          if (nodeData.isBold) textNode.toggleFormat('bold');
+          if (nodeData.isItalic) textNode.toggleFormat('italic');
 
           node.replace(textNode);
         }
-
         checkAllResolved();
       });
     },
@@ -93,15 +82,32 @@ export default function DiffPlugin({
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
           const originalText = node.getOriginalText();
+          const diffType = node.getDiffType();
 
-          if (originalText) {
-            const textNode = $createTextNode(originalText);
-            node.replace(textNode);
+          if (diffType === 'addition') {
+            if (originalText) {
+              // Replacement - restore original text
+              const textNode = $createTextNode(originalText);
+              node.replace(textNode);
+            } else {
+              // New content with no original - remove entirely
+              const parent = node.getParent();
+              node.remove();
+              // Remove empty parent if needed
+              if (parent && parent.getTextContent().trim() === '') {
+                parent.remove();
+              }
+            }
           } else {
-            node.remove();
+            // Deletion - restore the deleted content
+            if (originalText) {
+              const textNode = $createTextNode(originalText);
+              node.replace(textNode);
+            } else {
+              node.remove();
+            }
           }
         }
-
         checkAllResolved();
       });
     },
@@ -113,78 +119,31 @@ export default function DiffPlugin({
     DiffNode.setCallbacks(handleAccept, handleReject);
   }, [handleAccept, handleReject]);
 
-  // Apply changes with inline diffs
+  // Apply changes when received
   useEffect(() => {
-    if (originalContent === null || suggestedContent === null) {
+    if (!changes || changes.length === 0) {
       return;
     }
 
     editor.update(() => {
       const root = $getRoot();
-      root.clear();
 
-      // First, apply original content to get baseline
-      $convertFromMarkdownString(originalContent, TRANSFORMERS);
+      // Build block ID to node key mapping
+      const blockKeyMap = buildBlockKeyMap(root);
 
-      // Get the changes from the backend (stored in window)
-      const changes = (window as unknown as Record<string, unknown>).__vriteChanges as Array<{old_text: string, new_text: string}> | undefined;
+      console.log('Applying Lexical changes:', changes);
+      console.log('Block key map:', blockKeyMap);
 
-      if (changes && changes.length > 0) {
-        console.log('Applying inline diffs for changes:', changes);
+      // Apply changes with diff highlighting
+      applyChangesWithDiff(changes, blockKeyMap);
 
-        // Walk through all text nodes and find matches for old_text
-        const textNodes: TextNode[] = [];
-        root.getChildren().forEach((child) => {
-          if ('getChildren' in child && typeof child.getChildren === 'function') {
-            const descendants = child.getChildren() as LexicalNode[];
-            descendants.forEach((desc) => {
-              if (desc.getType() === 'text') {
-                textNodes.push(desc as TextNode);
-              }
-            });
-          }
-        });
-
-        // For each change, find and replace with DiffNode
-        changes.forEach((change) => {
-          const { old_text, new_text } = change;
-
-          // Parse markdown from new_text to get formatting
-          const parsed = parseMarkdown(new_text);
-
-          // Find text node containing old_text
-          for (const textNode of textNodes) {
-            const nodeText = textNode.getTextContent();
-            if (nodeText.includes(old_text)) {
-              // Create a diff node showing the formatted change
-              const diffNode = $createDiffNode(
-                'addition',
-                parsed.text,
-                old_text,
-                parsed.isBold,
-                parsed.isItalic,
-                parsed.headingLevel
-              );
-
-              // Replace the text node with diff node
-              textNode.replace(diffNode);
-              break;
-            }
-          }
-        });
-      } else {
-        // No specific changes, just apply suggested content
-        root.clear();
-        $convertFromMarkdownString(suggestedContent, TRANSFORMERS);
-      }
-
-      console.log('Applied changes with inline diffs');
+      console.log('Applied Lexical changes with inline diffs');
 
       if (onDiffComplete) {
         onDiffComplete();
       }
     });
-  }, [editor, originalContent, suggestedContent, onDiffComplete]);
+  }, [editor, changes, onDiffComplete]);
 
   return null;
 }

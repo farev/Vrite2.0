@@ -51,17 +51,23 @@ import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
 import DiffPlugin from './plugins/DiffPlugin';
 import ClipboardPlugin from './plugins/ClipboardPlugin';
-import PaginationPlugin from './plugins/PaginationPlugin';
 import AutocompletePlugin from './plugins/AutocompletePlugin';
+import PaginationPlugin from './plugins/PaginationPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
+import { PageBreakNode } from './nodes/PageBreakNode';
 import {
   saveDocument,
   loadDocument,
   AUTO_SAVE_INTERVAL,
   type DocumentData,
 } from '../lib/storage';
+import {
+  serializeLexicalToSimplified,
+  type SimplifiedDocument,
+} from '../lib/lexicalSerializer';
+import type { LexicalChange } from '../lib/lexicalChangeApplicator';
 
 const theme = {
   root: 'document-editor-root',
@@ -110,6 +116,7 @@ const createInitialConfig = (savedEditorState?: string) => ({
     DiffNode,
     EquationNode,
     AutocompleteNode,
+    PageBreakNode,
   ],
   editorState: savedEditorState,
 });
@@ -378,45 +385,6 @@ function SelectionContextPopover({
   );
 }
 
-function DocumentPage({ 
-  children, 
-  pageNumber,
-  margins = { top: 72, right: 72, bottom: 72, left: 72 },
-  width,
-  height,
-}: { 
-  children: React.ReactNode; 
-  pageNumber: number;
-  margins?: { top: number; right: number; bottom: number; left: number };
-  width: number;
-  height: number;
-}) {
-  return (
-    <div 
-      className="document-page"
-      style={{
-        width: `${width}px`,
-        height: `${height}px`,
-      }}
-    >
-      <div 
-        className="document-page-content"
-        style={{
-          paddingTop: `${margins.top}pt`,
-          paddingRight: `${margins.right}pt`,
-          paddingBottom: `${margins.bottom}pt`,
-          paddingLeft: `${margins.left}pt`,
-        }}
-      >
-        {children}
-      </div>
-      <div className="document-page-footer">
-        <span className="document-page-number">Page {pageNumber}</span>
-      </div>
-    </div>
-  );
-}
-
 // Page size presets (width x height in pixels at 96 DPI)
 const PAGE_SIZES = {
   letter: { width: 816, height: 1056, label: 'Letter (8.5" × 11")' },
@@ -424,6 +392,11 @@ const PAGE_SIZES = {
   legal: { width: 816, height: 1344, label: 'Legal (8.5" × 14")' },
   tabloid: { width: 1056, height: 1632, label: 'Tabloid (11" × 17")' },
 };
+
+// Constants for pagination
+const PAGE_GAP = 24; // Gap between pages in pixels
+const PT_TO_PX = 1.333; // Convert points to pixels (1pt = 1.333px at 96 DPI)
+const PAGE_FOOTER_HEIGHT_PX = 40; // Footer height in pixels
 
 interface DocumentEditorProps {
   documentTitle: string;
@@ -446,7 +419,6 @@ export default function DocumentEditor({
   const [documentContent, setDocumentContent] = useState('');
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
   const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
-  const [pageCount, setPageCount] = useState(1);
   const [pageSize, setPageSize] = useState<keyof typeof PAGE_SIZES>('letter');
   const [documentMargins, setDocumentMargins] = useState({
     top: 72,
@@ -458,6 +430,8 @@ export default function DocumentEditor({
   const [isDiffModeActive, setIsDiffModeActive] = useState(false);
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   const [suggestedContent, setSuggestedContent] = useState<string | null>(null);
+  const [pendingChanges, setPendingChanges] = useState<LexicalChange[] | null>(null);
+  const [pageCount, setPageCount] = useState(1);
   const [editorRef, setEditorRef] = useState<LexicalEditor | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
@@ -467,6 +441,46 @@ export default function DocumentEditor({
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const currentPageSize = PAGE_SIZES[pageSize];
+  const pageStackHeight = useMemo(() => {
+    if (pageCount <= 1) {
+      return currentPageSize.height;
+    }
+    return pageCount * currentPageSize.height + (pageCount - 1) * PAGE_GAP;
+  }, [currentPageSize.height, pageCount]);
+
+  const marginsInPx = useMemo(() => ({
+    top: documentMargins.top * PT_TO_PX,
+    right: documentMargins.right * PT_TO_PX,
+    bottom: documentMargins.bottom * PT_TO_PX,
+    left: documentMargins.left * PT_TO_PX,
+  }), [documentMargins]);
+
+  const pageContentHeight = useMemo(
+    () => currentPageSize.height - marginsInPx.top - marginsInPx.bottom - PAGE_FOOTER_HEIGHT_PX,
+    [currentPageSize.height, marginsInPx.bottom, marginsInPx.top]
+  );
+
+  const editorWrapperStyle = useMemo(
+    () =>
+      ({
+        '--page-width': `${currentPageSize.width}px`,
+        '--page-height': `${currentPageSize.height}px`,
+        '--page-gap': `${PAGE_GAP}px`,
+        '--page-content-height': `${Math.max(pageContentHeight, 0)}px`,
+        minHeight: `${pageStackHeight}px`,
+      }) as CSSProperties,
+    [currentPageSize.height, currentPageSize.width, pageContentHeight, pageStackHeight]
+  );
+
+  const editorSurfaceStyle = useMemo(
+    () => ({
+      paddingTop: `${documentMargins.top}pt`,
+      paddingRight: `${documentMargins.right}pt`,
+      paddingBottom: `${documentMargins.bottom}pt`,
+      paddingLeft: `${documentMargins.left}pt`,
+    }),
+    [documentMargins]
+  );
   
   // Detect title changes
   useEffect(() => {
@@ -601,6 +615,29 @@ export default function DocumentEditor({
     setIsAISidebarOpen(true);
   }, []);
 
+  // Get simplified document for AI sidebar (Lexical JSON format)
+  const getSimplifiedDocument = useCallback((): SimplifiedDocument => {
+    if (!editorRef) {
+      return { blocks: [] };
+    }
+
+    let doc: SimplifiedDocument = { blocks: [] };
+
+    editorRef.getEditorState().read(() => {
+      const root = $getRoot();
+      doc = serializeLexicalToSimplified(root);
+    });
+
+    return doc;
+  }, [editorRef]);
+
+  // Handle Lexical-based changes from AI (V2 API)
+  const handleApplyLexicalChanges = useCallback((changes: LexicalChange[]) => {
+    console.log('Applying Lexical changes:', changes);
+    setPendingChanges(changes);
+    setIsDiffModeActive(true);
+  }, []);
+
   const handleDocumentScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const scrollTop = event.currentTarget.scrollTop;
     const isAtTop = scrollTop <= 1;
@@ -641,18 +678,17 @@ export default function DocumentEditor({
     setIsDiffModeActive(false);
     setOriginalContent(null);
     setSuggestedContent(null);
+    setPendingChanges(null);
     setDocumentContent(finalContent);
   }, [editorRef]);
 
   const handleAcceptAllChanges = useCallback(() => {
     // Accept all changes - find all DiffNodes and accept them
-    // Note: DiffPlugin operates on plain text for now. Future enhancement:
-    // have AI backend return Lexical JSON to preserve formatting.
     if (editorRef) {
       editorRef.update(() => {
         const root = $getRoot();
         const allNodes: LexicalNode[] = [];
-        
+
         // Collect all nodes
         const collectNodes = (node: LexicalNode) => {
           allNodes.push(node);
@@ -662,15 +698,19 @@ export default function DocumentEditor({
           }
         };
         collectNodes(root);
-        
+
         // Accept all diff nodes
         allNodes.forEach((node) => {
           if ($isDiffNode(node)) {
             const diffType = node.getDiffType();
             const text = node.getText();
-            
+            const nodeData = node.exportJSON();
+
             if (diffType === 'addition') {
               const textNode = $createTextNode(text);
+              // Apply formatting from the diff node
+              if (nodeData.isBold) textNode.toggleFormat('bold');
+              if (nodeData.isItalic) textNode.toggleFormat('italic');
               node.replace(textNode);
             } else {
               node.remove();
@@ -687,6 +727,7 @@ export default function DocumentEditor({
     setIsDiffModeActive(false);
     setOriginalContent(null);
     setSuggestedContent(null);
+    setPendingChanges(null);
   }, [editorRef, suggestedContent]);
 
   const handleRejectAllChanges = useCallback(() => {
@@ -738,6 +779,7 @@ export default function DocumentEditor({
     setIsDiffModeActive(false);
     setOriginalContent(null);
     setSuggestedContent(null);
+    setPendingChanges(null);
   }, [editorRef, originalContent]);
 
   const handleAcceptChanges = (content: string) => {
@@ -884,28 +926,17 @@ export default function DocumentEditor({
                 className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
                 onScroll={handleDocumentScroll}
               >
-                <div className="document-editor-wrapper" style={{ position: 'relative' }}>
-                  <div className="document-pages-container">
-                    {/* Render all pages */}
-                    {Array.from({ length: pageCount }, (_, i) => (
-                      <DocumentPage 
-                        key={i} 
-                        pageNumber={i + 1} 
-                        margins={documentMargins}
-                        width={currentPageSize.width}
-                        height={currentPageSize.height}
-                      >
-                        {i === 0 && (
-                          <div className="document-editor-surface">
-                            <RichTextPlugin
-                              contentEditable={<ContentEditable className="document-content-editable" />}
-                              placeholder={null}
-                              ErrorBoundary={LexicalErrorBoundary}
-                            />
-                          </div>
-                        )}
-                      </DocumentPage>
-                    ))}
+                <div className="document-editor-wrapper" style={editorWrapperStyle}>
+                  <div className="document-page">
+                    <div className="document-page-content" style={editorSurfaceStyle}>
+                      <div className="document-editor-surface">
+                        <RichTextPlugin
+                          contentEditable={<ContentEditable className="document-content-editable" />}
+                          placeholder={null}
+                          ErrorBoundary={LexicalErrorBoundary}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <MyOnChangePlugin onChange={handleEditorChange} />
@@ -921,14 +952,15 @@ export default function DocumentEditor({
                   <PaginationPlugin
                     pageHeight={currentPageSize.height}
                     pageWidth={currentPageSize.width}
-                    margins={documentMargins}
+                    margins={marginsInPx}
+                    pageGap={PAGE_GAP}
+                    footerHeight={PAGE_FOOTER_HEIGHT_PX}
                     onPageCountChange={setPageCount}
                   />
 
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}
                   <DiffPlugin
-                    originalContent={originalContent}
-                    suggestedContent={suggestedContent}
+                    changes={pendingChanges}
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
                   />
@@ -949,8 +981,8 @@ export default function DocumentEditor({
         <AIAssistantSidebar
           isOpen={isAISidebarOpen}
           onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
-          documentContent={documentContent}
-          onApplyChanges={handleApplyChanges}
+          getSimplifiedDocument={getSimplifiedDocument}
+          onApplyLexicalChanges={handleApplyLexicalChanges}
           contextSnippets={contextSnippets}
           onRemoveContextSnippet={handleRemoveContextSnippet}
           onClearContextSnippets={handleClearContextSnippets}

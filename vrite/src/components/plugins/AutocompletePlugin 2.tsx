@@ -10,10 +10,8 @@ import {
   KEY_TAB_COMMAND,
   KEY_ESCAPE_COMMAND,
   $createTextNode,
-  type LexicalNode,
 } from 'lexical';
 import { $createAutocompleteNode, $isAutocompleteNode } from '../nodes/AutocompleteNode';
-import { createClient } from '../../lib/supabase/client';
 
 interface AutocompletePluginProps {
   enabled?: boolean;
@@ -38,17 +36,17 @@ export default function AutocompletePlugin({
   const clearAutocomplete = useCallback(() => {
     editor.update(() => {
       const root = $getRoot();
-      const allNodes: LexicalNode[] = [];
-
-      const collectNodes = (node: LexicalNode) => {
+      const allNodes: any[] = [];
+      
+      const collectNodes = (node: any) => {
         allNodes.push(node);
         if ('getChildren' in node && typeof node.getChildren === 'function') {
-          const children = node.getChildren() as LexicalNode[];
+          const children = node.getChildren();
           children.forEach(collectNodes);
         }
       };
       collectNodes(root);
-
+      
       allNodes.forEach((node) => {
         if ($isAutocompleteNode(node)) {
           node.remove();
@@ -61,17 +59,17 @@ export default function AutocompletePlugin({
   const acceptSuggestion = useCallback(() => {
     editor.update(() => {
       const root = $getRoot();
-      const allNodes: LexicalNode[] = [];
-
-      const collectNodes = (node: LexicalNode) => {
+      const allNodes: any[] = [];
+      
+      const collectNodes = (node: any) => {
         allNodes.push(node);
         if ('getChildren' in node && typeof node.getChildren === 'function') {
-          const children = node.getChildren() as LexicalNode[];
+          const children = node.getChildren();
           children.forEach(collectNodes);
         }
       };
       collectNodes(root);
-
+      
       // Find autocomplete node
       const autocompleteNode = allNodes.find($isAutocompleteNode);
       if (autocompleteNode) {
@@ -97,19 +95,24 @@ export default function AutocompletePlugin({
     setIsLoading(true);
 
     try {
-      const supabase = createClient();
-      const { data, error } = await supabase.functions.invoke('autocomplete', {
-        body: {
+      const response = await fetch('http://localhost:8000/api/autocomplete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           context,
           max_tokens: 50,
-        },
+        }),
+        signal: abortControllerRef.current.signal,
       });
 
-      if (error) {
-        throw new Error(error.message || 'Autocomplete request failed');
+      if (!response.ok) {
+        throw new Error('Autocomplete request failed');
       }
 
-      const suggestion = data?.completion || '';
+      const data = await response.json();
+      const suggestion = data.suggestion || '';
 
       if (suggestion) {
         // Insert autocomplete node
@@ -121,8 +124,8 @@ export default function AutocompletePlugin({
           }
         });
       }
-    } catch (error) {
-      if (error instanceof Error && error.name !== 'AbortError') {
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
         console.error('Autocomplete error:', error);
       }
     } finally {
@@ -179,17 +182,17 @@ export default function AutocompletePlugin({
       (event) => {
         const hasAutocomplete = editor.getEditorState().read(() => {
           const root = $getRoot();
-          const allNodes: LexicalNode[] = [];
-
-          const collectNodes = (node: LexicalNode) => {
+          const allNodes: any[] = [];
+          
+          const collectNodes = (node: any) => {
             allNodes.push(node);
             if ('getChildren' in node && typeof node.getChildren === 'function') {
-              const children = node.getChildren() as LexicalNode[];
+              const children = node.getChildren();
               children.forEach(collectNodes);
             }
           };
           collectNodes(root);
-
+          
           return allNodes.some($isAutocompleteNode);
         });
 

@@ -1,6 +1,5 @@
 'use client';
 
-import type { ReactElement } from 'react';
 import {
   DecoratorNode,
   type DOMConversionMap,
@@ -22,7 +21,7 @@ export type SerializedAutocompleteNode = Spread<
 /**
  * AutocompleteNode - Displays ghost text suggestions
  */
-export class AutocompleteNode extends DecoratorNode<ReactElement> {
+export class AutocompleteNode extends DecoratorNode<JSX.Element> {
   __suggestion: string;
 
   static getType(): string {
@@ -64,7 +63,7 @@ export class AutocompleteNode extends DecoratorNode<ReactElement> {
     return this.__suggestion;
   }
 
-  decorate(): ReactElement {
+  decorate(): JSX.Element {
     return (
       <span className="autocomplete-ghost-text">
         {this.__suggestion}

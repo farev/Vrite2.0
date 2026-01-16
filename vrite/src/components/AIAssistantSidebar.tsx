@@ -10,7 +10,8 @@ import {
   Check,
   User
 } from 'lucide-react';
-import { DeltaApplicator } from '@/lib/deltaApplicator';
+import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
+import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
 import { createClient } from '@/lib/supabase/client';
 
 interface Message {
@@ -26,16 +27,11 @@ export interface ContextSnippet {
   text: string;
 }
 
-interface DeltaChange {
-  old_text: string;
-  new_text: string;
-}
-
 interface AIAssistantSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
-  documentContent: string;
-  onApplyChanges?: (content: string, changes?: DeltaChange[]) => void;
+  getSimplifiedDocument: () => SimplifiedDocument;
+  onApplyLexicalChanges?: (changes: LexicalChange[]) => void;
   isDiffModeActive?: boolean;
   onAcceptAllChanges?: () => void;
   onRejectAllChanges?: () => void;
@@ -44,11 +40,11 @@ interface AIAssistantSidebarProps {
   onClearContextSnippets?: () => void;
 }
 
-export default function AIAssistantSidebar({ 
-  isOpen, 
-  onToggle, 
-  documentContent,
-  onApplyChanges,
+export default function AIAssistantSidebar({
+  isOpen,
+  onToggle,
+  getSimplifiedDocument,
+  onApplyLexicalChanges,
   isDiffModeActive = false,
   onAcceptAllChanges,
   onRejectAllChanges,
@@ -146,15 +142,22 @@ export default function AIAssistantSidebar({
           content: msg.content,
         }));
 
-      const requestBody: any = {
-        content: documentContent,
+      // Get the document as simplified Lexical JSON
+      const simplifiedDocument = getSimplifiedDocument();
+
+      const requestBody = {
+        document: simplifiedDocument,
         instruction: inputMessage,
         conversation_history: conversationHistory,
+        context_snippets: contextSnippets.length > 0
+          ? contextSnippets.map((snippet) => snippet.text)
+          : undefined,
       };
 
-      if (contextSnippets.length > 0) {
-        requestBody.context_snippets = contextSnippets.map((snippet) => snippet.text);
-      }
+      console.log('Sending to V2 API:', {
+        blockCount: simplifiedDocument.blocks.length,
+        instruction: inputMessage,
+      });
 
       // Check if anon key is available
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -197,23 +200,18 @@ export default function AIAssistantSidebar({
       console.log('[AIAssistant] Response type:', data.type);
       console.log('[AIAssistant] Changes count:', data.changes?.length || 0);
 
-      // Handle tool-based changes or fall back to full document
-      if (data.type === 'tool_based' && data.changes && data.changes.length > 0) {
-        // Apply markdown text replacements
-        console.log('Received tool-based changes:', data.changes);
+      // Handle Lexical-based changes
+      if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
+        console.log('Received Lexical changes:', data.changes);
 
-        const suggestedContent = DeltaApplicator.applyDeltas(
-          documentContent,
-          data.changes
-        );
-
-        if (onApplyChanges) {
-          // Pass both the suggested content AND the individual changes
-          onApplyChanges(suggestedContent, data.changes);
+        if (onApplyLexicalChanges) {
+          onApplyLexicalChanges(data.changes);
         }
-      } else if (onApplyChanges && data.processed_content) {
-        // Fallback: full document mode
-        onApplyChanges(data.processed_content);
+      } else if (data.type === 'no_changes') {
+        console.log('No changes needed:', data.summary);
+      } else {
+        console.warn('Unexpected response type:', data);
+      }
       }
 
       // Display reasoning + summary if available
