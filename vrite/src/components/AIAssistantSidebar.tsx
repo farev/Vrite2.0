@@ -153,7 +153,7 @@ export default function AIAssistantSidebar({
 
       // Use provided documentContent or convert Lexical document to plain text for Supabase Edge Function
       const contentForAPI = documentContent || simplifiedDocument.blocks
-        .map(block => block.content || '')
+        .map(block => block.segments.map(seg => seg.text).join(''))
         .join('\n\n');
 
       const requestBody = {

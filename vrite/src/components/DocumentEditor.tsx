@@ -814,7 +814,7 @@ export default function DocumentEditor({
       // Get auth token for Supabase Edge Function
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
-      
+
       const { data, error } = await supabase.functions.invoke('format-document', {
         body: {
           content: documentContent,
