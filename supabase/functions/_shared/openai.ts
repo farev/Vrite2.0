@@ -1,5 +1,3 @@
-import { createSupabaseClient } from './supabase.ts';
-
 export interface OpenAIConfig {
   apiKey: string;
   baseUrl: string;
@@ -9,42 +7,18 @@ export async function getOpenAIClient(): Promise<OpenAIConfig> {
   console.log('=== [OpenAI] Getting OpenAI Client ===');
   
   try {
-    const supabase = createSupabaseClient();
-    console.log('[OpenAI] Supabase client created');
+    // Retrieve API key from Edge Function secret (env var)
+    console.log('[OpenAI] Retrieving API key from Edge Function secret...');
+    const rawApiKey = Deno.env.get('OPENAI_API_KEY');
+    console.log('[OpenAI] API key present:', !!rawApiKey);
 
-    // Retrieve API key from Vault
-    console.log('[OpenAI] Retrieving API key from Supabase Vault...');
-    console.log('[OpenAI] Calling RPC function: get_secret');
-    console.log('[OpenAI] Secret name: OPENAI_API_KEY');
-    
-    const { data, error } = await supabase.rpc('get_secret', {
-      secret_name: 'OPENAI_API_KEY',
-    });
-
-    console.log('[OpenAI] RPC call completed');
-    console.log('[OpenAI] Error present:', !!error);
-    console.log('[OpenAI] Data present:', !!data);
-
-    if (error) {
-      console.error('[OpenAI] ❌ Failed to retrieve OpenAI API key from vault');
-      console.error('[OpenAI] Error message:', error.message);
-      console.error('[OpenAI] Error details:', JSON.stringify(error, null, 2));
-      console.error('[OpenAI] This usually means:');
-      console.error('[OpenAI]   1. The get_secret function does not exist in the database');
-      console.error('[OpenAI]   2. The OPENAI_API_KEY secret is not stored in Supabase Vault');
-      console.error('[OpenAI]   3. Permissions are not set correctly for the service role');
-      throw new Error(`Failed to retrieve OpenAI API key: ${error.message}`);
+    const apiKey = typeof rawApiKey === 'string' ? rawApiKey.trim() : '';
+    if (!apiKey) {
+      console.error('[OpenAI] ❌ OpenAI API key missing or empty');
+      console.error('[OpenAI] Set it with: supabase secrets set OPENAI_API_KEY=your-key-here');
+      throw new Error('OpenAI API key not configured - please set OPENAI_API_KEY as an Edge Function secret');
     }
 
-    if (!data) {
-      console.error('[OpenAI] ❌ OpenAI API key not found in vault (data is null/empty)');
-      console.error('[OpenAI] Please ensure OPENAI_API_KEY is stored in Supabase Vault');
-      console.error('[OpenAI] Run: supabase secrets set OPENAI_API_KEY=your-key-here');
-      throw new Error('OpenAI API key not found in vault - please configure it in Supabase');
-    }
-
-    const apiKey = data as string;
-    console.log('[OpenAI] ✅ API key retrieved successfully');
     console.log('[OpenAI] API key length:', apiKey.length);
     console.log('[OpenAI] API key prefix:', apiKey.substring(0, 7) + '...');
     console.log('=== [OpenAI] OpenAI Client Ready ===');
@@ -64,6 +38,7 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   tool_call_id?: string;
+  tool_calls?: ToolCall[];
 }
 
 export interface Tool {
@@ -126,6 +101,11 @@ export async function createChatCompletion(
   console.log('[OpenAI] Temperature:', options.temperature);
   console.log('[OpenAI] Response format:', options.response_format?.type || 'text');
 
+  const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
+  if (!apiKey) {
+    throw new Error('OpenAI API key is missing or invalid');
+  }
+
   const url = `${config.baseUrl}/chat/completions`;
   console.log('[OpenAI] API URL:', url);
   
@@ -139,7 +119,7 @@ export async function createChatCompletion(
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: requestBody,

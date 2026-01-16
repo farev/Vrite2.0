@@ -128,17 +128,19 @@ Deno.serve(async (req) => {
     console.log('[ai-command] Parsing request body...');
     const requestData: CommandRequest = await req.json();
     const { content, instruction, conversation_history, context_snippets } = requestData;
+    const normalizedContent = typeof content === 'string' ? content : '';
+    const normalizedInstruction = typeof instruction === 'string' ? instruction : '';
     
     console.log('[ai-command] Request data received:');
-    console.log('  - Content length:', content?.length || 0, 'characters');
-    console.log('  - Instruction:', instruction?.substring(0, 100) || 'MISSING');
+    console.log('  - Content length:', normalizedContent.length, 'characters');
+    console.log('  - Instruction:', normalizedInstruction.substring(0, 100) || 'MISSING');
     console.log('  - Conversation history length:', conversation_history?.length || 0);
     console.log('  - Context snippets:', context_snippets?.length || 0);
     
-    if (!content || !instruction) {
-      console.error('[ai-command] ❌ Missing required fields - content:', !!content, 'instruction:', !!instruction);
+    if (!normalizedInstruction.trim()) {
+      console.error('[ai-command] ❌ Missing required fields - content:', normalizedContent.length > 0, 'instruction:', normalizedInstruction.trim().length > 0);
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: content and instruction' }),
+        JSON.stringify({ error: 'Missing required fields: instruction' }),
         {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -184,7 +186,7 @@ Deno.serve(async (req) => {
     
     messages.push({
       role: 'user',
-      content: `${contextText}Document content:\n${content}\n\nUser instruction: ${instruction}\n\nUse the replace_text tool to make changes (remember to use markdown for formatting), then provide reasoning and summary.`,
+        content: `${contextText}Document content:\n${normalizedContent}\n\nUser instruction: ${normalizedInstruction}\n\nUse the replace_text tool to make changes (remember to use markdown for formatting), then provide reasoning and summary.`,
     });
     console.log('[ai-command] Total messages prepared:', messages.length);
     
@@ -228,6 +230,7 @@ Deno.serve(async (req) => {
       messages.push({
         role: 'assistant',
         content: message.content || '',
+        tool_calls: toolCalls,
       });
       
       for (const toolCall of toolCalls) {
@@ -249,7 +252,7 @@ Deno.serve(async (req) => {
         model: 'gpt-4o-mini',
         messages,
         max_tokens: 500,
-        temperature: 0.1,
+        temperature: 0.3,
         response_format: { type: 'json_object' },
       });
       
@@ -276,7 +279,7 @@ Deno.serve(async (req) => {
       : {
           type: 'full',
           summary,
-          processed_content: content,
+          processed_content: normalizedContent,
           reasoning,
         };
     
