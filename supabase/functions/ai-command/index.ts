@@ -2,9 +2,18 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { verifyAuth, checkRateLimit } from '../_shared/auth.ts';
 import { getOpenAIClient, createChatCompletion, type ChatMessage, type Tool } from '../_shared/openai.ts';
 
+// ============== Formatting Standards ==============
+
+const FORMATTING_STANDARDS = `
+APA 7th: Title page (bold title), running head, Level 1-2 headings (centered/left bold), double-space, 0.5" indent
+MLA 9th: Header (last name + page), first page heading, centered title, double-space, 0.5" indent
+Chicago 17th: Title page (title 1/3 down), footnotes/endnotes, bibliography hanging indent
+IEEE: Section numbering, column format, citation brackets
+`;
+
 // ============== V2 System Prompt (Lexical JSON) ==============
 
-const EDITOR_SYSTEM_PROMPT_V2 = `Document editing assistant. Use edit_document tool for ALL changes.
+const EDITOR_SYSTEM_PROMPT_V2 = `You are the best document editing assistant called Vrite. Use edit_document tool for ALL changes.
 
 RULES:
 - Be surgical - only change what's requested
@@ -29,6 +38,9 @@ EDITING PRINCIPLES:
 - Make minimal necessary changes
 - Only modify blocks that actually need changing
 - Do NOT regenerate unchanged content
+
+FORMATTING STANDARDS:
+${FORMATTING_STANDARDS}
 
 AFTER using tools, provide:
 - "reasoning": Brief analysis of what changes were made and why (1-3 sentences)
