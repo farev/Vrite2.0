@@ -13,7 +13,6 @@ import {
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
 import { createClient } from '@/lib/supabase/client';
-import { DeltaApplicator } from '@/lib/deltaApplicator';
 
 interface Message {
   id: string;
@@ -151,13 +150,9 @@ export default function AIAssistantSidebar({
       // Get the document as simplified Lexical JSON
       const simplifiedDocument = getSimplifiedDocument();
 
-      // Use provided documentContent or convert Lexical document to plain text for Supabase Edge Function
-      const contentForAPI = documentContent || simplifiedDocument.blocks
-        .map(block => block.segments.map(seg => seg.text).join(''))
-        .join('\n\n');
-
+      // Send the document in V2 Lexical JSON format
       const requestBody = {
-        content: contentForAPI,
+        document: simplifiedDocument,
         instruction: inputMessage,
         conversation_history: conversationHistory,
         context_snippets: contextSnippets.length > 0
@@ -211,23 +206,18 @@ export default function AIAssistantSidebar({
       console.log('[AIAssistant] Response type:', data.type);
       console.log('[AIAssistant] Changes count:', data.changes?.length || 0);
 
-      // Handle tool-based changes from Supabase Edge Function
-      if (data.type === 'tool_based' && data.changes && data.changes.length > 0) {
-        console.log('Received tool-based changes:', data.changes);
+      // Handle V2 Lexical changes from Supabase Edge Function
+      if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
+        console.log('Received lexical changes:', data.changes);
 
-        // For now, apply changes using the document editor's diff mode
-        // TODO: Convert DeltaChanges to LexicalChanges when Edge Function is updated
-        if (onApplyChanges) {
-          // Apply the changes to the document content and show diffs
-          const updatedContent = DeltaApplicator.applyDeltas(contentForAPI, data.changes);
-          onApplyChanges(updatedContent, data.changes);
+        // Apply Lexical changes using the V2 format
+        if (onApplyLexicalChanges) {
+          onApplyLexicalChanges(data.changes);
+        } else {
+          console.warn('[AIAssistant] onApplyLexicalChanges callback not provided');
         }
-      } else if (data.type === 'full' && data.processed_content) {
-        console.log('Received full document update');
-
-        if (onApplyChanges) {
-          onApplyChanges(data.processed_content);
-        }
+      } else if (data.type === 'no_changes') {
+        console.log('No changes needed');
       } else {
         console.warn('No changes or unexpected response type:', data.type);
       }
