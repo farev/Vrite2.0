@@ -983,6 +983,8 @@ export default function DocumentEditor({
           onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
           getSimplifiedDocument={getSimplifiedDocument}
           onApplyLexicalChanges={handleApplyLexicalChanges}
+          onApplyChanges={handleApplyChanges}
+          documentContent={documentContent}
           contextSnippets={contextSnippets}
           onRemoveContextSnippet={handleRemoveContextSnippet}
           onClearContextSnippets={handleClearContextSnippets}
