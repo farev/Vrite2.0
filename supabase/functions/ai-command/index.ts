@@ -27,9 +27,16 @@ Format: 0=normal, 1=bold, 2=italic, 3=bold+italic
 
 OPERATIONS:
 - modify_segments: Edit text/format in block
-- replace_block: Change block type
-- insert_block: Add block (afterBlockId=null for start)
+- replace_block: Change block type (use SAME ID as existing block, just change the type/content)
+- insert_block: Add block (afterBlockId=null for start, or use ID of existing block to insert after it)
 - delete_block: Remove block
+
+CRITICAL BLOCK ID RULES:
+- ONLY use block IDs that exist in the input document (e.g., if document has block-0, block-1, block-2, you can ONLY reference those)
+- For modify_segments, replace_block, delete_block: blockId MUST be from the input document
+- For insert_block: create a NEW unique ID (e.g., "new-block-1", "new-block-2") for the newBlock
+- For replace_block: keep the SAME blockId but provide newBlock with updated content/type
+- NEVER reference block IDs that don't exist in the input (e.g., don't use block-3 if only block-0, block-1, block-2 exist)
 
 LISTS: type="list-item" + listType. NEVER put "1." or "-" in text.
 
