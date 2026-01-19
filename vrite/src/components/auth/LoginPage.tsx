@@ -2,11 +2,13 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, X } from 'lucide-react';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPopup, setShowPopup] = useState(false);
+  const [popupContent, setPopupContent] = useState<'terms' | 'privacy' | null>(null);
   const supabase = createClient();
 
   const handleGoogleSignIn = async () => {
@@ -38,10 +40,108 @@ export default function LoginPage() {
     }
   };
 
+  const openPopup = (content: 'terms' | 'privacy') => {
+    setPopupContent(content);
+    setShowPopup(true);
+  };
 
+  const closePopup = () => {
+    setShowPopup(false);
+    setPopupContent(null);
+  };
+
+  const getPopupContent = () => {
+    if (popupContent === 'terms') {
+      return {
+        title: 'Terms of Service',
+        content: (
+          <div className="space-y-4 text-sm">
+            <p><strong>1. Acceptance of Terms</strong></p>
+            <p>By accessing and using Vrite, you accept and agree to be bound by the terms and provision of this agreement.</p>
+
+            <p><strong>2. Use License</strong></p>
+            <p>Permission is granted to temporarily use Vrite for personal, non-commercial transitory viewing only.</p>
+
+            <p><strong>3. Disclaimer</strong></p>
+            <p>The materials on Vrite are provided on an 'as is' basis. Vrite makes no warranties, expressed or implied, and hereby disclaims and negates all other warranties including without limitation, implied warranties or conditions of merchantability, fitness for a particular purpose, or non-infringement of intellectual property or other violation of rights.</p>
+
+            <p><strong>4. Limitations</strong></p>
+            <p>In no event shall Vrite or its suppliers be liable for any damages (including, without limitation, damages for loss of data or profit, or due to business interruption) arising out of the use or inability to use Vrite.</p>
+
+            <p><strong>5. Accuracy of Materials</strong></p>
+            <p>The materials appearing on Vrite could include technical, typographical, or photographic errors. Vrite does not warrant that any of the materials on its website are accurate, complete, or current.</p>
+          </div>
+        )
+      };
+    } else {
+      return {
+        title: 'Privacy Policy',
+        content: (
+          <div className="space-y-4 text-sm">
+            <p><strong>1. Information We Collect</strong></p>
+            <p>We collect information you provide directly to us, such as when you create an account, use our services, or contact us for support.</p>
+
+            <p><strong>2. How We Use Your Information</strong></p>
+            <p>We use the information we collect to provide, maintain, and improve our services, process transactions, and communicate with you.</p>
+
+            <p><strong>3. Information Sharing</strong></p>
+            <p>We do not sell, trade, or otherwise transfer your personal information to third parties without your consent, except as described in this policy.</p>
+
+            <p><strong>4. Data Security</strong></p>
+            <p>We implement appropriate security measures to protect your personal information against unauthorized access, alteration, disclosure, or destruction.</p>
+
+            <p><strong>5. Your Rights</strong></p>
+            <p>You have the right to access, update, or delete your personal information. You may also opt out of certain communications.</p>
+
+            <p><strong>6. Changes to This Policy</strong></p>
+            <p>We may update this privacy policy from time to time. We will notify you of any changes by posting the new policy on this page.</p>
+          </div>
+        )
+      };
+    }
+  };
+
+  const PopupModal = () => {
+    if (!showPopup || !popupContent) return null;
+
+    const content = getPopupContent();
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                {content.title}
+              </h2>
+              <button
+                onClick={closePopup}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              </button>
+            </div>
+            <div className="text-gray-700 dark:text-gray-300">
+              {content.content}
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={closePopup}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+    <>
+      <PopupModal />
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
       <div className="max-w-md w-full mx-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
           {/* Logo and Title */}
@@ -116,9 +216,23 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-sm text-gray-600 dark:text-gray-400 mt-6">
-          By signing in, you agree to our Terms of Service and Privacy Policy
+          By signing in, you agree to our{' '}
+          <button
+            onClick={() => openPopup('terms')}
+            className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 underline focus:outline-none focus:underline"
+          >
+            Terms of Service
+          </button>
+          {' '}and{' '}
+          <button
+            onClick={() => openPopup('privacy')}
+            className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 underline focus:outline-none focus:underline"
+          >
+            Privacy Policy
+          </button>
         </p>
       </div>
     </div>
+    </>
   );
 }
