@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Sparkles } from 'lucide-react';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -46,8 +46,14 @@ export default function LoginPage() {
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
           {/* Logo and Title */}
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-full mb-4">
-              <Sparkles className="w-8 h-8 text-white" />
+            <div className="inline-flex items-center justify-center w-16 h-16 mb-4">
+              <Image
+                src="/vrite-icon.png"
+                alt="Vrite Logo"
+                width={64}
+                height={64}
+                priority
+              />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
               Welcome to Vrite
