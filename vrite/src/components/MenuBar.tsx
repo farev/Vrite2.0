@@ -1,15 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { 
-  File, 
-  Save, 
-  Download, 
-  Printer, 
+import {
+  File,
+  Save,
+  Download,
+  Printer,
   FileText,
-  ChevronDown,
-  Home
+  ChevronDown
 } from 'lucide-react';
+import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
 import UserProfile from './auth/UserProfile';
 
@@ -80,12 +80,18 @@ export default function MenuBar({
     <div className="menu-bar">
       <div className="menu-bar-left">
         {onBackToHome ? (
-          <button 
-            className="menu-bar-brand menu-bar-brand-button" 
+          <button
+            className="menu-bar-brand menu-bar-brand-button"
             onClick={onBackToHome}
             title="Back to home"
           >
-            <Home className="menu-brand-icon" />
+            <Image
+              src="/vrite-icon.png"
+              alt="Vrite Logo"
+              width={24}
+              height={24}
+              className="menu-brand-icon"
+            />
           </button>
         ) : (
           <div className="menu-bar-brand">

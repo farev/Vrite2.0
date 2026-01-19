@@ -23,6 +23,7 @@
     "@supabase/ssr": "^0.5.1",
     "@supabase/supabase-js": "^2.45.0",
     "@types/diff": "^7.0.2",
+    "@vercel/analytics": "^1.6.1",
     "diff": "^8.0.2",
     "docx": "^9.5.1",
     "katex": "^0.16.27",

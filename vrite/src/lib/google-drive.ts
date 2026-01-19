@@ -56,9 +56,13 @@ export class GoogleDriveClient {
       if (searchResponse.ok) {
         const searchData = await searchResponse.json();
         if (searchData.files && searchData.files.length > 0) {
-          this.vwriteFolderId = searchData.files[0].id;
+          const folderId = searchData.files[0].id;
+          if (!folderId) {
+            throw new Error('Folder ID is null in search response');
+          }
+          this.vwriteFolderId = folderId;
           console.log('[GoogleDrive] Found existing vwrite folder:', this.vwriteFolderId);
-          return this.vwriteFolderId;
+          return folderId;
         }
       }
 
@@ -87,10 +91,14 @@ export class GoogleDriveClient {
       }
 
       const folderData = await createResponse.json();
-      this.vwriteFolderId = folderData.id;
+      const folderId = folderData.id;
+      if (!folderId) {
+        throw new Error('Folder ID is null in create response');
+      }
+      this.vwriteFolderId = folderId;
       console.log('[GoogleDrive] Created vwrite folder:', this.vwriteFolderId);
 
-      return this.vwriteFolderId;
+      return folderId;
     } catch (error) {
       console.error('[GoogleDrive] Error with vwrite folder:', error);
       // Instead of falling back to root, let's try to create the folder again with a different approach
@@ -116,9 +124,13 @@ export class GoogleDriveClient {
 
         if (createResponse.ok) {
           const folderData = await createResponse.json();
-          this.vwriteFolderId = folderData.id;
+          const folderId = folderData.id;
+          if (!folderId) {
+            throw new Error('Folder ID is null in alternative create response');
+          }
+          this.vwriteFolderId = folderId;
           console.log('[GoogleDrive] Created vwrite folder with explicit parent:', this.vwriteFolderId);
-          return this.vwriteFolderId;
+          return folderId;
         } else {
           const errorText = await createResponse.text();
           console.error('[GoogleDrive] Alternative folder creation also failed:', createResponse.status, errorText);

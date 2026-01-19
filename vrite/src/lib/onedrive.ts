@@ -54,9 +54,13 @@ export class OneDriveClient {
       if (searchResponse.ok) {
         const searchData = await searchResponse.json();
         if (searchData.value && searchData.value.length > 0) {
-          this.vwriteFolderId = searchData.value[0].id;
+          const folderId = searchData.value[0].id;
+          if (!folderId) {
+            throw new Error('Folder ID is null in search response');
+          }
+          this.vwriteFolderId = folderId;
           console.log('[OneDrive] Found existing vwrite folder:', this.vwriteFolderId);
-          return this.vwriteFolderId;
+          return folderId;
         }
       }
 
@@ -86,10 +90,14 @@ export class OneDriveClient {
       }
 
       const folderData = await createResponse.json();
-      this.vwriteFolderId = folderData.id;
+      const folderId = folderData.id;
+      if (!folderId) {
+        throw new Error('Folder ID is null in create response');
+      }
+      this.vwriteFolderId = folderId;
       console.log('[OneDrive] Created vwrite folder:', this.vwriteFolderId);
 
-      return this.vwriteFolderId;
+      return folderId;
     } catch (error) {
       console.error('[OneDrive] Error with vwrite folder:', error);
       // Fallback to root directory if folder operations fail
