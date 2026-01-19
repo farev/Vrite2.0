@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
     console.log('[PDF Export] PDF generated successfully, size:', pdf.length, 'bytes');
 
     // Return PDF
-    return new NextResponse(pdf, {
+    return new NextResponse(Buffer.from(pdf), {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${title || 'document'}.pdf"`,
