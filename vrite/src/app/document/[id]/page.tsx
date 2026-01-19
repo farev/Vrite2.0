@@ -142,12 +142,6 @@ export default function DocumentPage() {
 
   const handleExportDocument = async (format: 'pdf' | 'docx' | 'txt') => {
     try {
-      if (format === 'pdf') {
-        // For PDF, use browser print
-        window.print();
-        return;
-      }
-
       if (format === 'txt') {
         // Export as plain text
         const content = document.querySelector('.document-content-editable')?.textContent || '';
@@ -190,6 +184,39 @@ export default function DocumentPage() {
         a.download = `${documentTitle}.docx`;
         a.click();
         URL.revokeObjectURL(url);
+        return;
+      }
+
+      if (format === 'pdf') {
+        // Get HTML content from editor (clean version without UI elements)
+        const contentElement = document.querySelector('.document-content-editable');
+        const html = contentElement?.innerHTML || '';
+
+        // Call PDF export API
+        const response = await fetch('/api/export/pdf', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            html,
+            title: documentTitle,
+            pageSize: 'letter', // Could be made configurable later
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('PDF export failed');
+        }
+
+        // Download the PDF
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${documentTitle}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
       }
     } catch (error) {
       console.error('Export error:', error);
@@ -198,7 +225,15 @@ export default function DocumentPage() {
   };
 
   const handlePrint = () => {
-    window.print();
+    // Use PDF export instead of browser print
+    handleExportDocument('pdf');
+  };
+
+  const handleDocumentIdChange = (newId: string) => {
+    console.log('[DocumentPage] Document ID changed to:', newId);
+    setDocumentId(newId);
+    // Update URL without reloading the page
+    window.history.replaceState(null, '', `/document/${newId}`);
   };
 
   return (
@@ -219,6 +254,7 @@ export default function DocumentPage() {
         onLastSavedChange={setLastSaved}
         onSaveCallbackReady={setSaveCallback}
         initialDocumentId={documentId}
+        onDocumentIdChange={handleDocumentIdChange}
       />
     </div>
   );

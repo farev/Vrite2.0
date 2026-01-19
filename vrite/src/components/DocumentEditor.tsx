@@ -60,6 +60,7 @@ import { PageBreakNode } from './nodes/PageBreakNode';
 import {
   saveDocument,
   loadDocument,
+  loadDocumentById,
   AUTO_SAVE_INTERVAL,
   type DocumentData,
 } from '../lib/storage';
@@ -404,10 +405,15 @@ interface DocumentEditorProps {
   onLastSavedChange: (timestamp: number) => void;
   onSaveCallbackReady?: (callback: () => void) => void;
   initialDocumentId?: string | null;
+  onDocumentIdChange?: (id: string) => void;
 }
 
 // Track previous title to detect changes
 let previousTitle = '';
+
+// Global save lock to prevent concurrent saves
+let saveInProgress = false;
+let pendingSaveTimeout: NodeJS.Timeout | null = null;
 
 export default function DocumentEditor({
   documentTitle,
@@ -415,6 +421,7 @@ export default function DocumentEditor({
   onLastSavedChange,
   onSaveCallbackReady,
   initialDocumentId,
+  onDocumentIdChange,
 }: DocumentEditorProps) {
   const [documentContent, setDocumentContent] = useState('');
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
@@ -438,6 +445,7 @@ export default function DocumentEditor({
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
   const [isDocumentAtTop, setIsDocumentAtTop] = useState(true);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const isDocumentEmpty = documentContent.trim().length === 0;
   
   const currentPageSize = PAGE_SIZES[pageSize];
@@ -485,7 +493,9 @@ export default function DocumentEditor({
   // Detect title changes
   useEffect(() => {
     if (previousTitle && previousTitle !== documentTitle) {
+      console.log('[Editor] Title changed from:', previousTitle, 'to:', documentTitle);
       setHasUnsavedChanges(true);
+      // Let the debounced auto-save handle it
     }
     previousTitle = documentTitle;
   }, [documentTitle]);
@@ -496,9 +506,24 @@ export default function DocumentEditor({
     setHasUnsavedChanges(true); // Mark document as having unsaved changes
   };
 
-  // Manual save function
+  // Manual save function with debouncing and deduplication
   const handleManualSave = useCallback(async () => {
-    console.log('[Editor] Manual save triggered');
+    // Prevent concurrent saves using global lock
+    if (saveInProgress) {
+      console.log('[Editor] Save already in progress globally, skipping');
+      return;
+    }
+
+    // Clear any pending save timeout
+    if (pendingSaveTimeout) {
+      clearTimeout(pendingSaveTimeout);
+      pendingSaveTimeout = null;
+    }
+
+    console.log('[Editor] Save triggered, title:', documentTitle, 'content length:', documentContent.length);
+    saveInProgress = true;
+    setIsSaving(true);
+
     try {
       const documentData: DocumentData = {
         id: documentId,
@@ -507,25 +532,30 @@ export default function DocumentEditor({
         lastModified: Date.now(),
         editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
       };
-      
-      console.log('[Editor] Calling saveDocument...');
+
+      console.log('[Editor] Calling saveDocument with data:', { id: documentData.id, title: documentData.title, contentLength: documentData.content.length });
       const savedDoc = await saveDocument(documentData);
-      console.log('[Editor] Save successful, Drive ID:', savedDoc.id);
-      
+      console.log('[Editor] Save successful, ID:', savedDoc.id);
+
       // Update local ID if it was a new document
       if (!documentId && savedDoc.id) {
         setDocumentId(savedDoc.id);
         console.log('[Editor] New document created with ID:', savedDoc.id);
+        
+        // Notify parent to update URL
+        if (onDocumentIdChange) {
+          onDocumentIdChange(savedDoc.id);
+        }
       }
-      
+
       onLastSavedChange(savedDoc.lastModified);
       setHasUnsavedChanges(false); // Clear unsaved changes flag after successful save
     } catch (error) {
       console.error('[Editor] Save failed:', error);
-      
+
       // Provide more helpful error messages
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
+
       if (errorMessage.includes('access not available') || errorMessage.includes('provider access token')) {
         alert(
           '❌ Cannot Save Document\n\n' +
@@ -536,8 +566,11 @@ export default function DocumentEditor({
       } else {
         alert(`Failed to save document: ${errorMessage}\n\nPlease check your connection and try again.`);
       }
+    } finally {
+      saveInProgress = false;
+      setIsSaving(false);
     }
-  }, [documentId, documentTitle, documentContent, editorState, onLastSavedChange]);
+  }, [documentId, documentTitle, documentContent, editorState, onLastSavedChange, onDocumentIdChange]);
 
   // Expose save callback to parent
   useEffect(() => {
@@ -548,45 +581,69 @@ export default function DocumentEditor({
     }
   }, [handleManualSave, onSaveCallbackReady]);
 
-  // Load document on mount
+  // Load document on mount (only for existing documents)
   useEffect(() => {
-    const fetchDocument = async () => {
-      console.log('[Editor] Loading document on mount');
-      try {
-        const savedDoc = await loadDocument();
-        if (savedDoc) {
-          console.log('[Editor] Document loaded:', savedDoc.id);
-          setDocumentId(savedDoc.id);
-          onTitleChange(savedDoc.title);
-          onLastSavedChange(savedDoc.lastModified);
-          
-          if (savedDoc.content) {
-            setDocumentContent(savedDoc.content);
+    if (initialDocumentId && editorRef) {
+      const fetchDocument = async () => {
+        console.log('[Editor] Loading document on mount:', initialDocumentId);
+        try {
+          const savedDoc = await loadDocumentById(initialDocumentId);
+          if (savedDoc) {
+            console.log('[Editor] Document loaded:', savedDoc.id, 'content length:', savedDoc.content?.length || 0);
+            setDocumentId(savedDoc.id);
+            onTitleChange(savedDoc.title);
+            onLastSavedChange(savedDoc.lastModified);
+
+            if (savedDoc.content) {
+              setDocumentContent(savedDoc.content);
+              
+              // Update the Lexical editor with the loaded markdown content
+              editorRef.update(() => {
+                const root = $getRoot();
+                root.clear();
+                
+                // Convert markdown to Lexical nodes
+                $convertFromMarkdownString(savedDoc.content, TRANSFORMERS);
+              });
+              
+              console.log('[Editor] Content loaded into editor');
+            }
+          } else {
+            console.error('[Editor] Document not found:', initialDocumentId);
           }
-          
-          // Note: Restoring Lexical state is complex - for now we just load content
-        } else {
-          console.log('[Editor] No saved document found');
+        } catch (error) {
+          console.error('[Editor] Failed to load document:', error);
         }
-      } catch (error) {
-        console.error('[Editor] Failed to load document:', error);
+      };
+
+      fetchDocument();
+    } else {
+      console.log('[Editor] New document - not loading existing document');
+    }
+  }, [initialDocumentId, editorRef, onTitleChange, onLastSavedChange]);
+
+  // Auto-save effect with debouncing - save if there are unsaved changes
+  useEffect(() => {
+    // Debounce auto-save: only save after user stops editing for a few seconds
+    if (hasUnsavedChanges && !saveInProgress) {
+      // Clear existing timeout
+      if (pendingSaveTimeout) {
+        clearTimeout(pendingSaveTimeout);
+      }
+
+      // Set new timeout for debounced save
+      pendingSaveTimeout = setTimeout(() => {
+        console.log('[Editor] Debounced auto-save triggered');
+        handleManualSave();
+      }, 3000); // 3 seconds after last change
+    }
+
+    return () => {
+      if (pendingSaveTimeout) {
+        clearTimeout(pendingSaveTimeout);
       }
     };
-
-    fetchDocument();
-  }, [onTitleChange, onLastSavedChange]);
-
-  // Auto-save effect - only save if there are unsaved changes
-  useEffect(() => {
-    const autoSaveTimer = setInterval(() => {
-      if (hasUnsavedChanges && documentContent) {
-        console.log('[Editor] Auto-save triggered (unsaved changes detected)');
-        handleManualSave();
-      }
-    }, AUTO_SAVE_INTERVAL);
-
-    return () => clearInterval(autoSaveTimer);
-  }, [hasUnsavedChanges, documentContent, handleManualSave]);
+  }, [hasUnsavedChanges, documentContent, documentTitle, handleManualSave]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -610,6 +667,41 @@ export default function DocumentEditor({
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleManualSave]);
+
+  // Save on document close/unload - simplified to avoid duplicates
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // Only save if there are unsaved changes and not currently saving
+      if (hasUnsavedChanges && !saveInProgress) {
+        console.log('[Editor] Save on close triggered');
+
+        // Use sendBeacon for reliable save on page unload
+        try {
+          const documentData = {
+            id: documentId,
+            title: documentTitle,
+            content: documentContent,
+            lastModified: Date.now(),
+            editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
+          };
+
+          const blob = new Blob([JSON.stringify(documentData)], { type: 'application/json' });
+          const sent = navigator.sendBeacon('/api/save-on-close', blob);
+          
+          if (sent) {
+            console.log('[Editor] Save beacon sent successfully');
+          } else {
+            console.warn('[Editor] Save beacon failed to send');
+          }
+        } catch (error) {
+          console.warn('[Editor] Failed to send save-on-close beacon:', error);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges, documentContent, documentId, documentTitle, editorState]);
 
   const handleCommandK = useCallback(() => {
     setIsAISidebarOpen(true);

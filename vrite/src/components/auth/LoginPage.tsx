@@ -38,30 +38,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleMicrosoftSignIn = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      console.log('[Auth] Initiating Microsoft OAuth');
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'azure',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          scopes: 'User.Read Files.ReadWrite.All offline_access',
-        },
-      });
-
-      if (error) {
-        console.error('[Auth] OAuth error:', error);
-        throw error;
-      }
-    } catch (error) {
-      console.error('[Auth] Microsoft sign in error:', error);
-      setError(error instanceof Error ? error.message : 'Failed to sign in with Microsoft');
-      setLoading(false);
-    }
-  };
 
 
   return (
@@ -116,19 +92,6 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Continue with Google'}
             </button>
 
-            <button
-              onClick={handleMicrosoftSignIn}
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-3 px-6 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
-                <path fill="#f25022" d="M1 1h10v10H1z" />
-                <path fill="#00a4ef" d="M13 1h10v10H13z" />
-                <path fill="#7fba00" d="M1 13h10v10H1z" />
-                <path fill="#ffb900" d="M13 13h10v10H13z" />
-              </svg>
-              {loading ? 'Signing in...' : 'Continue with Microsoft'}
-            </button>
 
           </div>
 
