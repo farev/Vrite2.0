@@ -13,12 +13,17 @@ export default function LoginPage() {
     try {
       setLoading(true);
       setError(null);
-      
+
+      const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`;
       console.log('[Auth] Initiating Google OAuth');
+      console.log('[Auth] NEXT_PUBLIC_APP_URL:', process.env.NEXT_PUBLIC_APP_URL);
+      console.log('[Auth] window.location.origin:', window.location.origin);
+      console.log('[Auth] redirectTo:', redirectUrl);
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`,
+          redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',

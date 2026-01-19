@@ -88,8 +88,8 @@ export default function MenuBar({
             <Image
               src="/vrite-icon.png"
               alt="Vrite Logo"
-              width={24}
-              height={24}
+              width={32}
+              height={32}
               className="menu-brand-icon"
             />
           </button>

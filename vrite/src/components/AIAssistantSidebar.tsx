@@ -315,16 +315,6 @@ export default function AIAssistantSidebar({
 
   return (
     <div className="ai-sidebar-shell">
-      {!isOpen && (
-        <button
-          onClick={onToggle}
-          className="ai-sidebar-toggle"
-          title="Open AI Assistant"
-        >
-          <Sparkles size={20} />
-        </button>
-      )}
-
       <div className={`ai-sidebar ${isOpen ? 'ai-sidebar-open' : 'ai-sidebar-closed'}`}>
         <div className="ai-sidebar-header">
           <div className="ai-sidebar-title">
