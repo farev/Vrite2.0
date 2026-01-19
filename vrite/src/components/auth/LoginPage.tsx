@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Image from 'next/image';
+import { X } from 'lucide-react';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -127,7 +128,24 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-sm text-gray-600 dark:text-gray-400 mt-6">
-          By signing in, you agree to our Terms of Service and Privacy Policy
+          By signing in, you agree to our{' '}
+          <a
+            href={`${process.env.NEXT_PUBLIC_APP_URL?.replace(/\/login$/, '') || 'https://yourdomain.com'}/terms`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 underline focus:outline-none focus:underline"
+          >
+            Terms of Service
+          </a>
+          {' '}and{' '}
+          <a
+            href={`${process.env.NEXT_PUBLIC_APP_URL?.replace(/\/login$/, '') || 'https://yourdomain.com'}/privacy`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 underline focus:outline-none focus:underline"
+          >
+            Privacy Policy
+          </a>
         </p>
       </div>
     </div>
