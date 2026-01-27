@@ -1,9 +1,16 @@
 /**
- * Utility to migrate documents from localStorage to Supabase
+ * Utility to migrate documents from localStorage to cloud storage
  * Run this once after users log in for the first time
  */
 
 import { createClient } from './supabase/client';
+import {
+  listTemporaryDocuments,
+  clearTemporaryDocument,
+  clearAllTemporaryDocuments,
+  hasTemporaryDocuments as hasAnyTemporaryDocuments,
+} from './storage-anonymous';
+import { saveDocument, type DocumentData } from './storage';
 
 interface LegacyDocumentData {
   title: string;
@@ -166,4 +173,137 @@ export function markMigrationCompleted(): void {
 export function resetMigrationStatus(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('vrite_migration_completed');
+}
+
+/**
+ * Temporary Document Migration (anonymous -> authenticated)
+ */
+
+export interface TempDocMigrationResult {
+  success: boolean;
+  migratedCount: number;
+  failedCount: number;
+  migratedDocuments: Array<{ oldId: string; newId: string; title: string }>;
+  errors: Array<{ oldId: string; error: string }>;
+}
+
+/**
+ * Check if there are any temporary documents to migrate
+ */
+export function hasTemporaryDocuments(): boolean {
+  if (typeof window === 'undefined') return false;
+  return hasAnyTemporaryDocuments();
+}
+
+/**
+ * Migrate all temporary documents from localStorage to cloud storage
+ */
+export async function migrateTemporaryDocuments(): Promise<TempDocMigrationResult> {
+  if (typeof window === 'undefined') {
+    return {
+      success: false,
+      migratedCount: 0,
+      failedCount: 0,
+      migratedDocuments: [],
+      errors: [{ oldId: 'n/a', error: 'Not in browser environment' }],
+    };
+  }
+
+  const result: TempDocMigrationResult = {
+    success: true,
+    migratedCount: 0,
+    failedCount: 0,
+    migratedDocuments: [],
+    errors: [],
+  };
+
+  try {
+    // Check if user is authenticated
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.provider_token) {
+      result.success = false;
+      result.errors.push({ oldId: 'n/a', error: 'User not authenticated or provider token missing' });
+      return result;
+    }
+
+    // Get all temporary documents
+    const tempDocs = listTemporaryDocuments();
+
+    if (tempDocs.length === 0) {
+      console.log('[Migration] No temporary documents to migrate');
+      return result;
+    }
+
+    console.log(`[Migration] Found ${tempDocs.length} temporary documents to migrate`);
+
+    // Migrate each document to cloud storage
+    for (const tempDoc of tempDocs) {
+      try {
+        console.log(`[Migration] Migrating document: ${tempDoc.title} (${tempDoc.id})`);
+
+        const documentData: DocumentData = {
+          title: tempDoc.title || 'Untitled Document',
+          content: tempDoc.content || '',
+          lastModified: tempDoc.lastModified,
+        };
+
+        // Save to cloud storage (Google Drive / OneDrive)
+        const savedDoc = await saveDocument(documentData);
+
+        // Ensure we have a valid ID
+        if (!savedDoc.id) {
+          throw new Error('Document saved but no ID returned');
+        }
+
+        console.log(`[Migration] Successfully migrated ${tempDoc.id} -> ${savedDoc.id}`);
+
+        // Track successful migration
+        result.migratedDocuments.push({
+          oldId: tempDoc.id,
+          newId: savedDoc.id,
+          title: tempDoc.title,
+        });
+        result.migratedCount++;
+
+        // Clear the temporary document from localStorage
+        clearTemporaryDocument(tempDoc.id);
+      } catch (error) {
+        console.error(`[Migration] Failed to migrate document ${tempDoc.id}:`, error);
+
+        result.errors.push({
+          oldId: tempDoc.id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        result.failedCount++;
+        result.success = false;
+      }
+    }
+
+    console.log(`[Migration] Completed: ${result.migratedCount} succeeded, ${result.failedCount} failed`);
+
+    // If all migrations succeeded, clear localStorage flag
+    if (result.failedCount === 0) {
+      clearAllTemporaryDocuments();
+    }
+
+    return result;
+  } catch (error) {
+    console.error('[Migration] Migration process error:', error);
+    result.success = false;
+    result.errors.push({
+      oldId: 'n/a',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return result;
+  }
+}
+
+/**
+ * Get count of temporary documents waiting to be migrated
+ */
+export function getTemporaryDocumentCount(): number {
+  if (typeof window === 'undefined') return 0;
+  return listTemporaryDocuments().length;
 }

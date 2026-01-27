@@ -284,14 +284,15 @@ Use the edit_document tool to make changes, then provide reasoning and summary.`
     console.log('[ai-command] Total messages prepared:', messages.length);
 
     // Make OpenAI API call
-    console.log('[ai-command] Making OpenAI API call with model: gpt-4o-mini');
+    console.log('[ai-command] Making OpenAI API call with model: gpt-5-mini');
     const response = await createChatCompletion(openaiConfig, {
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       messages,
       tools: [EDIT_DOCUMENT_TOOL],
       tool_choice: 'auto',
-      max_tokens: 16384,
-      temperature: 0.3,
+      max_completion_tokens: 128000, // GPT-5-mini supports up to 128k completion tokens
+      reasoning_effort: 'low', // GPT-5-mini is a reasoning model: minimal, low, medium, high
+      // Note: temperature is not supported with GPT-5 reasoning models (defaults to 1)
     });
     console.log('[ai-command] ✅ OpenAI API call completed successfully');
 
@@ -352,10 +353,10 @@ Use the edit_document tool to make changes, then provide reasoning and summary.`
 
       console.log('[ai-command] Requesting final reasoning/summary from OpenAI...');
       const finalResponse = await createChatCompletion(openaiConfig, {
-        model: 'gpt-4o-mini',
+        model: 'gpt-5-mini',
         messages,
-        max_tokens: 500,
-        temperature: 0.3,
+        max_completion_tokens: 500, // GPT-5-mini uses max_completion_tokens instead of max_tokens
+        reasoning_effort: 'minimal', // Fast response for simple summary
         response_format: { type: 'json_object' },
       });
 

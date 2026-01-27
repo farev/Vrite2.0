@@ -22,6 +22,8 @@ interface MenuBarProps {
   documentTitle: string;
   onTitleChange: (title: string) => void;
   lastSaved: number | null;
+  isAuthenticated: boolean;
+  isTemporaryDocument: boolean;
 }
 
 export default function MenuBar({
@@ -33,6 +35,8 @@ export default function MenuBar({
   documentTitle,
   onTitleChange,
   lastSaved,
+  isAuthenticated,
+  isTemporaryDocument,
 }: MenuBarProps) {
   type DropdownKey = 'file' | 'export';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
@@ -122,7 +126,15 @@ export default function MenuBar({
           )}
           {lastSaved && (
             <span className="last-saved-text">
-              Last saved {getLastModifiedString(lastSaved)}
+              {isTemporaryDocument && !isAuthenticated ? (
+                <>
+                  <span className="text-amber-600">Not saved to cloud</span>
+                  {' '}&middot;{' '}
+                  Saved locally {getLastModifiedString(lastSaved)}
+                </>
+              ) : (
+                <>Last saved {getLastModifiedString(lastSaved)}</>
+              )}
             </span>
           )}
         </div>

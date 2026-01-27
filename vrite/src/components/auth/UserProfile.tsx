@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { User, LogOut, Settings, ChevronDown } from 'lucide-react';
+import { User, LogOut, Settings, ChevronDown, LogIn } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 export default function UserProfile() {
@@ -13,6 +14,7 @@ export default function UserProfile() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const supabase = createClient();
+  const { isAnonymous, showSignupModal } = useAuth();
 
   useEffect(() => {
     // Get initial user
@@ -56,8 +58,17 @@ export default function UserProfile() {
     );
   }
 
-  if (!user) {
-    return null;
+  // Show Sign In button for anonymous users
+  if (isAnonymous || !user) {
+    return (
+      <button
+        onClick={() => showSignupModal('save')}
+        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium"
+      >
+        <LogIn className="w-4 h-4" />
+        Sign In
+      </button>
+    );
   }
 
   const displayName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';

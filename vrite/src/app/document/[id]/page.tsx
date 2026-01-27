@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import MenuBar from '@/components/MenuBar';
 import { createClient } from '@/lib/supabase/client';
-import { loadDocumentById } from '@/lib/storage';
+import { loadDocumentById, loadTemporaryDocument } from '@/lib/storage';
 
 const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), { 
   ssr: false 
@@ -15,28 +15,43 @@ export default function DocumentPage() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [saveCallback, setSaveCallback] = useState<(() => void) | null>(null);
+  const saveCallbackRef = useRef<(() => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const router = useRouter();
   const params = useParams();
   const supabase = createClient();
 
+  // Define all callbacks at the top level (before any conditional returns)
+  const handleSaveCallbackReady = useCallback((callback: () => void) => {
+    saveCallbackRef.current = callback;
+  }, []);
+
   useEffect(() => {
+    const id = params.id as string;
+    const isTempDoc = id.startsWith('temp-');
+
     // Check authentication status
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAuthenticated(!!session);
-      
-      if (!session) {
-        console.log('[DocumentPage] No session, redirecting to login');
-        router.push('/login');
-        return;
+      const authenticated = !!session?.provider_token;
+      setIsAuthenticated(authenticated);
+
+      // Allow anonymous access for temporary documents
+      if (!authenticated) {
+        if (isTempDoc) {
+          console.log('[DocumentPage] Anonymous mode - temporary document access');
+          return;
+        } else {
+          console.log('[DocumentPage] No session, redirecting to login');
+          router.push('/login');
+          return;
+        }
       }
-      
-      // Verify cloud storage access
+
+      // Verify cloud storage access for authenticated users
       if (!session.provider_token) {
         console.error('[DocumentPage] ⚠️ No cloud storage access token!');
-        
+
         setTimeout(() => {
           const shouldReauth = confirm(
             '⚠️ Cloud Storage Access Missing\n\n' +
@@ -44,7 +59,7 @@ export default function DocumentPage() {
             'You need to log out and log in again to grant permissions.\n\n' +
             'Click OK to log out now, or Cancel to continue (saving will not work).'
           );
-          
+
           if (shouldReauth) {
             supabase.auth.signOut().then(() => {
               router.push('/login');
@@ -60,21 +75,19 @@ export default function DocumentPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(!!session);
-      if (!session) {
-        console.log('[DocumentPage] Session lost, redirecting to login');
-        router.push('/login');
-      }
+      const authenticated = !!session?.provider_token;
+      setIsAuthenticated(authenticated);
     });
 
     return () => subscription.unsubscribe();
-  }, [router, supabase]);
+  }, [router, supabase, params.id]);
 
   // Load document if ID is provided
   useEffect(() => {
-    const loadDocument = async () => {
+    const loadDocumentData = async () => {
       const id = params.id as string;
-      
+      const isTempDoc = id.startsWith('temp-');
+
       if (id === 'new') {
         // New document
         setDocumentId(null);
@@ -84,25 +97,41 @@ export default function DocumentPage() {
 
       // Load existing document
       setDocumentId(id);
+
       try {
-        const doc = await loadDocumentById(id);
-        if (doc) {
-          setDocumentTitle(doc.title);
-          setLastSaved(doc.lastModified);
-        } else {
-          console.error('[DocumentPage] Document not found');
-          router.push('/');
+        if (isTempDoc) {
+          // Load temporary document from localStorage
+          const tempDoc = loadTemporaryDocument(id);
+          if (tempDoc) {
+            setDocumentTitle(tempDoc.title);
+            setLastSaved(tempDoc.lastModified);
+          } else {
+            console.log('[DocumentPage] New temporary document');
+            // New temporary document - let editor initialize it
+          }
+        } else if (isAuthenticated) {
+          // Load cloud document (requires authentication)
+          const doc = await loadDocumentById(id);
+          if (doc) {
+            setDocumentTitle(doc.title);
+            setLastSaved(doc.lastModified);
+          } else {
+            console.error('[DocumentPage] Document not found');
+            router.push('/');
+          }
         }
       } catch (error) {
         console.error('[DocumentPage] Failed to load document:', error);
-        router.push('/');
+        if (!isTempDoc) {
+          router.push('/');
+        }
       } finally {
         setIsLoading(false);
       }
     };
 
-    if (isAuthenticated) {
-      loadDocument();
+    if (isAuthenticated !== null) {
+      loadDocumentData();
     }
   }, [params.id, isAuthenticated, router]);
 
@@ -118,8 +147,12 @@ export default function DocumentPage() {
     );
   }
 
-  // Don't render if not authenticated (will redirect)
-  if (!isAuthenticated) {
+  // Check if this is a temporary document
+  const id = params.id as string;
+  const isTempDoc = id.startsWith('temp-');
+
+  // Allow anonymous users for temporary documents only
+  if (!isAuthenticated && !isTempDoc) {
     return null;
   }
 
@@ -135,8 +168,8 @@ export default function DocumentPage() {
 
   const handleSaveDocument = () => {
     // Trigger the save callback from DocumentEditor
-    if (saveCallback) {
-      saveCallback();
+    if (saveCallbackRef.current) {
+      saveCallbackRef.current();
     }
   };
 
@@ -238,7 +271,7 @@ export default function DocumentPage() {
 
   return (
     <div className="app-shell">
-      <MenuBar 
+      <MenuBar
         onNewDocument={handleNewDocument}
         onSaveDocument={handleSaveDocument}
         onExportDocument={handleExportDocument}
@@ -247,14 +280,17 @@ export default function DocumentPage() {
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}
         lastSaved={lastSaved}
+        isAuthenticated={isAuthenticated}
+        isTemporaryDocument={isTempDoc}
       />
       <DocumentEditor
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}
         onLastSavedChange={setLastSaved}
-        onSaveCallbackReady={setSaveCallback}
+        onSaveCallbackReady={handleSaveCallbackReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
+        isAuthenticated={isAuthenticated}
       />
     </div>
   );

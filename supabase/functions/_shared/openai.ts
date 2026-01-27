@@ -87,8 +87,10 @@ export async function createChatCompletion(
     messages: ChatMessage[];
     tools?: Tool[];
     tool_choice?: string;
-    max_tokens?: number;
-    temperature?: number;
+    max_tokens?: number; // Deprecated for newer models, use max_completion_tokens
+    max_completion_tokens?: number; // For GPT-5-mini and newer models
+    temperature?: number; // Not supported on GPT-5 reasoning models
+    reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high'; // For GPT-5 reasoning models
     response_format?: { type: string };
   }
 ): Promise<ChatCompletionResponse> {
@@ -98,7 +100,9 @@ export async function createChatCompletion(
   console.log('[OpenAI] Tools provided:', options.tools?.length || 0);
   console.log('[OpenAI] Tool choice:', options.tool_choice || 'none');
   console.log('[OpenAI] Max tokens:', options.max_tokens);
+  console.log('[OpenAI] Max completion tokens:', options.max_completion_tokens);
   console.log('[OpenAI] Temperature:', options.temperature);
+  console.log('[OpenAI] Reasoning effort:', options.reasoning_effort);
   console.log('[OpenAI] Response format:', options.response_format?.type || 'text');
 
   const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';

@@ -31,10 +31,25 @@ export async function updateSession(request: NextRequest) {
 
   // Refreshing the auth token
   const { data: { user } } = await supabase.auth.getUser();
-  
-  // Redirect to login if not authenticated and accessing protected route
-  if (!user && request.nextUrl.pathname === '/') {
-    console.log('[Middleware] No user session, redirecting to login');
+
+  // Define anonymous-accessible routes
+  const pathname = request.nextUrl.pathname;
+  const anonymousRoutes = [
+    '/',
+    '/login',
+    '/auth/callback',
+    '/document/new',
+  ];
+
+  // Check if route is anonymous-accessible or a temporary document
+  const isAnonymousRoute =
+    anonymousRoutes.includes(pathname) ||
+    pathname.startsWith('/document/temp-') ||
+    pathname.startsWith('/api/ai-anonymous');
+
+  // Redirect to login only for protected routes
+  if (!user && !isAnonymousRoute) {
+    console.log('[Middleware] No user session, redirecting to login from:', pathname);
     return NextResponse.redirect(new URL('/login', request.url));
   }
 

@@ -296,7 +296,7 @@ Use the replace_text tool to make formatting changes, then provide reasoning and
 
         # Make API call with replace_text tool
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             messages=messages,
             tools=[REPLACE_TEXT_TOOL],
             tool_choice="auto",
@@ -339,7 +339,7 @@ Use the replace_text tool to make formatting changes, then provide reasoning and
             })
 
             final_response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5-mini",
                 messages=messages,
                 max_tokens=500,
                 temperature=0.1,
@@ -379,7 +379,7 @@ async def enhance_writing(request: WriteRequest):
         """
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1500,
             temperature=0.7
@@ -573,7 +573,7 @@ Use the replace_text tool to make changes (remember to use markdown for formatti
 
         # Make API call with tools
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             messages=messages,
             tools=[REPLACE_TEXT_TOOL],
             tool_choice="auto",
@@ -622,7 +622,7 @@ Use the replace_text tool to make changes (remember to use markdown for formatti
             })
 
             final_response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5-mini",
                 messages=messages,
                 max_tokens=500,
                 temperature=0.3,
@@ -718,7 +718,7 @@ Use the edit_document tool to make changes, then provide reasoning and summary."
 
         # Make API call with the edit_document tool
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             messages=messages,
             tools=[EDIT_DOCUMENT_TOOL],
             tool_choice="auto",
@@ -774,7 +774,7 @@ Use the edit_document tool to make changes, then provide reasoning and summary."
             })
 
             final_response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5-mini",
                 messages=messages,
                 max_tokens=500,
                 temperature=0.3,

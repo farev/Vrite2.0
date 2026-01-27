@@ -1,11 +1,14 @@
 /**
  * Document storage utilities - Supports Google Drive and OneDrive via Supabase Auth
+ * Also supports anonymous localStorage-based storage for unauthenticated users
  */
 
 import { GoogleDriveClient } from './google-drive';
 import { OneDriveClient } from './onedrive';
 import { createClient } from './supabase/client';
 import type { Session } from '@supabase/supabase-js';
+import * as anonymousStorage from './storage-anonymous';
+import * as supabaseStorage from './storage-supabase';
 
 export interface DocumentData {
   id?: string;
@@ -43,42 +46,45 @@ function getProviderName(provider: 'google' | 'azure'): string {
 }
 
 /**
- * Save document to cloud storage (Google Drive or OneDrive)
+ * Save document to cloud storage (Google Drive or OneDrive) or Supabase database
+ * Routes to appropriate storage based on authentication type
  */
 export async function saveDocument(data: DocumentData): Promise<DocumentData> {
   console.log('[Storage] Save initiated:', data.title);
-  
+
   // Get access token from Supabase session
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  
+
   if (!session) {
     console.error('[Storage] No active session');
     throw new Error('Not authenticated');
   }
 
-  // Debug: Log full session structure
-  console.log('[Storage] Session user:', session.user.email);
-  console.log('[Storage] Session provider_token:', session.provider_token ? 'present' : 'missing');
-  console.log('[Storage] Session provider_refresh_token:', session.provider_refresh_token ? 'present' : 'missing');
-  console.log('[Storage] User app_metadata:', session.user.app_metadata);
-  console.log('[Storage] User identities:', session.user.identities?.map(i => ({ provider: i.provider, id: i.id })));
+  const isAnonymous = session.user.is_anonymous || false;
+  const hasProviderToken = !!session.provider_token;
+
+  // Debug: Log session info
+  console.log('[Storage] Session info:', {
+    userId: session.user.id,
+    email: session.user.email,
+    isAnonymous,
+    hasProviderToken,
+  });
+
+  // Anonymous users or users without OAuth tokens save to Supabase database
+  if (isAnonymous || !hasProviderToken) {
+    console.log('[Storage] Using Supabase database storage (anonymous or no OAuth)');
+    return supabaseStorage.saveDocumentToSupabase(data);
+  }
+
+  // Authenticated OAuth users save to Google Drive/OneDrive
+  console.log('[Storage] Using cloud storage (OAuth authenticated)');
 
   // Detect provider
   const provider = getProviderFromSession(session);
   const providerName = getProviderName(provider);
-
-  // Get provider access token from session
-  // Note: Supabase stores provider tokens in session.provider_token
   const accessToken = session.provider_token;
-  if (!accessToken) {
-    console.error('[Storage] No provider access token in session');
-    console.error('[Storage] This usually means:');
-    console.error('[Storage] 1. OAuth provider is not configured in Supabase');
-    console.error('[Storage] 2. Required scopes are missing');
-    console.error('[Storage] 3. User needs to log out and log in again');
-    throw new Error(`${providerName} access not available. Please log out and log in again.`);
-  }
 
   try {
     if (provider === 'azure') {
@@ -246,18 +252,30 @@ export async function hasSavedDocument(): Promise<boolean> {
 }
 
 /**
- * List all documents from cloud storage
+ * List all documents from appropriate storage
  */
 export async function listAllDocuments(): Promise<DocumentData[]> {
   console.log('[Storage] Listing all documents');
-  
+
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  
-  if (!session?.provider_token) {
-    console.error('[Storage] No session or provider token');
+
+  if (!session) {
+    console.error('[Storage] No session');
     return [];
   }
+
+  const isAnonymous = session.user.is_anonymous || false;
+  const hasProviderToken = !!session.provider_token;
+
+  // Anonymous users or users without OAuth use Supabase
+  if (isAnonymous || !hasProviderToken) {
+    console.log('[Storage] Listing from Supabase database');
+    return supabaseStorage.listDocumentsFromSupabase();
+  }
+
+  // Authenticated OAuth users use cloud storage
+  console.log('[Storage] Listing from cloud storage');
 
   // Detect provider
   const provider = getProviderFromSession(session);
@@ -294,18 +312,33 @@ export async function listAllDocuments(): Promise<DocumentData[]> {
 }
 
 /**
- * Load a specific document by ID
+ * Load a specific document by ID from appropriate storage
  */
 export async function loadDocumentById(documentId: string): Promise<DocumentData | null> {
   console.log('[Storage] Loading document by ID:', documentId);
-  
+
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  
-  if (!session?.provider_token) {
-    console.error('[Storage] No session or provider token');
+
+  if (!session) {
+    console.error('[Storage] No session');
     return null;
   }
+
+  const isAnonymous = session.user.is_anonymous || false;
+  const hasProviderToken = !!session.provider_token;
+
+  // Check if this is a UUID (Supabase document) or cloud storage ID
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId);
+
+  // Anonymous users, users without OAuth, or UUID documents use Supabase
+  if (isAnonymous || !hasProviderToken || isUUID) {
+    console.log('[Storage] Loading from Supabase database');
+    return supabaseStorage.loadDocumentFromSupabase(documentId);
+  }
+
+  // Authenticated OAuth users with non-UUID IDs use cloud storage
+  console.log('[Storage] Loading from cloud storage');
 
   // Detect provider
   const provider = getProviderFromSession(session);
@@ -342,3 +375,115 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
 }
 
 export { AUTO_SAVE_INTERVAL };
+
+/**
+ * Check if user is authenticated with a valid session
+ */
+export async function isUserAuthenticated(): Promise<boolean> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return !!session?.provider_token;
+}
+
+/**
+ * Unified save function that routes to cloud or anonymous storage
+ */
+export async function saveDocumentUnified(data: DocumentData, isAuthenticated: boolean): Promise<DocumentData> {
+  if (!isAuthenticated) {
+    // Save to anonymous localStorage
+    const id = anonymousStorage.saveTemporaryDocument({
+      id: data.id,
+      title: data.title,
+      content: data.content,
+    });
+
+    return {
+      ...data,
+      id,
+      lastModified: Date.now(),
+    };
+  }
+
+  // Save to cloud storage
+  return saveDocument(data);
+}
+
+/**
+ * Unified load function that routes to cloud or anonymous storage
+ */
+export async function loadDocumentUnified(documentId?: string, isAuthenticated?: boolean): Promise<DocumentData | null> {
+  // Auto-detect authentication if not provided
+  if (isAuthenticated === undefined) {
+    isAuthenticated = await isUserAuthenticated();
+  }
+
+  if (!isAuthenticated) {
+    // Load from anonymous localStorage
+    if (documentId && documentId.startsWith('temp-')) {
+      const tempDoc = anonymousStorage.loadTemporaryDocument(documentId);
+      if (tempDoc) {
+        return {
+          id: tempDoc.id,
+          title: tempDoc.title,
+          content: tempDoc.content,
+          lastModified: tempDoc.lastModified,
+        };
+      }
+    }
+
+    // Load current document
+    const currentId = anonymousStorage.getCurrentDocumentId();
+    if (currentId) {
+      const tempDoc = anonymousStorage.loadTemporaryDocument(currentId);
+      if (tempDoc) {
+        return {
+          id: tempDoc.id,
+          title: tempDoc.title,
+          content: tempDoc.content,
+          lastModified: tempDoc.lastModified,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  // Load from cloud storage
+  if (documentId) {
+    return loadDocumentById(documentId);
+  }
+
+  return loadDocument();
+}
+
+/**
+ * Unified list function that routes to cloud or anonymous storage
+ */
+export async function listDocumentsUnified(isAuthenticated: boolean): Promise<DocumentData[]> {
+  if (!isAuthenticated) {
+    // List from anonymous localStorage
+    const tempDocs = anonymousStorage.listTemporaryDocuments();
+    return tempDocs.map(doc => ({
+      id: doc.id,
+      title: doc.title,
+      content: doc.content,
+      lastModified: doc.lastModified,
+    }));
+  }
+
+  // List from cloud storage
+  return listAllDocuments();
+}
+
+// Re-export anonymous storage utilities for direct use when needed
+export {
+  saveTemporaryDocument,
+  loadTemporaryDocument,
+  listTemporaryDocuments,
+  clearTemporaryDocument,
+  hasTemporaryDocuments,
+  clearAllTemporaryDocuments,
+  getCurrentDocumentId,
+  generateTempId,
+  updateTemporaryDocument,
+} from './storage-anonymous';

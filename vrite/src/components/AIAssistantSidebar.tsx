@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send,
   Sparkles,
@@ -13,6 +13,7 @@ import {
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Message {
   id: string;
@@ -57,6 +58,7 @@ export default function AIAssistantSidebar({
   onRemoveContextSnippet,
   onClearContextSnippets
 }: AIAssistantSidebarProps) {
+  const { isAuthenticated, isAnonymous, sessionToken, showSignupModal } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -68,8 +70,11 @@ export default function AIAssistantSidebar({
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const hasTriggeredOnboardingRef = useRef(false);
+  const onboardingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messageIdCounterRef = useRef(0);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -84,145 +89,139 @@ export default function AIAssistantSidebar({
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+  // Helper function to trigger AI requests (both onboarding and user-initiated)
+  const triggerAIRequest = useCallback(async (instruction: string, isOnboarding = false) => {
+    setIsLoading(true);
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      type: 'user',
-      content: inputMessage,
-      timestamp: new Date()
-    };
-
+    // Generate unique message ID with counter to prevent duplicates
+    messageIdCounterRef.current += 1;
     const loadingMessage: Message = {
-      id: (Date.now() + 1).toString(),
+      id: `${Date.now()}-${messageIdCounterRef.current}`,
       type: 'assistant',
       content: '',
       timestamp: new Date(),
-      isLoading: true
+      isLoading: true,
     };
 
-    setMessages(prev => [...prev, userMessage, loadingMessage]);
-    setInputMessage('');
-    setIsLoading(true);
+    setMessages(prev => [...prev, loadingMessage]);
 
     try {
-      console.log('[AIAssistant] Starting AI command request...');
-      
-      const supabase = createClient();
-      
-      console.log('[AIAssistant] Getting Supabase session...');
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
-        console.error('[AIAssistant] ❌ Auth Session Missing:', sessionError);
-        throw new Error('Not authenticated. Please log in again.');
+      if (!sessionToken) {
+        console.error('[AIAssistant] No session token available');
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === loadingMessage.id
+              ? {
+                  ...msg,
+                  content: 'AI features require authentication. Please enable anonymous sign-ins in Supabase or sign in with Google.',
+                  isLoading: false,
+                }
+              : msg
+          )
+        );
+        setIsLoading(false);
+        return;
       }
 
-      // DEBUG: Inspect the token before sending
-      try {
-        const payload = JSON.parse(atob(session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-        console.log('[AIAssistant] Token Debug Info:');
-        console.log('  - Role:', payload.role);
-        console.log('  - Email:', payload.email);
-        console.log('  - Exp:', new Date(payload.exp * 1000).toLocaleString());
-        
-        if (payload.role === 'anon') {
-          console.error('[AIAssistant] ❌ CRITICAL: Access token has "anon" role! This will be rejected by Edge Functions.');
+      console.log('[AIAssistant] AI request:', {
+        anonymous: isAnonymous,
+        authenticated: isAuthenticated,
+        isOnboarding,
+      });
+
+      // Rate limiting for anonymous users (only for user-initiated requests)
+      if (isAnonymous && !isOnboarding) {
+        const usageCount = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
+
+        if (usageCount >= 3) {
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === loadingMessage.id
+                ? {
+                    ...msg,
+                    content: 'You\'ve reached the limit for anonymous AI usage. Sign in for unlimited access!',
+                    isLoading: false,
+                  }
+                : msg
+            )
+          );
+          setIsLoading(false);
+          showSignupModal('ai-limit-reached');
+          return;
         }
-      } catch (e) {
-        console.warn('[AIAssistant] Could not parse token payload for debug');
       }
 
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const endpoint = `${supabaseUrl}/functions/v1/ai-command`;
-      
-      console.log('[AIAssistant] Sending POST to:', endpoint);
-      
-      // Build conversation history (exclude loading messages and current user message)
+      // Get document and conversation history
+      const simplifiedDocument = getSimplifiedDocument();
       const conversationHistory = messages
-        .filter(msg => !msg.isLoading && msg.id !== userMessage.id)
+        .filter(msg => !msg.isLoading)
         .map(msg => ({
           role: msg.type === 'user' ? 'user' : 'assistant',
           content: msg.content,
         }));
 
-      // Get the document as simplified Lexical JSON
-      const simplifiedDocument = getSimplifiedDocument();
+      // Call Edge Function (works for both anonymous and authenticated users)
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const endpoint = `${supabaseUrl}/functions/v1/ai-command`;
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-      // Send the document in V2 Lexical JSON format
       const requestBody = {
         document: simplifiedDocument,
-        instruction: inputMessage,
+        instruction,
         conversation_history: conversationHistory,
         context_snippets: contextSnippets.length > 0
           ? contextSnippets.map((snippet) => snippet.text)
           : undefined,
       };
 
-      console.log('Sending to V2 API:', {
-        blockCount: simplifiedDocument.blocks.length,
-        instruction: inputMessage,
-      });
-
-      // Check if anon key is available
-      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!anonKey) {
-        console.warn('[AIAssistant] ⚠️ NEXT_PUBLIC_SUPABASE_ANON_KEY is missing!');
-      }
-
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${sessionToken}`,
           'apikey': anonKey || '',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
       });
 
-      console.log('[AIAssistant] Response Status:', response.status);
-      
-      // Log headers for debugging (careful with sensitive info)
-      console.log('[AIAssistant] Request headers sent:', {
-        'Authorization': `Bearer ${session.access_token.substring(0, 10)}...`,
-        'apikey': anonKey ? `${anonKey.substring(0, 10)}...` : 'MISSING',
-      });
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[AIAssistant] ❌ Request failed with status:', response.status);
-        console.error('[AIAssistant] Error response text:', errorText);
-        
-        // Extract x-request-id for Supabase support
-        const requestId = response.headers.get('x-request-id');
-        if (requestId) console.log('[AIAssistant] Supabase Request ID:', requestId);
-        
-        throw new Error(`Edge Function returned ${response.status}: ${errorText}`);
+
+        // Handle rate limit for Edge Function
+        if (response.status === 429) {
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === loadingMessage.id
+                ? {
+                    ...msg,
+                    content: 'Rate limit exceeded. Please wait before making more requests.',
+                    isLoading: false,
+                  }
+                : msg
+            )
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        throw new Error(`AI service error: ${errorText}`);
       }
 
-      console.log('[AIAssistant] ✅ Response received, parsing...');
       const data = await response.json();
-      console.log('[AIAssistant] Response type:', data.type);
-      console.log('[AIAssistant] Changes count:', data.changes?.length || 0);
 
-      // Handle V2 Lexical changes from Supabase Edge Function
+      // Increment anonymous usage count (only for user-initiated requests)
+      if (isAnonymous && !isOnboarding) {
+        const currentCount = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
+        sessionStorage.setItem('vrite_ai_usage_count', String(currentCount + 1));
+      }
+
+      // Handle response
       if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
-        console.log('Received lexical changes:', data.changes);
-
-        // Apply Lexical changes using the V2 format
         if (onApplyLexicalChanges) {
           onApplyLexicalChanges(data.changes);
-        } else {
-          console.warn('[AIAssistant] onApplyLexicalChanges callback not provided');
         }
-      } else if (data.type === 'no_changes') {
-        console.log('No changes needed');
-      } else {
-        console.warn('No changes or unexpected response type:', data.type);
       }
 
-      // Display reasoning + summary if available
       const displayMessage = data.reasoning
         ? `**Reasoning:** ${data.reasoning}\n\n${data.summary || 'Changes applied.'}`
         : data.summary || 'Changes applied successfully.';
@@ -235,56 +234,100 @@ export default function AIAssistantSidebar({
         )
       );
     } catch (error) {
-      console.error('=== [AIAssistant] Error Getting AI Response ===');
-      console.error('[AIAssistant] ❌ Error:', error);
-      
-      let errorMessage = 'Sorry, I encountered an error processing your request.';
-      
-      // Try to extract more details from Supabase FunctionsHttpError
-      if (error && typeof error === 'object' && 'context' in error) {
-        try {
-          // FunctionsHttpError often has context.json() or similar
-          const errorDetails = error as any;
-          console.error('[AIAssistant] Error context:', errorDetails.context);
-          if (errorDetails.message) {
-            console.error('[AIAssistant] Error message from context:', errorDetails.message);
-          }
-        } catch (e) {
-          console.error('[AIAssistant] Could not parse error context');
-        }
-      }
-      
-      if (error instanceof Error) {
-        if (error.message.includes('Not authenticated') || error.message.includes('Unauthorized')) {
-          errorMessage = '🔒 Authentication error. Please log out and log in again.';
-        } else if (error.message.includes('Rate limit')) {
-          errorMessage = '⏱️ Rate limit exceeded. Please wait a moment before trying again.';
-        } else if (error.message.includes('OpenAI')) {
-          errorMessage = '🤖 AI service error. Please try again in a moment.';
-        } else if (error.message.includes('network') || error.message.includes('fetch')) {
-          errorMessage = '🌐 Network error. Please check your connection and try again.';
-        } else {
-          errorMessage = `❌ Error: ${error.message}`;
-        }
-      }
-      
-      console.error('[AIAssistant] Displaying error to user:', errorMessage);
-      
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === loadingMessage.id 
-            ? { 
-                ...msg, 
-                content: errorMessage,
-                isLoading: false
+      console.error('[AIAssistant] Error:', error);
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === loadingMessage.id
+            ? {
+                ...msg,
+                content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                isLoading: false,
               }
             : msg
         )
       );
     } finally {
       setIsLoading(false);
-      console.log('[AIAssistant] Request completed');
     }
+  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets]);
+
+  // Automatic AI onboarding for anonymous users
+  useEffect(() => {
+    // Only set timer once
+    if (hasTriggeredOnboardingRef.current || onboardingTimerRef.current) {
+      return;
+    }
+
+    const hasSeenOnboarding = typeof window !== 'undefined' && localStorage.getItem('vrite_has_seen_onboarding');
+
+    console.log('[AIAssistant] Onboarding check:', {
+      hasSeenOnboarding: !!hasSeenOnboarding,
+      isAuthenticated,
+      hasSession: !!sessionToken,
+      hasTriggeredOnboarding: hasTriggeredOnboardingRef.current,
+      timerSet: !!onboardingTimerRef.current,
+      shouldTrigger: !hasSeenOnboarding && isAuthenticated === false && sessionToken !== null
+    });
+
+    if (!hasSeenOnboarding && isAuthenticated === false && sessionToken) {
+      hasTriggeredOnboardingRef.current = true;
+
+      // Trigger onboarding after a short delay to let the editor load
+      onboardingTimerRef.current = setTimeout(async () => {
+        console.log('[AIAssistant] Triggering automatic onboarding for anonymous user');
+
+        const onboardingPrompt = `Please introduce yourself to the user and explain your capabilities as an AI writing assistant. Format this nicely in the document. Include:
+- Who you are (an AI assistant for writing and editing)
+- Key capabilities (formatting, editing, content generation, document styling)
+- How to use you (highlight text, use keyboard shortcuts, ask questions)
+- What makes you special (real-time collaboration, intelligent suggestions)
+
+Keep it concise, friendly, and well-formatted with headings and bullet points.`;
+
+        // Add welcome message to chat
+        messageIdCounterRef.current += 1;
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `onboarding-welcome-${Date.now()}-${messageIdCounterRef.current}`,
+            type: 'assistant',
+            content: '👋 Welcome! Let me introduce myself...',
+            timestamp: new Date(),
+          },
+        ]);
+
+        // Trigger AI request
+        await triggerAIRequest(onboardingPrompt, true);
+
+        // Mark onboarding as seen
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('vrite_has_seen_onboarding', 'true');
+        }
+
+        // Clear the ref after firing
+        onboardingTimerRef.current = null;
+      }, 500);
+
+      console.log('[AIAssistant] Onboarding timer set, will fire in 0.5 seconds');
+    }
+  }, [isAuthenticated, sessionToken, triggerAIRequest]);
+
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || isLoading) return;
+
+    messageIdCounterRef.current += 1;
+    const userMessage: Message = {
+      id: `${Date.now()}-${messageIdCounterRef.current}`,
+      type: 'user',
+      content: inputMessage,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    const instruction = inputMessage;
+    setInputMessage('');
+
+    await triggerAIRequest(instruction, false);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import {
   $getRoot,
@@ -63,12 +63,17 @@ import {
   loadDocumentById,
   AUTO_SAVE_INTERVAL,
   type DocumentData,
+  saveTemporaryDocument,
+  updateTemporaryDocument,
+  loadTemporaryDocument,
 } from '../lib/storage';
 import {
   serializeLexicalToSimplified,
   type SimplifiedDocument,
 } from '../lib/lexicalSerializer';
 import type { LexicalChange } from '../lib/lexicalChangeApplicator';
+import { useAuth } from '../contexts/AuthContext';
+import { useDocumentSync } from '../hooks/useDocumentSync';
 
 const theme = {
   root: 'document-editor-root',
@@ -406,6 +411,7 @@ interface DocumentEditorProps {
   onSaveCallbackReady?: (callback: () => void) => void;
   initialDocumentId?: string | null;
   onDocumentIdChange?: (id: string) => void;
+  isAuthenticated: boolean;
 }
 
 // Track previous title to detect changes
@@ -422,9 +428,37 @@ export default function DocumentEditor({
   onSaveCallbackReady,
   initialDocumentId,
   onDocumentIdChange,
+  isAuthenticated,
 }: DocumentEditorProps) {
+  const { showSignupModal, isAnonymous } = useAuth();
   const [documentContent, setDocumentContent] = useState('');
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
+
+  // User can save to cloud if they're authenticated OR anonymous (both have Supabase sessions)
+  const canSaveToCloud = isAuthenticated || isAnonymous;
+
+  // Multi-tab sync for temporary documents
+  const { updateLastKnownTimestamp } = useDocumentSync({
+    documentId,
+    isAuthenticated,
+    onDocumentUpdated: (newContent, newTitle) => {
+      console.log('[Editor] Reloading document from another tab');
+      setDocumentContent(newContent);
+      onTitleChange(newTitle);
+
+      // Update the Lexical editor with the new content
+      if (editorRef) {
+        editorRef.update(() => {
+          const root = $getRoot();
+          root.clear();
+          $convertFromMarkdownString(newContent, TRANSFORMERS);
+        });
+      }
+    },
+    onConflictDetected: () => {
+      console.log('[Editor] Multi-tab conflict detected');
+    },
+  });
   const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
   const [pageSize, setPageSize] = useState<keyof typeof PAGE_SIZES>('letter');
   const [documentMargins, setDocumentMargins] = useState({
@@ -447,6 +481,8 @@ export default function DocumentEditor({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const isDocumentEmpty = documentContent.trim().length === 0;
+  const initialMountRef = useRef(true);
+  const hasLoadedDocumentRef = useRef(false);
   
   const currentPageSize = PAGE_SIZES[pageSize];
   const pageStackHeight = useMemo(() => {
@@ -507,7 +543,7 @@ export default function DocumentEditor({
   };
 
   // Manual save function with debouncing and deduplication
-  const handleManualSave = useCallback(async () => {
+  const handleManualSave = useCallback(async (isManualTrigger = true) => {
     // Prevent concurrent saves using global lock
     if (saveInProgress) {
       console.log('[Editor] Save already in progress globally, skipping');
@@ -525,6 +561,48 @@ export default function DocumentEditor({
     setIsSaving(true);
 
     try {
+      // Check if user can save to cloud (authenticated or anonymous with Supabase session)
+      if (!canSaveToCloud) {
+        // No session - save to localStorage and show signup modal
+        console.log('[Editor] No session - storing to localStorage');
+
+        const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
+
+        if (tempId) {
+          // Update existing temporary document
+          updateTemporaryDocument(tempId, {
+            title: documentTitle,
+            content: documentContent,
+          });
+        } else {
+          // Create new temporary document
+          const newTempId = saveTemporaryDocument({
+            title: documentTitle,
+            content: documentContent,
+          });
+
+          setDocumentId(newTempId);
+          if (onDocumentIdChange) {
+            onDocumentIdChange(newTempId);
+          }
+        }
+
+        const now = Date.now();
+        onLastSavedChange(now);
+        setHasUnsavedChanges(false);
+
+        // Update sync timestamp
+        updateLastKnownTimestamp(now);
+
+        // Show signup modal
+        showSignupModal('save');
+
+        saveInProgress = false;
+        setIsSaving(false);
+        return;
+      }
+
+      // Save to cloud (works for both authenticated and anonymous users)
       const documentData: DocumentData = {
         id: documentId,
         title: documentTitle,
@@ -541,7 +619,7 @@ export default function DocumentEditor({
       if (!documentId && savedDoc.id) {
         setDocumentId(savedDoc.id);
         console.log('[Editor] New document created with ID:', savedDoc.id);
-        
+
         // Notify parent to update URL
         if (onDocumentIdChange) {
           onDocumentIdChange(savedDoc.id);
@@ -550,13 +628,22 @@ export default function DocumentEditor({
 
       onLastSavedChange(savedDoc.lastModified);
       setHasUnsavedChanges(false); // Clear unsaved changes flag after successful save
+
+      // Show signup modal for anonymous users on manual save only (not auto-save)
+      if (isAnonymous && isManualTrigger) {
+        console.log('[Editor] Anonymous user manual save - showing signup modal');
+        showSignupModal('save');
+      }
     } catch (error) {
       console.error('[Editor] Save failed:', error);
 
       // Provide more helpful error messages
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-      if (errorMessage.includes('access not available') || errorMessage.includes('provider access token')) {
+      if (errorMessage.includes('Storage quota exceeded')) {
+        // Show storage full modal
+        showSignupModal('storage-full');
+      } else if (errorMessage.includes('access not available') || errorMessage.includes('provider access token')) {
         alert(
           '❌ Cannot Save Document\n\n' +
           'Your session does not have access to Google Drive/OneDrive.\n\n' +
@@ -570,7 +657,7 @@ export default function DocumentEditor({
       saveInProgress = false;
       setIsSaving(false);
     }
-  }, [documentId, documentTitle, documentContent, editorState, onLastSavedChange, onDocumentIdChange]);
+  }, [documentId, documentTitle, documentContent, editorState, onLastSavedChange, onDocumentIdChange, isAuthenticated, showSignupModal, initialDocumentId]);
 
   // Expose save callback to parent
   useEffect(() => {
@@ -581,13 +668,40 @@ export default function DocumentEditor({
     }
   }, [handleManualSave, onSaveCallbackReady]);
 
+  // Reset the loaded flag when document ID changes
+  useEffect(() => {
+    hasLoadedDocumentRef.current = false;
+  }, [initialDocumentId]);
+
   // Load document on mount (only for existing documents)
   useEffect(() => {
-    if (initialDocumentId && editorRef) {
+    // Only load once per document
+    if (initialDocumentId && editorRef && !hasLoadedDocumentRef.current) {
+      hasLoadedDocumentRef.current = true;
+
       const fetchDocument = async () => {
         console.log('[Editor] Loading document on mount:', initialDocumentId);
         try {
-          const savedDoc = await loadDocumentById(initialDocumentId);
+          const isTempDoc = initialDocumentId.startsWith('temp-');
+          let savedDoc = null;
+
+          if (isTempDoc) {
+            // Load from localStorage
+            console.log('[Editor] Loading temporary document from localStorage');
+            const tempDoc = loadTemporaryDocument(initialDocumentId);
+            if (tempDoc) {
+              savedDoc = {
+                id: tempDoc.id,
+                title: tempDoc.title,
+                content: tempDoc.content,
+                lastModified: tempDoc.lastModified,
+              };
+            }
+          } else if (isAuthenticated) {
+            // Load from cloud (only if authenticated)
+            savedDoc = await loadDocumentById(initialDocumentId);
+          }
+
           if (savedDoc) {
             console.log('[Editor] Document loaded:', savedDoc.id, 'content length:', savedDoc.content?.length || 0);
             setDocumentId(savedDoc.id);
@@ -596,20 +710,25 @@ export default function DocumentEditor({
 
             if (savedDoc.content) {
               setDocumentContent(savedDoc.content);
-              
+
               // Update the Lexical editor with the loaded markdown content
               editorRef.update(() => {
                 const root = $getRoot();
                 root.clear();
-                
+
                 // Convert markdown to Lexical nodes
                 $convertFromMarkdownString(savedDoc.content, TRANSFORMERS);
               });
-              
+
               console.log('[Editor] Content loaded into editor');
             }
+
+            // Update sync timestamp for temp docs
+            if (isTempDoc) {
+              updateLastKnownTimestamp(savedDoc.lastModified);
+            }
           } else {
-            console.error('[Editor] Document not found:', initialDocumentId);
+            console.log('[Editor] Document not found, starting with empty document');
           }
         } catch (error) {
           console.error('[Editor] Failed to load document:', error);
@@ -617,13 +736,19 @@ export default function DocumentEditor({
       };
 
       fetchDocument();
-    } else {
+    } else if (!initialDocumentId) {
       console.log('[Editor] New document - not loading existing document');
     }
-  }, [initialDocumentId, editorRef, onTitleChange, onLastSavedChange]);
+  }, [initialDocumentId, editorRef, isAuthenticated]);
 
   // Auto-save effect with debouncing - save if there are unsaved changes
   useEffect(() => {
+    // Skip auto-save on initial mount
+    if (initialMountRef.current) {
+      initialMountRef.current = false;
+      return;
+    }
+
     // Debounce auto-save: only save after user stops editing for a few seconds
     if (hasUnsavedChanges && !saveInProgress) {
       // Clear existing timeout
@@ -634,7 +759,43 @@ export default function DocumentEditor({
       // Set new timeout for debounced save
       pendingSaveTimeout = setTimeout(() => {
         console.log('[Editor] Debounced auto-save triggered');
-        handleManualSave();
+
+        if (!canSaveToCloud) {
+          // Silent save to localStorage only (no modal)
+          console.log('[Editor] Auto-save (no session) - silent save to localStorage');
+          try {
+            const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
+
+            if (tempId) {
+              updateTemporaryDocument(tempId, {
+                title: documentTitle,
+                content: documentContent,
+              });
+            } else {
+              const newTempId = saveTemporaryDocument({
+                title: documentTitle,
+                content: documentContent,
+              });
+
+              setDocumentId(newTempId);
+              if (onDocumentIdChange) {
+                onDocumentIdChange(newTempId);
+              }
+            }
+
+            const now = Date.now();
+            onLastSavedChange(now);
+            setHasUnsavedChanges(false);
+
+            // Update sync timestamp
+            updateLastKnownTimestamp(now);
+          } catch (error) {
+            console.error('[Editor] Auto-save to localStorage failed:', error);
+          }
+        } else {
+          // Auto-save - use normal save flow (pass false to indicate auto-save)
+          handleManualSave(false);
+        }
       }, 3000); // 3 seconds after last change
     }
 
@@ -643,7 +804,7 @@ export default function DocumentEditor({
         clearTimeout(pendingSaveTimeout);
       }
     };
-  }, [hasUnsavedChanges, documentContent, documentTitle, handleManualSave]);
+  }, [hasUnsavedChanges, documentContent, documentTitle, handleManualSave, isAuthenticated, documentId, initialDocumentId, onDocumentIdChange, onLastSavedChange]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -675,33 +836,56 @@ export default function DocumentEditor({
       if (hasUnsavedChanges && !saveInProgress) {
         console.log('[Editor] Save on close triggered');
 
-        // Use sendBeacon for reliable save on page unload
-        try {
-          const documentData = {
-            id: documentId,
-            title: documentTitle,
-            content: documentContent,
-            lastModified: Date.now(),
-            editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
-          };
+        if (!canSaveToCloud) {
+          // No session - save to localStorage synchronously
+          try {
+            const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
 
-          const blob = new Blob([JSON.stringify(documentData)], { type: 'application/json' });
-          const sent = navigator.sendBeacon('/api/save-on-close', blob);
-          
-          if (sent) {
-            console.log('[Editor] Save beacon sent successfully');
-          } else {
-            console.warn('[Editor] Save beacon failed to send');
+            if (tempId) {
+              updateTemporaryDocument(tempId, {
+                title: documentTitle,
+                content: documentContent,
+              });
+            } else {
+              saveTemporaryDocument({
+                title: documentTitle,
+                content: documentContent,
+              });
+            }
+
+            console.log('[Editor] Anonymous save on close successful');
+          } catch (error) {
+            console.error('[Editor] Failed to save to localStorage on close:', error);
           }
-        } catch (error) {
-          console.warn('[Editor] Failed to send save-on-close beacon:', error);
+        } else {
+          // Authenticated user - use sendBeacon for reliable save on page unload
+          try {
+            const documentData = {
+              id: documentId,
+              title: documentTitle,
+              content: documentContent,
+              lastModified: Date.now(),
+              editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
+            };
+
+            const blob = new Blob([JSON.stringify(documentData)], { type: 'application/json' });
+            const sent = navigator.sendBeacon('/api/save-on-close', blob);
+
+            if (sent) {
+              console.log('[Editor] Save beacon sent successfully');
+            } else {
+              console.warn('[Editor] Save beacon failed to send');
+            }
+          } catch (error) {
+            console.warn('[Editor] Failed to send save-on-close beacon:', error);
+          }
         }
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges, documentContent, documentId, documentTitle, editorState]);
+  }, [hasUnsavedChanges, documentContent, documentId, documentTitle, editorState, isAuthenticated, initialDocumentId]);
 
   const handleCommandK = useCallback(() => {
     setIsAISidebarOpen(true);
