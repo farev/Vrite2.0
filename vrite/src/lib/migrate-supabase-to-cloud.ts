@@ -17,8 +17,9 @@ export interface SupabaseMigrationResult {
 
 /**
  * Check if user has documents in Supabase database
+ * Optionally check for documents from a specific user_id (e.g., old anonymous session)
  */
-export async function hasSupabaseDocuments(): Promise<boolean> {
+export async function hasSupabaseDocuments(userId?: string): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
   try {
@@ -27,10 +28,13 @@ export async function hasSupabaseDocuments(): Promise<boolean> {
 
     if (!session) return false;
 
+    // Use provided userId or current session user_id
+    const targetUserId = userId || session.user.id;
+
     const { data: docs, error } = await supabase
       .from('documents')
       .select('id')
-      .eq('user_id', session.user.id)
+      .eq('user_id', targetUserId)
       .eq('is_deleted', false)
       .limit(1);
 
@@ -48,8 +52,9 @@ export async function hasSupabaseDocuments(): Promise<boolean> {
 
 /**
  * Get count of documents in Supabase
+ * Optionally count documents from a specific user_id (e.g., old anonymous session)
  */
-export async function getSupabaseDocumentCount(): Promise<number> {
+export async function getSupabaseDocumentCount(userId?: string): Promise<number> {
   if (typeof window === 'undefined') return 0;
 
   try {
@@ -58,10 +63,13 @@ export async function getSupabaseDocumentCount(): Promise<number> {
 
     if (!session) return 0;
 
+    // Use provided userId or current session user_id
+    const targetUserId = userId || session.user.id;
+
     const { data: docs, error } = await supabase
       .from('documents')
       .select('id')
-      .eq('user_id', session.user.id)
+      .eq('user_id', targetUserId)
       .eq('is_deleted', false);
 
     if (error) {
@@ -78,8 +86,9 @@ export async function getSupabaseDocumentCount(): Promise<number> {
 
 /**
  * Migrate all documents from Supabase to cloud storage (Google Drive/OneDrive)
+ * Optionally migrate documents from a specific user_id (e.g., old anonymous session)
  */
-export async function migrateSupabaseToCloud(): Promise<SupabaseMigrationResult> {
+export async function migrateSupabaseToCloud(userId?: string): Promise<SupabaseMigrationResult> {
   console.log('[Migration] Starting Supabase -> Cloud migration');
 
   const result: SupabaseMigrationResult = {
@@ -103,15 +112,21 @@ export async function migrateSupabaseToCloud(): Promise<SupabaseMigrationResult>
       return result;
     }
 
+    // Use provided userId or current session user_id
+    const targetUserId = userId || session.user.id;
+
     console.log('[Migration] Fetching documents from Supabase...');
+    if (userId) {
+      console.log(`[Migration] Migrating documents from anonymous user: ${userId}`);
+    }
 
     // Get all documents from Supabase
     const { data: docs, error: fetchError } = await supabase
       .from('documents')
       .select('*')
-      .eq('user_id', session.user.id)
+      .eq('user_id', targetUserId)
       .eq('is_deleted', false)
-      .order('last_modified', { ascending: false });
+      .order('last_modified', { ascending: false});
 
     if (fetchError) {
       console.error('[Migration] Failed to fetch documents:', fetchError);

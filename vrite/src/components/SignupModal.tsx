@@ -43,49 +43,36 @@ export default function SignupModal() {
         console.log('[SignupModal] Saved return path to localStorage:', currentPath);
       }
 
+      // Save current anonymous user_id if exists (for document migration)
+      if (isAnonymous && typeof window !== 'undefined') {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          localStorage.setItem('anonymous_user_id', session.user.id);
+          console.log('[SignupModal] Saved anonymous user_id for migration:', session.user.id);
+        }
+      }
+
       const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`;
 
-      // Check if user is anonymous and use linkIdentity to upgrade their account
-      if (isAnonymous) {
-        console.log('[SignupModal] Linking Google OAuth to anonymous account');
+      // Always use regular OAuth sign-in (avoid linkIdentity to prevent identity_already_exists errors)
+      console.log('[SignupModal] Initiating Google OAuth');
+      console.log('[SignupModal] redirectTo:', redirectUrl);
 
-        const { error } = await supabase.auth.linkIdentity({
-          provider: 'google',
-          options: {
-            redirectTo: redirectUrl,
-            queryParams: {
-              access_type: 'offline',
-              prompt: 'consent',
-            },
-            scopes: 'email profile openid https://www.googleapis.com/auth/drive.file',
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
           },
-        });
+          scopes: 'email profile openid https://www.googleapis.com/auth/drive.file',
+        },
+      });
 
-        if (error) {
-          console.error('[SignupModal] Link identity error:', error);
-          throw error;
-        }
-      } else {
-        // Regular OAuth sign-in for users without an anonymous session
-        console.log('[SignupModal] Initiating Google OAuth');
-        console.log('[SignupModal] redirectTo:', redirectUrl);
-
-        const { error } = await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: redirectUrl,
-            queryParams: {
-              access_type: 'offline',
-              prompt: 'consent',
-            },
-            scopes: 'email profile openid https://www.googleapis.com/auth/drive.file',
-          },
-        });
-
-        if (error) {
-          console.error('[SignupModal] OAuth error:', error);
-          throw error;
-        }
+      if (error) {
+        console.error('[SignupModal] OAuth error:', error);
+        throw error;
       }
     } catch (error) {
       console.error('[SignupModal] Google sign in error:', error);

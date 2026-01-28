@@ -68,10 +68,13 @@ export default function Home() {
         }
 
         // Then, check for Supabase documents (from anonymous session)
-        if (await hasSupabaseDocuments()) {
+        // Check for old anonymous user_id first (in case of OAuth sign-in with existing account)
+        const anonymousUserId = typeof window !== 'undefined' ? localStorage.getItem('anonymous_user_id') : null;
+
+        if (await hasSupabaseDocuments(anonymousUserId || undefined)) {
           console.log('[Home] Found Supabase documents, starting cloud migration...');
 
-          const docCount = await getSupabaseDocumentCount();
+          const docCount = await getSupabaseDocumentCount(anonymousUserId || undefined);
           console.log(`[Home] Found ${docCount} Supabase documents to migrate to cloud`);
 
           // Show migration UI
@@ -86,14 +89,15 @@ export default function Home() {
           const returnPath = typeof window !== 'undefined' ? localStorage.getItem('oauth_return_path') : null;
 
           try {
-            const result = await migrateSupabaseToCloud();
+            const result = await migrateSupabaseToCloud(anonymousUserId || undefined);
 
             if (result.success && result.migratedCount > 0) {
               console.log(`[Home] Successfully migrated ${result.migratedCount} documents to cloud`);
 
-              // Clear OAuth return path
+              // Clear OAuth return path and anonymous user_id
               if (typeof window !== 'undefined') {
                 localStorage.removeItem('oauth_return_path');
+                localStorage.removeItem('anonymous_user_id');
               }
 
               // Turn off migration UI
