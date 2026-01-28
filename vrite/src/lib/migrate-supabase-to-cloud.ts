@@ -154,17 +154,17 @@ export async function migrateSupabaseToCloud(): Promise<SupabaseMigrationResult>
         });
         result.migratedCount++;
 
-        // Delete from Supabase (soft delete)
+        // Delete from Supabase (hard delete - permanently remove)
         const { error: deleteError } = await supabase
           .from('documents')
-          .update({ is_deleted: true })
+          .delete()
           .eq('id', doc.id);
 
         if (deleteError) {
           console.warn(`[Migration] Failed to delete Supabase doc ${doc.id}:`, deleteError);
-          // Don't fail migration if delete fails
+          // Don't fail migration if delete fails - document is already in Drive
         } else {
-          console.log(`[Migration] Deleted Supabase doc ${doc.id}`);
+          console.log(`[Migration] Permanently deleted Supabase doc ${doc.id}`);
         }
       } catch (error) {
         console.error(`[Migration] Failed to migrate document ${doc.id}:`, error);
