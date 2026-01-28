@@ -36,9 +36,14 @@ export default function SignupModal() {
       setLoading(true);
       setError(null);
 
-      // Save current page URL to redirect back after OAuth
+      // Save current page URL to localStorage to redirect back after OAuth
       const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
-      const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback?return_to=${encodeURIComponent(currentPath)}`;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('oauth_return_path', currentPath);
+        console.log('[SignupModal] Saved return path to localStorage:', currentPath);
+      }
+
+      const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`;
 
       // Check if user is anonymous and use linkIdentity to upgrade their account
       if (isAnonymous) {
