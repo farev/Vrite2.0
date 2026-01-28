@@ -1,12 +1,10 @@
 /**
- * Document storage utilities - Supports Google Drive and OneDrive via Supabase Auth
+ * Document storage utilities - Supports Google Drive via Supabase Auth
  * Also supports anonymous localStorage-based storage for unauthenticated users
  */
 
 import { GoogleDriveClient } from './google-drive';
-import { OneDriveClient } from './onedrive';
 import { createClient } from './supabase/client';
-import type { Session } from '@supabase/supabase-js';
 import * as anonymousStorage from './storage-anonymous';
 import * as supabaseStorage from './storage-supabase';
 
@@ -22,31 +20,7 @@ export interface DocumentData {
 const AUTO_SAVE_INTERVAL = 30000; // 30 seconds in milliseconds
 
 /**
- * Detect the storage provider from the session
- */
-function getProviderFromSession(session: Session): 'google' | 'azure' {
-  // Check app_metadata first, then identities
-  const provider = session.user.app_metadata?.provider || 
-                   session.user.identities?.[0]?.provider;
-  
-  console.log('[Storage] Detected provider:', provider);
-  
-  // Return 'google' or 'azure', default to 'google' for backward compatibility
-  if (provider === 'azure') {
-    return 'azure';
-  }
-  return 'google';
-}
-
-/**
- * Get provider display name
- */
-function getProviderName(provider: 'google' | 'azure'): string {
-  return provider === 'azure' ? 'OneDrive' : 'Google Drive';
-}
-
-/**
- * Save document to cloud storage (Google Drive or OneDrive) or Supabase database
+ * Save document to cloud storage (Google Drive) or Supabase database
  * Routes to appropriate storage based on authentication type
  */
 export async function saveDocument(data: DocumentData): Promise<DocumentData> {
@@ -78,112 +52,71 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
     return supabaseStorage.saveDocumentToSupabase(data);
   }
 
-  // Authenticated OAuth users save to Google Drive/OneDrive
-  console.log('[Storage] Using cloud storage (OAuth authenticated)');
+  // Authenticated OAuth users save to Google Drive
+  console.log('[Storage] Using Google Drive storage (OAuth authenticated)');
 
-  // Detect provider
-  const provider = getProviderFromSession(session);
-  const providerName = getProviderName(provider);
   const accessToken = session.provider_token;
 
+  if (!accessToken) {
+    throw new Error('No access token available');
+  }
+
   try {
-    if (provider === 'azure') {
-      // Use OneDrive client
-      const oneDriveClient = new OneDriveClient(accessToken);
-      const file = await oneDriveClient.saveDocument(data.id || null, data.title, data.content);
-      
-      console.log('[Storage] Document saved to OneDrive:', file.id);
-      
-      return {
-        id: file.id,
-        title: file.name.replace('.md', ''), // Remove .md extension for display
-        content: data.content,
-        editorState: data.editorState,
-        lastModified: new Date(file.lastModifiedDateTime).getTime(),
-      };
-    } else {
-      // Use Google Drive client
-      const driveClient = new GoogleDriveClient(accessToken);
-      const file = await driveClient.saveDocument(data.id || null, data.title, data.content);
-      
-      console.log('[Storage] Document saved to Google Drive:', file.id);
-      
-      return {
-        id: file.id,
-        title: file.name.replace('.md', ''), // Remove .md extension for display
-        content: data.content,
-        editorState: data.editorState,
-        lastModified: new Date(file.modifiedTime).getTime(),
-      };
-    }
+    // Use Google Drive client
+    const driveClient = new GoogleDriveClient(accessToken);
+    const file = await driveClient.saveDocument(data.id || null, data.title, data.content);
+
+    console.log('[Storage] Document saved to Google Drive:', file.id);
+
+    return {
+      id: file.id,
+      title: file.name.replace('.md', ''), // Remove .md extension for display
+      content: data.content,
+      editorState: data.editorState,
+      lastModified: new Date(file.modifiedTime).getTime(),
+    };
   } catch (error) {
-    console.error(`[Storage] Save to ${providerName} failed:`, error);
+    console.error('[Storage] Save to Google Drive failed:', error);
     throw error;
   }
 }
 
 /**
- * Load most recent document from cloud storage (Google Drive or OneDrive)
+ * Load most recent document from cloud storage (Google Drive)
  */
 export async function loadDocument(): Promise<DocumentData | null> {
   console.log('[Storage] Loading most recent document');
-  
+
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  
+
   if (!session?.provider_token) {
     console.error('[Storage] No session or provider token');
     return null;
   }
 
-  // Detect provider
-  const provider = getProviderFromSession(session);
-  const providerName = getProviderName(provider);
-
   try {
-    if (provider === 'azure') {
-      // Use OneDrive client
-      const oneDriveClient = new OneDriveClient(session.provider_token);
-      const files = await oneDriveClient.listDocuments();
-      
-      if (files.length === 0) {
-        console.log('[Storage] No documents found in OneDrive');
-        return null;
-      }
+    // Use Google Drive client
+    const driveClient = new GoogleDriveClient(session.provider_token);
+    const files = await driveClient.listDocuments();
 
-      const mostRecent = files[0];
-      console.log('[Storage] Loading document:', mostRecent.id);
-      const { content } = await oneDriveClient.getDocument(mostRecent.id);
-      
-      return {
-        id: mostRecent.id,
-        title: mostRecent.name.replace('.md', ''), // Remove .md extension for display
-        content,
-        lastModified: new Date(mostRecent.lastModifiedDateTime).getTime(),
-      };
-    } else {
-      // Use Google Drive client
-      const driveClient = new GoogleDriveClient(session.provider_token);
-      const files = await driveClient.listDocuments();
-      
-      if (files.length === 0) {
-        console.log('[Storage] No documents found in Google Drive');
-        return null;
-      }
-
-      const mostRecent = files[0];
-      console.log('[Storage] Loading document:', mostRecent.id);
-      const { content } = await driveClient.getDocument(mostRecent.id);
-      
-      return {
-        id: mostRecent.id,
-        title: mostRecent.name.replace('.md', ''), // Remove .md extension for display
-        content,
-        lastModified: new Date(mostRecent.modifiedTime).getTime(),
-      };
+    if (files.length === 0) {
+      console.log('[Storage] No documents found in Google Drive');
+      return null;
     }
+
+    const mostRecent = files[0];
+    console.log('[Storage] Loading document:', mostRecent.id);
+    const { content } = await driveClient.getDocument(mostRecent.id);
+
+    return {
+      id: mostRecent.id,
+      title: mostRecent.name.replace('.md', ''), // Remove .md extension for display
+      content,
+      lastModified: new Date(mostRecent.modifiedTime).getTime(),
+    };
   } catch (error) {
-    console.error(`[Storage] Load from ${providerName} failed:`, error);
+    console.error('[Storage] Load from Google Drive failed:', error);
     throw error;
   }
 }
@@ -222,29 +155,19 @@ export function getLastModifiedString(timestamp: number): string {
  */
 export async function hasSavedDocument(): Promise<boolean> {
   console.log('[Storage] Checking for saved documents');
-  
+
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  
+
   if (!session?.provider_token) {
     return false;
   }
 
-  // Detect provider
-  const provider = getProviderFromSession(session);
-
   try {
-    if (provider === 'azure') {
-      // Use OneDrive client
-      const oneDriveClient = new OneDriveClient(session.provider_token);
-      const files = await oneDriveClient.listDocuments();
-      return files.length > 0;
-    } else {
-      // Use Google Drive client
-      const driveClient = new GoogleDriveClient(session.provider_token);
-      const files = await driveClient.listDocuments();
-      return files.length > 0;
-    }
+    // Use Google Drive client
+    const driveClient = new GoogleDriveClient(session.provider_token);
+    const files = await driveClient.listDocuments();
+    return files.length > 0;
   } catch (error) {
     console.error('[Storage] Failed to check for documents:', error);
     return false;
@@ -275,38 +198,26 @@ export async function listAllDocuments(): Promise<DocumentData[]> {
   }
 
   // Authenticated OAuth users use cloud storage
-  console.log('[Storage] Listing from cloud storage');
+  console.log('[Storage] Listing from Google Drive');
 
-  // Detect provider
-  const provider = getProviderFromSession(session);
-  const providerName = getProviderName(provider);
+  if (!session.provider_token) {
+    console.error('[Storage] No provider token available');
+    return [];
+  }
 
   try {
-    if (provider === 'azure') {
-      // Use OneDrive client
-      const oneDriveClient = new OneDriveClient(session.provider_token);
-      const files = await oneDriveClient.listDocuments();
-      
-      return files.map(file => ({
-        id: file.id,
-        title: file.name.replace('.md', ''),
-        content: '', // Don't load content for list view
-        lastModified: new Date(file.lastModifiedDateTime).getTime(),
-      }));
-    } else {
-      // Use Google Drive client
-      const driveClient = new GoogleDriveClient(session.provider_token);
-      const files = await driveClient.listDocuments();
-      
-      return files.map(file => ({
-        id: file.id,
-        title: file.name.replace('.md', ''),
-        content: '', // Don't load content for list view
-        lastModified: new Date(file.modifiedTime).getTime(),
-      }));
-    }
+    // Use Google Drive client
+    const driveClient = new GoogleDriveClient(session.provider_token);
+    const files = await driveClient.listDocuments();
+
+    return files.map(file => ({
+      id: file.id,
+      title: file.name.replace('.md', ''),
+      content: '', // Don't load content for list view
+      lastModified: new Date(file.modifiedTime).getTime(),
+    }));
   } catch (error) {
-    console.error(`[Storage] List from ${providerName} failed:`, error);
+    console.error('[Storage] List from Google Drive failed:', error);
     return [];
   }
 }
@@ -338,38 +249,26 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
   }
 
   // Authenticated OAuth users with non-UUID IDs use cloud storage
-  console.log('[Storage] Loading from cloud storage');
+  console.log('[Storage] Loading from Google Drive');
 
-  // Detect provider
-  const provider = getProviderFromSession(session);
-  const providerName = getProviderName(provider);
+  if (!session.provider_token) {
+    console.error('[Storage] No provider token available');
+    return null;
+  }
 
   try {
-    if (provider === 'azure') {
-      // Use OneDrive client
-      const oneDriveClient = new OneDriveClient(session.provider_token);
-      const { content, metadata } = await oneDriveClient.getDocument(documentId);
-      
-      return {
-        id: metadata.id,
-        title: metadata.name.replace('.md', ''),
-        content,
-        lastModified: new Date(metadata.lastModifiedDateTime).getTime(),
-      };
-    } else {
-      // Use Google Drive client
-      const driveClient = new GoogleDriveClient(session.provider_token);
-      const { content, metadata } = await driveClient.getDocument(documentId);
-      
-      return {
-        id: metadata.id,
-        title: metadata.name.replace('.md', ''),
-        content,
-        lastModified: new Date(metadata.modifiedTime).getTime(),
-      };
-    }
+    // Use Google Drive client
+    const driveClient = new GoogleDriveClient(session.provider_token);
+    const { content, metadata } = await driveClient.getDocument(documentId);
+
+    return {
+      id: metadata.id,
+      title: metadata.name.replace('.md', ''),
+      content,
+      lastModified: new Date(metadata.modifiedTime).getTime(),
+    };
   } catch (error) {
-    console.error(`[Storage] Load from ${providerName} failed:`, error);
+    console.error('[Storage] Load from Google Drive failed:', error);
     return null;
   }
 }
