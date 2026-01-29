@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
 import {
   $getRoot,
   $getSelection,
@@ -42,10 +41,7 @@ import {
   Undo,
   Redo,
   Sparkles,
-  X,
-  PlusCircle,
 } from 'lucide-react';
-import { createPortal } from 'react-dom';
 import AIAssistantSidebar, { type ContextSnippet } from './AIAssistantSidebar';
 import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
@@ -349,47 +345,7 @@ function SelectionContextPlugin({ onSelectionChange }: { onSelectionChange: (inf
   return null;
 }
 
-function SelectionContextPopover({
-  selectionInfo,
-  onAddToContext,
-  onDismiss,
-}: {
-  selectionInfo: SelectionInfo;
-  onAddToContext: () => void;
-  onDismiss: () => void;
-}) {
-  if (!selectionInfo.text || !selectionInfo.rect || typeof document === 'undefined') {
-    return null;
-  }
-
-  const { rect } = selectionInfo;
-  const style = {
-    top: rect.top + rect.height + 8,
-    left: rect.left + rect.width / 2,
-  };
-
-  const preventMouseDown = (event: ReactMouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  return createPortal(
-    <div
-      className="ai-context-selection-popover"
-      style={{ top: `${style.top}px`, left: `${style.left}px` }}
-      onMouseDown={preventMouseDown}
-    >
-      <button type="button" className="ai-context-selection-popover-btn" onClick={onAddToContext}>
-        <PlusCircle size={14} />
-        Add to AI context
-      </button>
-      <button type="button" className="ai-context-selection-popover-dismiss" onClick={onDismiss}>
-        <X size={12} />
-      </button>
-    </div>,
-    document.body
-  );
-}
+// SelectionContextPopover removed - text is now automatically added to AI context when selected
 
 // Page size presets (width x height in pixels at 96 DPI)
 const PAGE_SIZES = {
@@ -1155,18 +1111,18 @@ export default function DocumentEditor({
     setContextSnippets([]);
   }, []);
 
-  const hasPendingSelection = useMemo(
-    () => selectionInfo.text.trim().length > 0 && selectionInfo.rect !== null,
-    [selectionInfo]
-  );
+  // Automatically sync selected text to AI context
+  useEffect(() => {
+    const normalized = selectionInfo.text.trim();
 
-  const handleDismissSelection = useCallback(() => {
-    setSelectionInfo({ text: '', rect: null });
-    if (typeof window !== 'undefined') {
-      const domSelection = window.getSelection();
-      domSelection?.removeAllRanges();
+    if (normalized.length > 0) {
+      // Replace context with current selection
+      setContextSnippets([{ id: 'current-selection', text: normalized }]);
+    } else {
+      // Clear context when nothing is selected
+      setContextSnippets([]);
     }
-  }, []);
+  }, [selectionInfo]);
 
   const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
@@ -1241,13 +1197,6 @@ export default function DocumentEditor({
                     onAllResolved={handleAllDiffsResolved}
                   />
                   <SelectionContextPlugin onSelectionChange={setSelectionInfo} />
-                  {hasPendingSelection && (
-                    <SelectionContextPopover
-                      selectionInfo={selectionInfo}
-                      onAddToContext={handleAddSelectionToContext}
-                      onDismiss={handleDismissSelection}
-                    />
-                  )}
                 </div>
               </div>
             </div>

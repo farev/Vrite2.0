@@ -432,46 +432,29 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
           </div>
 
           {/* Context Panel */}
-          <div className="ai-context-panel">
-            <div className="ai-context-panel-header">
-              <span>Context ({contextSnippets.length})</span>
-              {contextSnippets.length > 0 && (
+          {contextSnippets.length > 0 && (
+            <div className="ai-context-panel">
+              <div className="ai-context-panel-header">
+                <span>Selected text</span>
                 <button
                   type="button"
-                  className="ai-context-clear-btn"
-                  onClick={() => onClearContextSnippets?.()}
+                  className="ai-context-chip-remove"
+                  onClick={() => onRemoveContextSnippet?.(contextSnippets[0]?.id)}
+                  aria-label="Clear selection"
                 >
-                  Clear all
+                  <X size={16} />
                 </button>
-              )}
+              </div>
+              <div className="ai-context-chip-list">
+                {contextSnippets.map((snippet) => (
+                  <div key={snippet.id} className="ai-context-chip ai-context-chip-selected">
+                    <span>{snippet.text}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            {contextSnippets.length === 0 ? (
-              <p className="ai-context-panel-note">
-                Highlight text in the editor and choose &quot;Add to AI context&quot; to pin it here for your next prompt.
-              </p>
-            ) : (
-              <>
-                <div className="ai-context-chip-list">
-                  {contextSnippets.map((snippet) => (
-                    <div key={snippet.id} className="ai-context-chip">
-                      <span>{truncateContext(snippet.text)}</span>
-                      <button
-                        type="button"
-                        className="ai-context-chip-remove"
-                        onClick={() => onRemoveContextSnippet?.(snippet.id)}
-                        aria-label="Remove context"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <p className="ai-context-panel-note">
-                  These snippets are sent with your prompt and prioritized by the assistant.
-                </p>
-              </>
-            )}
-          </div>
+          )}
+
 
           {isDiffModeActive && (
             <div className="ai-diff-actions">

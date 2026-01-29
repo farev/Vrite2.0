@@ -17,6 +17,13 @@ import {
 } from '@lexical/rich-text';
 import { $setBlocksType } from '@lexical/selection';
 import { $createParagraphNode, $isTextNode } from 'lexical';
+import {
+  INSERT_UNORDERED_LIST_COMMAND,
+  INSERT_ORDERED_LIST_COMMAND,
+  REMOVE_LIST_COMMAND,
+  $isListNode,
+  ListNode,
+} from '@lexical/list';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $createEquationNode } from './nodes/EquationNode';
 import {
@@ -43,6 +50,8 @@ import {
   IndentIncrease,
   IndentDecrease,
   MoreVertical,
+  List,
+  ListOrdered,
 } from 'lucide-react';
 
 interface FormattingToolbarProps {
@@ -74,6 +83,8 @@ export default function FormattingToolbar({
   const [isStrikethrough, setIsStrikethrough] = useState(false);
   const [isSubscript, setIsSubscript] = useState(false);
   const [isSuperscript, setIsSuperscript] = useState(false);
+  const [isBulletList, setIsBulletList] = useState(false);
+  const [isNumberedList, setIsNumberedList] = useState(false);
   const [fontSize, setFontSize] = useState('12pt');
   const [fontFamily, setFontFamily] = useState('Times New Roman');
   const [lineHeight, setLineHeight] = useState('1.5');
@@ -126,19 +137,35 @@ export default function FormattingToolbar({
       setIsStrikethrough(selection.hasFormat('strikethrough'));
       setIsSubscript(selection.hasFormat('subscript'));
       setIsSuperscript(selection.hasFormat('superscript'));
-      
+
       // Get block type and alignment
       const anchorNode = selection.anchor.getNode();
       const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
       const elementDOM = editor.getElementByKey(element.getKey());
-      
+
+      // Check if we're in a list
+      let parent = anchorNode.getParent();
+      let isInBulletList = false;
+      let isInNumberedList = false;
+      while (parent) {
+        if ($isListNode(parent)) {
+          const listType = parent.getListType();
+          isInBulletList = listType === 'bullet';
+          isInNumberedList = listType === 'number';
+          break;
+        }
+        parent = parent.getParent();
+      }
+      setIsBulletList(isInBulletList);
+      setIsNumberedList(isInNumberedList);
+
       if (elementDOM !== null) {
         if ($isHeadingNode(element)) {
           setBlockType(element.getTag());
         } else {
           setBlockType('paragraph');
         }
-        
+
         // Get text alignment from element
         const align = elementDOM.style.textAlign || 'left';
         setTextAlign(align);
@@ -171,6 +198,24 @@ export default function FormattingToolbar({
         $setBlocksType(selection, () => $createParagraphNode());
       }
     });
+    setOpenDropdown(null);
+  };
+
+  const toggleBulletList = () => {
+    if (isBulletList) {
+      editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
+    } else {
+      editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined);
+    }
+    setOpenDropdown(null);
+  };
+
+  const toggleNumberedList = () => {
+    if (isNumberedList) {
+      editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
+    } else {
+      editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined);
+    }
     setOpenDropdown(null);
   };
 
@@ -474,6 +519,36 @@ export default function FormattingToolbar({
           >
             <Underline size={18} />
           </button>
+        </div>
+
+        {/* List Formatting */}
+        <div className="toolbar-dropdown">
+          <button
+            className={`toolbar-dropdown-button toolbar-icon-button ${isBulletList || isNumberedList ? 'active' : ''}`}
+            onClick={() => toggleDropdown('lists', true)}
+            title="Lists"
+          >
+            {isBulletList ? <List size={18} /> : isNumberedList ? <ListOrdered size={18} /> : <List size={18} />}
+            <ChevronDown size={14} />
+          </button>
+          {openDropdown === 'lists' && (
+            <div className="toolbar-dropdown-menu">
+              <button
+                onClick={toggleBulletList}
+                className={`toolbar-dropdown-item ${isBulletList ? 'active' : ''}`}
+              >
+                <List size={18} style={{ marginRight: '8px' }} />
+                Bullet List
+              </button>
+              <button
+                onClick={toggleNumberedList}
+                className={`toolbar-dropdown-item ${isNumberedList ? 'active' : ''}`}
+              >
+                <ListOrdered size={18} style={{ marginRight: '8px' }} />
+                Numbered List
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Text Color and Highlight */}
