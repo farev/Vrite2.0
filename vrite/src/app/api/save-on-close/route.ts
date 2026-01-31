@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
 
     console.log('[SaveOnClose] Received save request for:', documentData.title, 'ID:', documentData.id);
 
-    // Only save if there's actual content or a title change
-    if (documentData.content.trim().length > 0 || documentData.title !== 'Untitled Document') {
+    // Only save if there's actual editor state or a title change
+    if (documentData.editorState || documentData.title !== 'Untitled Document') {
       // Save the document
       const savedDoc = await saveDocument(documentData);
       console.log('[SaveOnClose] Document saved successfully, ID:', savedDoc.id);

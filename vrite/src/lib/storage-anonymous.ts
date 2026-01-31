@@ -9,7 +9,7 @@
 export interface TemporaryDocument {
   id: string;
   title: string;
-  content: string;
+  editorState: string;
   lastModified: number;
   createdAt: number;
 }
@@ -32,7 +32,7 @@ export function generateTempId(): string {
 export function saveTemporaryDocument(data: {
   id?: string;
   title: string;
-  content: string;
+  editorState: string;
 }): string {
   try {
     const id = data.id || generateTempId();
@@ -41,7 +41,7 @@ export function saveTemporaryDocument(data: {
     const document: TemporaryDocument = {
       id,
       title: data.title,
-      content: data.content,
+      editorState: data.editorState,
       lastModified: now,
       createdAt: now,
     };
@@ -68,7 +68,7 @@ export function saveTemporaryDocument(data: {
         const document: TemporaryDocument = {
           id,
           title: data.title,
-          content: data.content,
+          editorState: data.editorState,
           lastModified: now,
           createdAt: now,
         };

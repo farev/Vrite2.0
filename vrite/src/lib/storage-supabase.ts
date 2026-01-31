@@ -8,9 +8,8 @@ import { createClient } from './supabase/client';
 export interface DocumentData {
   id?: string;
   title: string;
-  content: string;
+  editorState: string;
   lastModified: number;
-  editorState?: string;
 }
 
 /**
@@ -47,8 +46,7 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
         .from('documents')
         .update({
           title: data.title,
-          content: data.content,
-          editor_state: data.editorState ? JSON.parse(data.editorState) : null,
+          editor_state: JSON.parse(data.editorState),
           last_modified: new Date().toISOString(),
         })
         .eq('id', data.id)
@@ -66,8 +64,7 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
       return {
         id: updatedDoc.id,
         title: updatedDoc.title,
-        content: updatedDoc.content || '',
-        editorState: updatedDoc.editor_state ? JSON.stringify(updatedDoc.editor_state) : undefined,
+        editorState: JSON.stringify(updatedDoc.editor_state),
         lastModified: new Date(updatedDoc.last_modified).getTime(),
       };
     } else {
@@ -79,8 +76,7 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
         .insert({
           user_id: userId,
           title: data.title,
-          content: data.content,
-          editor_state: data.editorState ? JSON.parse(data.editorState) : null,
+          editor_state: JSON.parse(data.editorState),
           storage_provider: 'supabase',
           last_modified: new Date().toISOString(),
         })
@@ -97,8 +93,7 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
       return {
         id: newDoc.id,
         title: newDoc.title,
-        content: newDoc.content || '',
-        editorState: newDoc.editor_state ? JSON.stringify(newDoc.editor_state) : undefined,
+        editorState: JSON.stringify(newDoc.editor_state),
         lastModified: new Date(newDoc.last_modified).getTime(),
       };
     }
@@ -144,8 +139,7 @@ export async function loadDocumentFromSupabase(documentId: string): Promise<Docu
     return {
       id: doc.id,
       title: doc.title,
-      content: doc.content || '',
-      editorState: doc.editor_state ? JSON.stringify(doc.editor_state) : undefined,
+      editorState: JSON.stringify(doc.editor_state),
       lastModified: new Date(doc.last_modified).getTime(),
     };
   } catch (error) {
@@ -171,7 +165,7 @@ export async function listDocumentsFromSupabase(): Promise<DocumentData[]> {
   try {
     const { data: docs, error } = await supabase
       .from('documents')
-      .select('id, title, content, editor_state, last_modified')
+      .select('id, title, editor_state, last_modified')
       .eq('user_id', session.user.id)
       .eq('is_deleted', false)
       .order('last_modified', { ascending: false });
@@ -184,7 +178,7 @@ export async function listDocumentsFromSupabase(): Promise<DocumentData[]> {
     return (docs || []).map(doc => ({
       id: doc.id,
       title: doc.title,
-      content: '', // Don't load full content for list view
+      editorState: '{"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}}', // Empty editor state for list view
       lastModified: new Date(doc.last_modified).getTime(),
     }));
   } catch (error) {
