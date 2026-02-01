@@ -24,6 +24,7 @@ RULES:
 FORMAT: {"blocks":[{"id":"block-0","type":"paragraph","segments":[{"text":"Hello","format":0}]}]}
 Types: paragraph, heading (tag:h1/h2/h3), list-item (listType:bullet/number)
 Format: 0=normal, 1=bold, 2=italic, 3=bold+italic
+Alignment: Use "align" property - "left" (default), "center", "right", "justify"
 
 OPERATIONS:
 - modify_segments: Edit text/format in block
@@ -39,6 +40,14 @@ CRITICAL BLOCK ID RULES:
 - NEVER reference block IDs that don't exist in the input (e.g., don't use block-3 if only block-0, block-1, block-2 exist)
 
 LISTS: type="list-item" + listType. NEVER put "1." or "-" in text.
+
+ALIGNMENT: Use "align" property to set text alignment:
+- "center": For titles, headings, centered content
+- "right": For dates, signatures, right-aligned content
+- "justify": For body paragraphs (formal documents)
+- "left" or omit: Default left alignment
+Example: {"id":"block-0","type":"heading","tag":"h1","align":"center","segments":[...]}
+DO NOT write about alignment in the text - SET the align property instead!
 
 EDITING PRINCIPLES:
 - Preserve the author's voice and style
@@ -98,6 +107,7 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
                   type: { type: 'string', enum: ['paragraph', 'heading', 'list-item'] },
                   tag: { type: 'string', enum: ['h1', 'h2', 'h3'], description: 'Heading level (for headings only)' },
                   listType: { type: 'string', enum: ['bullet', 'number'], description: 'List type (for list-items only)' },
+                  align: { type: 'string', enum: ['left', 'center', 'right', 'justify', 'start', 'end'], description: 'Text alignment (optional, defaults to left)' },
                   segments: {
                     type: 'array',
                     items: {
@@ -145,6 +155,7 @@ interface SimplifiedBlock {
   tag?: 'h1' | 'h2' | 'h3';
   listType?: 'bullet' | 'number';
   indent?: number;
+  align?: 'left' | 'center' | 'right' | 'justify' | 'start' | 'end';
   segments: TextSegment[];
 }
 

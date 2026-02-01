@@ -21,6 +21,7 @@ export type SerializedDiffNode = Spread<
     isBold?: boolean;
     isItalic?: boolean;
     headingLevel?: number;
+    alignmentChange?: { from: string; to: string }; // Track alignment changes
   },
   SerializedLexicalNode
 >;
@@ -35,6 +36,7 @@ function DiffComponent({
   isBold,
   isItalic,
   headingLevel,
+  alignmentChange,
 }: {
   text: string;
   diffType: DiffType;
@@ -45,6 +47,7 @@ function DiffComponent({
   isBold?: boolean;
   isItalic?: boolean;
   headingLevel?: number;
+  alignmentChange?: { from: string; to: string };
 }) {
   const isAddition = diffType === 'addition';
   const isReplacement = isAddition && !!originalText;
@@ -114,6 +117,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
   __isBold?: boolean;
   __isItalic?: boolean;
   __headingLevel?: number;
+  __alignmentChange?: { from: string; to: string };
 
   // Static callbacks for accept/reject - will be set by the plugin
   static __onAccept: ((nodeKey: NodeKey) => void) | null = null;
@@ -131,6 +135,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
       node.__isBold,
       node.__isItalic,
       node.__headingLevel,
+      node.__alignmentChange,
       node.__key
     );
   }
@@ -150,6 +155,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
     isBold?: boolean,
     isItalic?: boolean,
     headingLevel?: number,
+    alignmentChange?: { from: string; to: string },
     key?: NodeKey
   ) {
     super(key);
@@ -159,6 +165,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
     this.__isBold = isBold;
     this.__isItalic = isItalic;
     this.__headingLevel = headingLevel;
+    this.__alignmentChange = alignmentChange;
   }
 
   createDOM(config: EditorConfig): HTMLElement {
@@ -177,7 +184,8 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
       serializedNode.originalText,
       serializedNode.isBold,
       serializedNode.isItalic,
-      serializedNode.headingLevel
+      serializedNode.headingLevel,
+      serializedNode.alignmentChange
     );
   }
 
@@ -191,6 +199,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
       isBold: this.__isBold,
       isItalic: this.__isItalic,
       headingLevel: this.__headingLevel,
+      alignmentChange: this.__alignmentChange,
     };
   }
 
@@ -221,6 +230,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
         isBold={this.__isBold}
         isItalic={this.__isItalic}
         headingLevel={this.__headingLevel}
+        alignmentChange={this.__alignmentChange}
         onAccept={DiffNode.__onAccept || (() => {})}
         onReject={DiffNode.__onReject || (() => {})}
       />
@@ -238,9 +248,10 @@ export function $createDiffNode(
   originalText?: string,
   isBold?: boolean,
   isItalic?: boolean,
-  headingLevel?: number
+  headingLevel?: number,
+  alignmentChange?: { from: string; to: string }
 ): DiffNode {
-  return new DiffNode(diffType, text, originalText, isBold, isItalic, headingLevel);
+  return new DiffNode(diffType, text, originalText, isBold, isItalic, headingLevel, alignmentChange);
 }
 
 export function $isDiffNode(node: LexicalNode | null | undefined): node is DiffNode {

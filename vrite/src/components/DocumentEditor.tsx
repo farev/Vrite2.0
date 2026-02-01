@@ -906,25 +906,18 @@ export default function DocumentEditor({
     console.log('Diff applied to editor');
   }, []);
 
-  const handleAllDiffsResolved = useCallback((finalContent: string) => {
+  const handleAllDiffsResolved = useCallback(() => {
     // Called when all diff nodes have been accepted/rejected
-    // finalContent is markdown, need to convert to Lexical
-    if (editorRef) {
-      editorRef.update(() => {
-        const root = $getRoot();
-        root.clear();
-
-        // Convert markdown to Lexical nodes
-        $convertFromMarkdownString(finalContent, TRANSFORMERS);
-      });
-    }
+    // The editor state is already correct - diffs were applied directly to Lexical state
+    // No need to reload or convert anything
+    console.log('All diffs resolved - editor state is already up to date');
 
     setIsDiffModeActive(false);
     setOriginalContent(null);
     setSuggestedContent(null);
     setPendingChanges(null);
-    setDocumentContent(finalContent);
-  }, [editorRef]);
+    // Document content is already correct in the editor - no need to set it
+  }, []);
 
   const handleAcceptAllChanges = useCallback(() => {
     // Accept all changes - find all DiffNodes and accept them

@@ -10,6 +10,8 @@ import {
   $createTextNode,
   type LexicalNode,
   type TextNode,
+  type ElementNode,
+  $isElementNode,
 } from 'lexical';
 import { $createHeadingNode, type HeadingTagType } from '@lexical/rich-text';
 import { $createListItemNode, $createListNode, type ListItemNode } from '@lexical/list';
@@ -182,8 +184,14 @@ function applyReplaceBlock(change: ReplaceBlockChange, blockKeyMap: BlockKeyMap)
   // Get original text for diff display
   const originalText = existingNode.getTextContent();
 
+  // Get original alignment if node is an ElementNode
+  let originalAlign: string | undefined;
+  if ($isElementNode(existingNode)) {
+    originalAlign = (existingNode as ElementNode).getFormatType() || 'left';
+  }
+
   // Create new node with diff highlighting
-  const newNode = createBlockNodeWithDiff(change.newBlock, originalText);
+  const newNode = createBlockNodeWithDiff(change.newBlock, originalText, originalAlign);
   existingNode.replace(newNode);
 }
 
@@ -219,6 +227,11 @@ function createListItemNodeWithDiff(block: SimplifiedBlock): ListItemNode {
   const listItemNode = $createListItemNode();
   if (block.indent) {
     listItemNode.setIndent(block.indent);
+  }
+
+  // Apply alignment if specified
+  if (block.align && $isElementNode(listItemNode)) {
+    (listItemNode as unknown as ElementNode).setFormat(block.align);
   }
 
   const newText = block.segments.map(s => s.text).join('');
@@ -368,7 +381,8 @@ function applyModifySegments(change: ModifySegmentsChange, blockKeyMap: BlockKey
  */
 function createBlockNodeWithDiff(
   block: SimplifiedBlock,
-  originalText: string | null
+  originalText: string | null,
+  originalAlign?: string
 ): LexicalNode {
   let node: LexicalNode;
 
@@ -389,6 +403,16 @@ function createBlockNodeWithDiff(
       break;
   }
 
+  // Apply alignment if specified
+  if (block.align && $isElementNode(node)) {
+    (node as ElementNode).setFormat(block.align);
+  }
+
+  // Detect alignment change
+  const newAlign = block.align || 'left';
+  const oldAlign = originalAlign || 'left';
+  const alignmentChange = (newAlign !== oldAlign) ? { from: oldAlign, to: newAlign } : undefined;
+
   // Build new text from segments
   const newText = block.segments.map(s => s.text).join('');
   const isBold = hasFormat(block.segments, 1);
@@ -401,7 +425,9 @@ function createBlockNodeWithDiff(
       newText,
       originalText,
       isBold,
-      isItalic
+      isItalic,
+      undefined,
+      alignmentChange
     );
     (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
   } else if (originalText === null) {
@@ -411,16 +437,32 @@ function createBlockNodeWithDiff(
       newText,
       undefined, // No original text
       isBold,
-      isItalic
+      isItalic,
+      undefined,
+      alignmentChange
     );
     (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
   } else {
-    // Same text (shouldn't happen for replace, but handle it)
-    // Apply segments directly without diff
-    for (const segment of block.segments) {
-      const textNode = $createTextNode(segment.text);
-      applyFormatToTextNode(textNode, segment.format);
-      (node as { append?: (child: LexicalNode) => void }).append?.(textNode);
+    // Same text but might have alignment change
+    if (alignmentChange) {
+      // Only alignment changed - show as diff
+      const diffNode = $createDiffNode(
+        'addition',
+        newText,
+        newText, // Same text
+        isBold,
+        isItalic,
+        undefined,
+        alignmentChange
+      );
+      (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
+    } else {
+      // No changes - apply segments directly without diff
+      for (const segment of block.segments) {
+        const textNode = $createTextNode(segment.text);
+        applyFormatToTextNode(textNode, segment.format);
+        (node as { append?: (child: LexicalNode) => void }).append?.(textNode);
+      }
     }
   }
 

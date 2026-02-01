@@ -3,7 +3,8 @@
  * for communication with the AI agent backend.
  */
 
-import type { LexicalNode, TextNode } from 'lexical';
+import type { LexicalNode, TextNode, ElementNode } from 'lexical';
+import { $isElementNode } from 'lexical';
 import type { HeadingNode } from '@lexical/rich-text';
 import type { ListItemNode, ListNode } from '@lexical/list';
 
@@ -20,6 +21,7 @@ export interface SimplifiedBlock {
   tag?: 'h1' | 'h2' | 'h3';
   listType?: 'bullet' | 'number';
   indent?: number;
+  align?: 'left' | 'center' | 'right' | 'justify' | 'start' | 'end'; // Text alignment
   segments: TextSegment[];
 }
 
@@ -47,11 +49,21 @@ export function serializeLexicalToSimplified(root: LexicalNode): SimplifiedDocum
       const segments = extractSegments(node);
       // Only add if there's content (or it's the only block)
       if (segments.length > 0 || blockIndex === 0) {
-        blocks.push({
+        const block: SimplifiedBlock = {
           id: `block-${blockIndex++}`,
           type: 'paragraph',
           segments: segments.length > 0 ? segments : [{ text: '', format: 0 }],
-        });
+        };
+
+        // Extract alignment if available
+        if ($isElementNode(node)) {
+          const formatType = (node as ElementNode).getFormatType();
+          if (formatType && formatType !== 'left') {
+            block.align = formatType;
+          }
+        }
+
+        blocks.push(block);
       }
     } else if (type === 'heading') {
       const headingNode = node as HeadingNode;
@@ -60,12 +72,22 @@ export function serializeLexicalToSimplified(root: LexicalNode): SimplifiedDocum
       // Normalize h4-h6 to h3
       const normalizedTag = ['h1', 'h2', 'h3'].includes(tag) ? tag as 'h1' | 'h2' | 'h3' : 'h3';
 
-      blocks.push({
+      const block: SimplifiedBlock = {
         id: `block-${blockIndex++}`,
         type: 'heading',
         tag: normalizedTag,
         segments: segments.length > 0 ? segments : [{ text: '', format: 0 }],
-      });
+      };
+
+      // Extract alignment if available
+      if ($isElementNode(headingNode)) {
+        const formatType = (headingNode as unknown as ElementNode).getFormatType();
+        if (formatType && formatType !== 'left') {
+          block.align = formatType;
+        }
+      }
+
+      blocks.push(block);
     } else if (type === 'list') {
       const listNode = node as ListNode;
       const listType = listNode.getListType() === 'bullet' ? 'bullet' : 'number';
@@ -78,13 +100,23 @@ export function serializeLexicalToSimplified(root: LexicalNode): SimplifiedDocum
       const listItemNode = node as ListItemNode;
       const segments = extractSegments(listItemNode);
 
-      blocks.push({
+      const block: SimplifiedBlock = {
         id: `block-${blockIndex++}`,
         type: 'list-item',
         listType: parentListType,
         indent: listItemNode.getIndent(),
         segments: segments.length > 0 ? segments : [{ text: '', format: 0 }],
-      });
+      };
+
+      // Extract alignment if available
+      if ($isElementNode(listItemNode)) {
+        const formatType = (listItemNode as unknown as ElementNode).getFormatType();
+        if (formatType && formatType !== 'left') {
+          block.align = formatType;
+        }
+      }
+
+      blocks.push(block);
     } else if ('getChildren' in node && typeof node.getChildren === 'function') {
       // Process children of unknown container nodes (like root)
       const children = node.getChildren() as LexicalNode[];
