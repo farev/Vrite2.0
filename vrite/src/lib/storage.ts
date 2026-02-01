@@ -11,10 +11,8 @@ import * as supabaseStorage from './storage-supabase';
 export interface DocumentData {
   id?: string;
   title: string;
-  content: string;
-  formatType?: string;
+  editorState: string; // Lexical editor state as JSON string (required)
   lastModified: number;
-  editorState?: string; // Lexical editor state as JSON string
 }
 
 const AUTO_SAVE_INTERVAL = 30000; // 30 seconds in milliseconds
@@ -52,12 +50,11 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
   try {
     // Use Google Drive client
     const driveClient = new GoogleDriveClient(accessToken);
-    const file = await driveClient.saveDocument(data.id || null, data.title, data.content);
+    const file = await driveClient.saveDocument(data.id || null, data.title, data.editorState);
 
     return {
       id: file.id,
-      title: file.name.replace('.md', ''), // Remove .md extension for display
-      content: data.content,
+      title: file.name.replace('.vrite.json', ''), // Remove .vrite.json extension for display
       editorState: data.editorState,
       lastModified: new Date(file.modifiedTime).getTime(),
     };
@@ -93,13 +90,13 @@ export async function loadDocument(): Promise<DocumentData | null> {
 
     const mostRecent = files[0];
     console.log('[Storage] Loading document:', mostRecent.id);
-    const { content } = await driveClient.getDocument(mostRecent.id);
+    const { editorState, metadata } = await driveClient.getDocument(mostRecent.id);
 
     return {
-      id: mostRecent.id,
-      title: mostRecent.name.replace('.md', ''), // Remove .md extension for display
-      content,
-      lastModified: new Date(mostRecent.modifiedTime).getTime(),
+      id: metadata.id,
+      title: metadata.name.replace('.vrite.json', ''), // Remove .vrite.json extension for display
+      editorState,
+      lastModified: new Date(metadata.modifiedTime).getTime(),
     };
   } catch (error) {
     console.error('[Storage] Load from Google Drive failed:', error);
@@ -198,8 +195,8 @@ export async function listAllDocuments(): Promise<DocumentData[]> {
 
     return files.map(file => ({
       id: file.id,
-      title: file.name.replace('.md', ''),
-      content: '', // Don't load content for list view
+      title: file.name.replace('.vrite.json', ''),
+      editorState: '{"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}}', // Empty editor state for list view
       lastModified: new Date(file.modifiedTime).getTime(),
     }));
   } catch (error) {
@@ -245,12 +242,12 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
   try {
     // Use Google Drive client
     const driveClient = new GoogleDriveClient(session.provider_token);
-    const { content, metadata } = await driveClient.getDocument(documentId);
+    const { editorState, metadata } = await driveClient.getDocument(documentId);
 
     return {
       id: metadata.id,
-      title: metadata.name.replace('.md', ''),
-      content,
+      title: metadata.name.replace('.vrite.json', ''),
+      editorState,
       lastModified: new Date(metadata.modifiedTime).getTime(),
     };
   } catch (error) {
@@ -279,7 +276,7 @@ export async function saveDocumentUnified(data: DocumentData, isAuthenticated: b
     const id = anonymousStorage.saveTemporaryDocument({
       id: data.id,
       title: data.title,
-      content: data.content,
+      editorState: data.editorState,
     });
 
     return {
@@ -310,7 +307,7 @@ export async function loadDocumentUnified(documentId?: string, isAuthenticated?:
         return {
           id: tempDoc.id,
           title: tempDoc.title,
-          content: tempDoc.content,
+          editorState: tempDoc.editorState,
           lastModified: tempDoc.lastModified,
         };
       }
@@ -324,7 +321,7 @@ export async function loadDocumentUnified(documentId?: string, isAuthenticated?:
         return {
           id: tempDoc.id,
           title: tempDoc.title,
-          content: tempDoc.content,
+          editorState: tempDoc.editorState,
           lastModified: tempDoc.lastModified,
         };
       }
@@ -351,7 +348,7 @@ export async function listDocumentsUnified(isAuthenticated: boolean): Promise<Do
     return tempDocs.map(doc => ({
       id: doc.id,
       title: doc.title,
-      content: doc.content,
+      editorState: doc.editorState,
       lastModified: doc.lastModified,
     }));
   }

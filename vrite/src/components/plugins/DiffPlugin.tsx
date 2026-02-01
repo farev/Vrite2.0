@@ -6,8 +6,11 @@ import {
   $getRoot,
   $createTextNode,
   $getNodeByKey,
+  $setSelection,
+  $isElementNode,
   type NodeKey,
   type LexicalNode,
+  type ElementNode,
 } from 'lexical';
 import { $convertToMarkdownString, TRANSFORMERS } from '@lexical/markdown';
 import { DiffNode, $isDiffNode } from '../nodes/DiffNode';
@@ -48,9 +51,11 @@ export default function DiffPlugin({
 
     checkNode(root);
 
+    // When all diffs are resolved, the editor state is already correct
+    // No need to reload or convert - diffs were applied directly to Lexical state
     if (!hasDiffNodes && onAllResolved) {
-      const markdownContent = $convertToMarkdownString(TRANSFORMERS);
-      onAllResolved(markdownContent);
+      // Just notify that all diffs are resolved (no content parameter needed)
+      onAllResolved('');
     }
   }, [onAllResolved]);
 
@@ -67,6 +72,8 @@ export default function DiffPlugin({
           if (nodeData.isBold) textNode.toggleFormat('bold');
           if (nodeData.isItalic) textNode.toggleFormat('italic');
 
+          // Replace the DiffNode with the new TextNode
+          // The parent element already has the new alignment set (from createBlockNodeWithDiff)
           node.replace(textNode);
         }
         checkAllResolved();
@@ -83,6 +90,14 @@ export default function DiffPlugin({
         if ($isDiffNode(node)) {
           const originalText = node.getOriginalText();
           const diffType = node.getDiffType();
+          const nodeData = node.exportJSON();
+          const parent = node.getParent();
+
+          // Restore original alignment if there was an alignment change
+          if (nodeData.alignmentChange && parent && $isElementNode(parent)) {
+            const originalAlign = nodeData.alignmentChange.from;
+            (parent as ElementNode).setFormat(originalAlign as any);
+          }
 
           if (diffType === 'addition') {
             if (originalText) {
@@ -91,7 +106,6 @@ export default function DiffPlugin({
               node.replace(textNode);
             } else {
               // New content with no original - remove entirely
-              const parent = node.getParent();
               node.remove();
               // Remove empty parent if needed
               if (parent && parent.getTextContent().trim() === '') {
@@ -127,6 +141,9 @@ export default function DiffPlugin({
 
     editor.update(() => {
       const root = $getRoot();
+
+      // Clear selection to avoid "selection has been lost" error when replacing nodes
+      $setSelection(null);
 
       // Build block ID to node key mapping
       const blockKeyMap = buildBlockKeyMap(root);

@@ -523,22 +523,24 @@ export default function DocumentEditor({
 
         const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
 
-        if (tempId) {
-          // Update existing temporary document
-          updateTemporaryDocument(tempId, {
-            title: documentTitle,
-            content: documentContent,
-          });
-        } else {
-          // Create new temporary document
-          const newTempId = saveTemporaryDocument({
-            title: documentTitle,
-            content: documentContent,
-          });
+        if (editorState) {
+          if (tempId) {
+            // Update existing temporary document
+            updateTemporaryDocument(tempId, {
+              title: documentTitle,
+              editorState: JSON.stringify(editorState.toJSON()),
+            });
+          } else {
+            // Create new temporary document
+            const newTempId = saveTemporaryDocument({
+              title: documentTitle,
+              editorState: JSON.stringify(editorState.toJSON()),
+            });
 
-          setDocumentId(newTempId);
-          if (onDocumentIdChange) {
-            onDocumentIdChange(newTempId);
+            setDocumentId(newTempId);
+            if (onDocumentIdChange) {
+              onDocumentIdChange(newTempId);
+            }
           }
         }
 
@@ -558,12 +560,18 @@ export default function DocumentEditor({
       }
 
       // Save to cloud (works for both authenticated and anonymous users)
+      if (!editorState) {
+        console.error('[Editor] No editor state available for save');
+        saveInProgress = false;
+        setIsSaving(false);
+        return;
+      }
+
       const documentData: DocumentData = {
         id: documentId,
         title: documentTitle,
-        content: documentContent,
+        editorState: JSON.stringify(editorState.toJSON()),
         lastModified: Date.now(),
-        editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
       };
 
       const savedDoc = await saveDocument(documentData);
@@ -646,7 +654,7 @@ export default function DocumentEditor({
               savedDoc = {
                 id: tempDoc.id,
                 title: tempDoc.title,
-                content: tempDoc.content,
+                editorState: tempDoc.editorState,
                 lastModified: tempDoc.lastModified,
               };
             }
@@ -656,24 +664,23 @@ export default function DocumentEditor({
           }
 
           if (savedDoc) {
-            console.log('[Editor] Document loaded:', savedDoc.id, 'content length:', savedDoc.content?.length || 0);
+            console.log('[Editor] Document loaded:', savedDoc.id, 'editorState length:', savedDoc.editorState?.length || 0);
             setDocumentId(savedDoc.id);
             onTitleChange(savedDoc.title);
             onLastSavedChange(savedDoc.lastModified);
 
-            if (savedDoc.content) {
-              setDocumentContent(savedDoc.content);
-
-              // Update the Lexical editor with the loaded markdown content
+            if (savedDoc.editorState) {
+              // Update the Lexical editor with the loaded editor state
+              console.log('[Editor] Loading from Lexical JSON');
+              const parsedState = editorRef.parseEditorState(savedDoc.editorState);
+              editorRef.setEditorState(parsedState);
+              console.log('[Editor] Content loaded into editor');
+            } else {
+              console.log('[Editor] No editorState found - starting with empty document');
               editorRef.update(() => {
                 const root = $getRoot();
                 root.clear();
-
-                // Convert markdown to Lexical nodes
-                $convertFromMarkdownString(savedDoc.content, TRANSFORMERS);
               });
-
-              console.log('[Editor] Content loaded into editor');
             }
 
             // Update sync timestamp for temp docs
@@ -714,31 +721,33 @@ export default function DocumentEditor({
         if (!canSaveToCloud) {
           // Silent save to localStorage only (no modal)
           try {
-            const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
+            if (editorState) {
+              const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
 
-            if (tempId) {
-              updateTemporaryDocument(tempId, {
-                title: documentTitle,
-                content: documentContent,
-              });
-            } else {
-              const newTempId = saveTemporaryDocument({
-                title: documentTitle,
-                content: documentContent,
-              });
+              if (tempId) {
+                updateTemporaryDocument(tempId, {
+                  title: documentTitle,
+                  editorState: JSON.stringify(editorState.toJSON()),
+                });
+              } else {
+                const newTempId = saveTemporaryDocument({
+                  title: documentTitle,
+                  editorState: JSON.stringify(editorState.toJSON()),
+                });
 
-              setDocumentId(newTempId);
-              if (onDocumentIdChange) {
-                onDocumentIdChange(newTempId);
+                setDocumentId(newTempId);
+                if (onDocumentIdChange) {
+                  onDocumentIdChange(newTempId);
+                }
               }
+
+              const now = Date.now();
+              onLastSavedChange(now);
+              setHasUnsavedChanges(false);
+
+              // Update sync timestamp
+              updateLastKnownTimestamp(now);
             }
-
-            const now = Date.now();
-            onLastSavedChange(now);
-            setHasUnsavedChanges(false);
-
-            // Update sync timestamp
-            updateLastKnownTimestamp(now);
           } catch (error) {
             console.error('[Editor] Auto-save to localStorage failed:', error);
           }
@@ -789,42 +798,45 @@ export default function DocumentEditor({
         if (!canSaveToCloud) {
           // No session - save to localStorage synchronously
           try {
-            const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
+            if (editorState) {
+              const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
 
-            if (tempId) {
-              updateTemporaryDocument(tempId, {
-                title: documentTitle,
-                content: documentContent,
-              });
-            } else {
-              saveTemporaryDocument({
-                title: documentTitle,
-                content: documentContent,
-              });
+              if (tempId) {
+                updateTemporaryDocument(tempId, {
+                  title: documentTitle,
+                  editorState: JSON.stringify(editorState.toJSON()),
+                });
+              } else {
+                saveTemporaryDocument({
+                  title: documentTitle,
+                  editorState: JSON.stringify(editorState.toJSON()),
+                });
+              }
+
+              console.log('[Editor] Anonymous save on close successful');
             }
-
-            console.log('[Editor] Anonymous save on close successful');
           } catch (error) {
             console.error('[Editor] Failed to save to localStorage on close:', error);
           }
         } else {
           // Authenticated user - use sendBeacon for reliable save on page unload
           try {
-            const documentData = {
-              id: documentId,
-              title: documentTitle,
-              content: documentContent,
-              lastModified: Date.now(),
-              editorState: editorState ? JSON.stringify(editorState.toJSON()) : undefined,
-            };
+            if (editorState) {
+              const documentData = {
+                id: documentId,
+                title: documentTitle,
+                editorState: JSON.stringify(editorState.toJSON()),
+                lastModified: Date.now(),
+              };
 
-            const blob = new Blob([JSON.stringify(documentData)], { type: 'application/json' });
-            const sent = navigator.sendBeacon('/api/save-on-close', blob);
+              const blob = new Blob([JSON.stringify(documentData)], { type: 'application/json' });
+              const sent = navigator.sendBeacon('/api/save-on-close', blob);
 
-            if (sent) {
-              console.log('[Editor] Save beacon sent successfully');
-            } else {
-              console.warn('[Editor] Save beacon failed to send');
+              if (sent) {
+                console.log('[Editor] Save beacon sent successfully');
+              } else {
+                console.warn('[Editor] Save beacon failed to send');
+              }
             }
           } catch (error) {
             console.warn('[Editor] Failed to send save-on-close beacon:', error);
@@ -888,25 +900,18 @@ export default function DocumentEditor({
     console.log('Diff applied to editor');
   }, []);
 
-  const handleAllDiffsResolved = useCallback((finalContent: string) => {
+  const handleAllDiffsResolved = useCallback(() => {
     // Called when all diff nodes have been accepted/rejected
-    // finalContent is markdown, need to convert to Lexical
-    if (editorRef) {
-      editorRef.update(() => {
-        const root = $getRoot();
-        root.clear();
-
-        // Convert markdown to Lexical nodes
-        $convertFromMarkdownString(finalContent, TRANSFORMERS);
-      });
-    }
+    // The editor state is already correct - diffs were applied directly to Lexical state
+    // No need to reload or convert anything
+    console.log('All diffs resolved - editor state is already up to date');
 
     setIsDiffModeActive(false);
     setOriginalContent(null);
     setSuggestedContent(null);
     setPendingChanges(null);
-    setDocumentContent(finalContent);
-  }, [editorRef]);
+    // Document content is already correct in the editor - no need to set it
+  }, []);
 
   const handleAcceptAllChanges = useCallback(() => {
     // Accept all changes - find all DiffNodes and accept them
