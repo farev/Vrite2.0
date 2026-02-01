@@ -260,22 +260,11 @@ export default function AIAssistantSidebar({
 
     const hasSeenOnboarding = typeof window !== 'undefined' && localStorage.getItem('vrite_has_seen_onboarding');
 
-    console.log('[AIAssistant] Onboarding check:', {
-      hasSeenOnboarding: !!hasSeenOnboarding,
-      isAuthenticated,
-      hasSession: !!sessionToken,
-      hasTriggeredOnboarding: hasTriggeredOnboardingRef.current,
-      timerSet: !!onboardingTimerRef.current,
-      shouldTrigger: !hasSeenOnboarding && isAuthenticated === false && sessionToken !== null
-    });
-
     if (!hasSeenOnboarding && isAuthenticated === false && sessionToken) {
       hasTriggeredOnboardingRef.current = true;
 
       // Trigger onboarding after a short delay to let the editor load
       onboardingTimerRef.current = setTimeout(async () => {
-        console.log('[AIAssistant] Triggering automatic onboarding for anonymous user');
-
         const onboardingPrompt = `Please introduce yourself to the user and explain your capabilities as an AI writing assistant. Format this nicely in the document. Include:
 - Who you are (an AI assistant for writing and editing)
 - Key capabilities (formatting, editing, content generation, document styling)

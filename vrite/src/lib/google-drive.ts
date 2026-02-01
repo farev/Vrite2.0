@@ -36,8 +36,6 @@ export class GoogleDriveClient {
       return this.vwriteFolderId;
     }
 
-    console.log('[GoogleDrive] Finding or creating vwrite folder');
-
     try {
       // First, try to find existing folder
       const query = encodeURIComponent(
@@ -61,7 +59,6 @@ export class GoogleDriveClient {
             throw new Error('Folder ID is null in search response');
           }
           this.vwriteFolderId = folderId;
-          console.log('[GoogleDrive] Found existing vwrite folder:', this.vwriteFolderId);
           return folderId;
         }
       }
@@ -288,8 +285,6 @@ export class GoogleDriveClient {
     title: string,
     content: string
   ): Promise<DriveFile> {
-    console.log('[GoogleDrive] Saving document:', title, 'ID:', fileId);
-
     if (fileId) {
       return await this.updateFile(fileId, content, title);
     } else {
@@ -302,8 +297,6 @@ export class GoogleDriveClient {
    * First checks if a file with the same name exists to avoid duplicates
    */
   async createFile(title: string, content: string): Promise<DriveFile> {
-    console.log('[GoogleDrive] Creating new file:', title);
-
     try {
       const fileName = title.endsWith('.md') ? title : `${title}.md`;
       
@@ -387,8 +380,6 @@ export class GoogleDriveClient {
    * Update an existing file's content and optionally rename it
    */
   async updateFile(fileId: string, content: string, newTitle?: string): Promise<DriveFile> {
-    console.log('[GoogleDrive] Updating file:', fileId, newTitle ? `with new title: ${newTitle}` : '');
-
     try {
       let fileName: string | undefined;
       let shouldRename = false;
@@ -505,8 +496,6 @@ export class GoogleDriveClient {
       }
 
       const file = await metadataResponse.json();
-      console.log('[GoogleDrive] File updated successfully:', file.id);
-
       return file;
     } catch (error) {
       console.error('[GoogleDrive] Update error:', error);

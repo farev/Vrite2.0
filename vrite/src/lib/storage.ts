@@ -24,8 +24,6 @@ const AUTO_SAVE_INTERVAL = 30000; // 30 seconds in milliseconds
  * Routes to appropriate storage based on authentication type
  */
 export async function saveDocument(data: DocumentData): Promise<DocumentData> {
-  console.log('[Storage] Save initiated:', data.title);
-
   // Get access token from Supabase session
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
@@ -38,22 +36,12 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
   const isAnonymous = session.user.is_anonymous || false;
   const hasProviderToken = !!session.provider_token;
 
-  // Debug: Log session info
-  console.log('[Storage] Session info:', {
-    userId: session.user.id,
-    email: session.user.email,
-    isAnonymous,
-    hasProviderToken,
-  });
-
   // Anonymous users or users without OAuth tokens save to Supabase database
   if (isAnonymous || !hasProviderToken) {
-    console.log('[Storage] Using Supabase database storage (anonymous or no OAuth)');
     return supabaseStorage.saveDocumentToSupabase(data);
   }
 
   // Authenticated OAuth users save to Google Drive
-  console.log('[Storage] Using Google Drive storage (OAuth authenticated)');
 
   const accessToken = session.provider_token;
 
@@ -65,8 +53,6 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
     // Use Google Drive client
     const driveClient = new GoogleDriveClient(accessToken);
     const file = await driveClient.saveDocument(data.id || null, data.title, data.content);
-
-    console.log('[Storage] Document saved to Google Drive:', file.id);
 
     return {
       id: file.id,

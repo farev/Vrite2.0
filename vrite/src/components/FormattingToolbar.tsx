@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   $getSelection,
   $isRangeSelection,
@@ -92,10 +92,13 @@ export default function FormattingToolbar({
   const [textColor, setTextColor] = useState('#000000');
   const [highlightColor, setHighlightColor] = useState('transparent');
   const [textAlign, setTextAlign] = useState('left');
-  
+
   // Dropdown states - only one can be open at a time
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+
+  // Ref for click-outside detection
+  const toolbarRef = useRef<HTMLDivElement>(null);
 
   const fontSizes = ['8pt', '9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '18pt', '20pt', '24pt', '28pt', '36pt', '48pt', '72pt'];
   const fontFamilies = [
@@ -180,6 +183,22 @@ export default function FormattingToolbar({
       });
     });
   }, [editor, updateToolbar]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (toolbarRef.current && !toolbarRef.current.contains(event.target as Node)) {
+        setOpenDropdown(null);
+        setIsMoreOpen(false);
+      }
+    };
+
+    // Use capture phase to ensure we catch the event before other handlers
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+    };
+  }, []);
 
   const formatHeading = (headingSize: HeadingTagType) => {
     editor.update(() => {
@@ -414,7 +433,7 @@ export default function FormattingToolbar({
   };
 
   return (
-    <div className="formatting-toolbar">
+    <div className="formatting-toolbar" ref={toolbarRef}>
       <div className="formatting-toolbar-main">
         {/* Style Dropdown */}
         <div className="toolbar-dropdown">
