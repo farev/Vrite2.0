@@ -5,9 +5,12 @@ import {
   $getSelection,
   $isRangeSelection,
   FORMAT_TEXT_COMMAND,
+  FORMAT_ELEMENT_COMMAND,
   UNDO_COMMAND,
   REDO_COMMAND,
   $getNodeByKey,
+  ElementFormatType,
+  $isElementNode,
 } from 'lexical';
 import {
   $createHeadingNode,
@@ -141,7 +144,6 @@ export default function FormattingToolbar({
       // Get block type and alignment
       const anchorNode = selection.anchor.getNode();
       const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
-      const elementDOM = editor.getElementByKey(element.getKey());
 
       // Check if we're in a list
       let parent = anchorNode.getParent();
@@ -159,16 +161,18 @@ export default function FormattingToolbar({
       setIsBulletList(isInBulletList);
       setIsNumberedList(isInNumberedList);
 
-      if (elementDOM !== null) {
-        if ($isHeadingNode(element)) {
-          setBlockType(element.getTag());
-        } else {
-          setBlockType('paragraph');
-        }
+      if ($isHeadingNode(element)) {
+        setBlockType(element.getTag());
+      } else {
+        setBlockType('paragraph');
+      }
 
-        // Get text alignment from element
-        const align = elementDOM.style.textAlign || 'left';
-        setTextAlign(align);
+      // Get text alignment from Lexical's native format property
+      if ($isElementNode(element)) {
+        const formatType = element.getFormatType();
+        setTextAlign(formatType || 'left');
+      } else {
+        setTextAlign('left');
       }
     }
   }, [editor]);
@@ -271,19 +275,7 @@ export default function FormattingToolbar({
   };
 
   const applyTextAlign = (align: 'left' | 'center' | 'right' | 'justify') => {
-    editor.update(() => {
-      const selection = $getSelection();
-      if ($isRangeSelection(selection)) {
-        const anchorNode = selection.anchor.getNode();
-        const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
-        if (element) {
-          const elementDOM = editor.getElementByKey(element.getKey());
-          if (elementDOM) {
-            elementDOM.style.textAlign = align;
-          }
-        }
-      }
-    });
+    editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, align as ElementFormatType);
     setTextAlign(align);
   };
 

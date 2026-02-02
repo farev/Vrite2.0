@@ -158,7 +158,7 @@ export class GoogleDriveClient {
 
       // First try to find files in the vwrite folder
       const folderQuery = encodeURIComponent(
-        `mimeType='text/markdown' and '${folderId}' in parents and trashed=false`
+        `mimeType='application/json' and '${folderId}' in parents and trashed=false`
       );
 
       const folderResponse = await fetch(
@@ -190,7 +190,7 @@ export class GoogleDriveClient {
       console.log('[GoogleDrive] No files in vwrite folder, checking root directory');
 
       const rootQuery = encodeURIComponent(
-        `mimeType='text/markdown' and 'root' in parents and trashed=false and name contains 'vwrite'`
+        `mimeType='application/json' and 'root' in parents and trashed=false and name contains '.vrite.json'`
       );
 
       const rootResponse = await fetch(
@@ -232,9 +232,9 @@ export class GoogleDriveClient {
   /**
    * Get a specific document's content and metadata
    */
-  async getDocument(fileId: string): Promise<{ content: string; metadata: DriveFile }> {
+  async getDocument(fileId: string): Promise<{ editorState: string; metadata: DriveFile }> {
     console.log('[GoogleDrive] Fetching document:', fileId);
-    
+
     try {
       // Fetch metadata
       const metadataResponse = await fetch(
@@ -273,7 +273,11 @@ export class GoogleDriveClient {
       const content = await contentResponse.text();
       console.log('[GoogleDrive] Document fetched successfully, size:', content.length, 'bytes');
 
-      return { content, metadata };
+      // Parse the Vrite document structure
+      const vriteDoc = JSON.parse(content);
+      const editorState = JSON.stringify(vriteDoc.editorState);
+
+      return { editorState, metadata };
     } catch (error) {
       console.error('[GoogleDrive] Get document error:', error);
       throw error;
@@ -286,14 +290,14 @@ export class GoogleDriveClient {
   async saveDocument(
     fileId: string | null,
     title: string,
-    content: string
+    editorState: string
   ): Promise<DriveFile> {
     console.log('[GoogleDrive] Saving document:', title, 'ID:', fileId);
 
     if (fileId) {
-      return await this.updateFile(fileId, content, title);
+      return await this.updateFile(fileId, editorState, title);
     } else {
-      return await this.createFile(title, content);
+      return await this.createFile(title, editorState);
     }
   }
 
@@ -301,12 +305,12 @@ export class GoogleDriveClient {
    * Create a new file in Google Drive
    * First checks if a file with the same name exists to avoid duplicates
    */
-  async createFile(title: string, content: string): Promise<DriveFile> {
+  async createFile(title: string, editorState: string): Promise<DriveFile> {
     console.log('[GoogleDrive] Creating new file:', title);
 
     try {
-      const fileName = title.endsWith('.md') ? title : `${title}.md`;
-      
+      const fileName = title.endsWith('.vrite.json') ? title : `${title}.vrite.json`;
+
       // Get the vwrite folder ID
       const folderId = await this.findOrCreateVwriteFolder();
 
@@ -330,7 +334,7 @@ export class GoogleDriveClient {
           // File already exists, update it instead of creating a new one
           const existingFile = searchData.files[0];
           console.log('[GoogleDrive] File with same name exists, updating instead:', existingFile.id);
-          return await this.updateFile(existingFile.id, content, title);
+          return await this.updateFile(existingFile.id, editorState, title);
         }
       }
 
@@ -339,9 +343,17 @@ export class GoogleDriveClient {
       const delimiter = `\r\n--${boundary}\r\n`;
       const closeDelimiter = `\r\n--${boundary}--`;
 
+      // Create the Vrite document structure
+      const vriteDoc = {
+        version: '1.0',
+        title: title,
+        editorState: JSON.parse(editorState),
+        lastModified: Date.now(),
+      };
+
       const metadata: DriveFileMetadata = {
         name: fileName,
-        mimeType: 'text/markdown',
+        mimeType: 'application/json',
         // Only set parents if it's not root (root is default)
         ...(folderId !== 'root' && { parents: [folderId] }),
       };
@@ -351,8 +363,8 @@ export class GoogleDriveClient {
         'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
         JSON.stringify(metadata) +
         delimiter +
-        'Content-Type: text/markdown\r\n\r\n' +
-        content +
+        'Content-Type: application/json\r\n\r\n' +
+        JSON.stringify(vriteDoc, null, 2) +
         closeDelimiter;
 
       const response = await fetch(
@@ -386,7 +398,7 @@ export class GoogleDriveClient {
   /**
    * Update an existing file's content and optionally rename it
    */
-  async updateFile(fileId: string, content: string, newTitle?: string): Promise<DriveFile> {
+  async updateFile(fileId: string, editorState: string, newTitle?: string): Promise<DriveFile> {
     console.log('[GoogleDrive] Updating file:', fileId, newTitle ? `with new title: ${newTitle}` : '');
 
     try {
@@ -408,7 +420,7 @@ export class GoogleDriveClient {
 
       let currentParents: string[] = [];
       let currentMetadata: any = null;
-      
+
       if (currentMetadataResponse.ok) {
         currentMetadata = await currentMetadataResponse.json();
         currentParents = currentMetadata.parents || [];
@@ -427,7 +439,7 @@ export class GoogleDriveClient {
 
       // If title is provided, check if it has changed
       if (newTitle) {
-        const desiredFileName = newTitle.endsWith('.md') ? newTitle : `${newTitle}.md`;
+        const desiredFileName = newTitle.endsWith('.vrite.json') ? newTitle : `${newTitle}.vrite.json`;
 
         if (currentMetadata) {
           shouldRename = currentMetadata.name !== desiredFileName;
@@ -464,6 +476,14 @@ export class GoogleDriveClient {
         }
       }
 
+      // Create the Vrite document structure
+      const vriteDoc = {
+        version: '1.0',
+        title: newTitle || 'Untitled',
+        editorState: JSON.parse(editorState),
+        lastModified: Date.now(),
+      };
+
       // Update content
       const updateResponse = await fetch(
         `${this.uploadUrl}/files/${fileId}?uploadType=media`,
@@ -471,9 +491,9 @@ export class GoogleDriveClient {
           method: 'PATCH',
           headers: {
             'Authorization': `Bearer ${this.accessToken}`,
-            'Content-Type': 'text/markdown',
+            'Content-Type': 'application/json',
           },
-          body: content,
+          body: JSON.stringify(vriteDoc, null, 2),
         }
       );
 
@@ -499,7 +519,7 @@ export class GoogleDriveClient {
         return {
           id: fileId,
           name: fileName || 'Unknown',
-          mimeType: 'text/markdown',
+          mimeType: 'application/json',
           modifiedTime: new Date().toISOString(),
         };
       }

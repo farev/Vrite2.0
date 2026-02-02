@@ -152,8 +152,7 @@ export async function migrateSupabaseToCloud(userId?: string): Promise<SupabaseM
 
         const documentData: DocumentData = {
           title: doc.title || 'Untitled Document',
-          content: doc.content || '',
-          editorState: doc.editor_state ? JSON.stringify(doc.editor_state) : undefined,
+          editorState: doc.editor_state ? JSON.stringify(doc.editor_state) : '{"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}}',
           lastModified: new Date(doc.last_modified).getTime(),
         };
 

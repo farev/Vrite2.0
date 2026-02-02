@@ -14,7 +14,7 @@ import { saveDocument, type DocumentData } from './storage';
 
 interface LegacyDocumentData {
   title: string;
-  content: string;
+  content?: string; // Legacy field - will be converted to editorState if present
   formatType?: string;
   lastModified: number;
   editorState?: string;
@@ -67,15 +67,19 @@ export async function migrateLegacyDocument(): Promise<MigrationResult> {
 
     const legacyDoc: LegacyDocumentData = JSON.parse(stored);
 
-    // Parse editor state if it exists
-    let editorState: Record<string, unknown> | undefined;
+    // Parse editor state if it exists, otherwise create empty state
+    let editorState: Record<string, unknown>;
     if (legacyDoc.editorState) {
       try {
         editorState = JSON.parse(legacyDoc.editorState);
       } catch {
-        // If parsing fails, ignore editor state
-        console.warn('Failed to parse legacy editor state');
+        // If parsing fails, use empty state
+        console.warn('Failed to parse legacy editor state, using empty state');
+        editorState = {"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}};
       }
+    } else {
+      // No editor state, create empty state
+      editorState = {"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}};
     }
 
     // Check if document already exists in Supabase
@@ -83,7 +87,6 @@ export async function migrateLegacyDocument(): Promise<MigrationResult> {
       .from('documents')
       .select('id')
       .eq('title', legacyDoc.title)
-      .eq('content', legacyDoc.content)
       .limit(1);
 
     if (existingDocs && existingDocs.length > 0) {
@@ -101,7 +104,6 @@ export async function migrateLegacyDocument(): Promise<MigrationResult> {
       .insert({
         user_id: session.user.id,
         title: legacyDoc.title || 'Untitled Document',
-        content: legacyDoc.content || '',
         editor_state: editorState,
         storage_provider: 'supabase',
         last_modified: new Date(legacyDoc.lastModified || Date.now()).toISOString(),
@@ -245,7 +247,7 @@ export async function migrateTemporaryDocuments(): Promise<TempDocMigrationResul
 
         const documentData: DocumentData = {
           title: tempDoc.title || 'Untitled Document',
-          content: tempDoc.content || '',
+          editorState: tempDoc.editorState,
           lastModified: tempDoc.lastModified,
         };
 
