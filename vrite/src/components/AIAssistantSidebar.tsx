@@ -21,6 +21,7 @@ interface Message {
   content: string;
   timestamp: Date;
   isLoading?: boolean;
+  isStreaming?: boolean;
 }
 
 export interface ContextSnippet {
@@ -84,6 +85,126 @@ export default function AIAssistantSidebar({
     if (text.length <= limit) return text;
     return `${text.slice(0, limit - 1)}…`;
   };
+
+  // Handle streaming response from the AI
+  const handleStreamingResponse = useCallback(async (
+    endpoint: string,
+    requestBody: any,
+    messageId: string,
+    isOnboarding: boolean
+  ) => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    console.log('[AIAssistant] Sending streaming request to:', endpoint);
+    console.log('[AIAssistant] Request body:', { ...requestBody, document: '[REDACTED]' });
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sessionToken}`,
+        'apikey': anonKey || '',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    console.log('[AIAssistant] Response status:', response.status);
+    console.log('[AIAssistant] Response headers:', Object.fromEntries(response.headers.entries()));
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[AIAssistant] Streaming request failed:', errorText);
+      throw new Error(`Streaming failed: ${response.status} - ${errorText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let accumulatedContent = '';
+    let changes: LexicalChange[] = [];
+    let reasoning = '';
+    let summary = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+
+          try {
+            const event = JSON.parse(line.slice(6));
+
+            switch (event.type) {
+              case 'token':
+                console.log('[AIAssistant] Received token:', event.content);
+                accumulatedContent += event.content;
+                setMessages(prev => prev.map(msg =>
+                  msg.id === messageId
+                    ? { ...msg, content: accumulatedContent, isStreaming: true, isLoading: false }
+                    : msg
+                ));
+                break;
+
+              case 'changes':
+                // Buffer changes - don't apply yet
+                changes = event.changes;
+                break;
+
+              case 'reasoning':
+                reasoning = event.reasoning;
+                break;
+
+              case 'summary':
+                summary = event.summary;
+                break;
+
+              case 'complete':
+                console.log('[AIAssistant] Stream complete. Changes:', changes.length, 'Reasoning:', !!reasoning, 'Summary:', !!summary);
+                // Now apply all buffered changes with diff highlighting
+                if (changes.length > 0 && onApplyLexicalChanges) {
+                  onApplyLexicalChanges(changes);
+                }
+
+                const finalContent = reasoning
+                  ? `**Reasoning:** ${reasoning}\n\n${summary || 'Changes applied.'}`
+                  : summary || 'Changes applied successfully.';
+
+                setMessages(prev => prev.map(msg =>
+                  msg.id === messageId
+                    ? { ...msg, content: finalContent, isStreaming: false, isLoading: false }
+                    : msg
+                ));
+
+                // Increment usage count for anonymous users
+                if (isAnonymous && !isOnboarding) {
+                  const count = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
+                  sessionStorage.setItem('vrite_ai_usage_count', String(count + 1));
+                }
+                break;
+
+              case 'error':
+                throw new Error(event.error);
+            }
+          } catch (parseError) {
+            console.error('[AIAssistant] Error parsing SSE event:', parseError);
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }, [sessionToken, isAnonymous, onApplyLexicalChanges]);
 
   useEffect(() => {
     scrollToBottom();
@@ -154,7 +275,7 @@ export default function AIAssistantSidebar({
       // Get document and conversation history
       const simplifiedDocument = getSimplifiedDocument();
       const conversationHistory = messages
-        .filter(msg => !msg.isLoading)
+        .filter(msg => !msg.isLoading && !msg.isStreaming)
         .map(msg => ({
           role: msg.type === 'user' ? 'user' : 'assistant',
           content: msg.content,
@@ -172,67 +293,83 @@ export default function AIAssistantSidebar({
         context_snippets: contextSnippets.length > 0
           ? contextSnippets.map((snippet) => snippet.text)
           : undefined,
+        stream: true, // Enable streaming by default
       };
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${sessionToken}`,
-          'apikey': anonKey || '',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      // Try streaming first, with fallback to non-streaming
+      try {
+        console.log('[AIAssistant] Attempting streaming request...');
+        await handleStreamingResponse(endpoint, requestBody, loadingMessage.id, isOnboarding);
+        console.log('[AIAssistant] Streaming completed successfully');
+      } catch (streamError) {
+        console.error('[AIAssistant] Streaming failed, falling back to non-streaming:', streamError);
 
-      if (!response.ok) {
-        const errorText = await response.text();
+        // Fallback to non-streaming
+        const fallbackRequestBody = {
+          ...requestBody,
+          stream: false,
+        };
 
-        // Handle rate limit for Edge Function
-        if (response.status === 429) {
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === loadingMessage.id
-                ? {
-                    ...msg,
-                    content: 'Rate limit exceeded. Please wait before making more requests.',
-                    isLoading: false,
-                  }
-                : msg
-            )
-          );
-          setIsLoading(false);
-          return;
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${sessionToken}`,
+            'apikey': anonKey || '',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(fallbackRequestBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+
+          // Handle rate limit for Edge Function
+          if (response.status === 429) {
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === loadingMessage.id
+                  ? {
+                      ...msg,
+                      content: 'Rate limit exceeded. Please wait before making more requests.',
+                      isLoading: false,
+                    }
+                  : msg
+              )
+            );
+            setIsLoading(false);
+            return;
+          }
+
+          throw new Error(`AI service error: ${errorText}`);
         }
 
-        throw new Error(`AI service error: ${errorText}`);
-      }
+        const data = await response.json();
 
-      const data = await response.json();
-
-      // Increment anonymous usage count (only for user-initiated requests)
-      if (isAnonymous && !isOnboarding) {
-        const currentCount = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
-        sessionStorage.setItem('vrite_ai_usage_count', String(currentCount + 1));
-      }
-
-      // Handle response
-      if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
-        if (onApplyLexicalChanges) {
-          onApplyLexicalChanges(data.changes);
+        // Increment anonymous usage count (only for user-initiated requests)
+        if (isAnonymous && !isOnboarding) {
+          const currentCount = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
+          sessionStorage.setItem('vrite_ai_usage_count', String(currentCount + 1));
         }
+
+        // Handle response
+        if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
+          if (onApplyLexicalChanges) {
+            onApplyLexicalChanges(data.changes);
+          }
+        }
+
+        const displayMessage = data.reasoning
+          ? `**Reasoning:** ${data.reasoning}\n\n${data.summary || 'Changes applied.'}`
+          : data.summary || 'Changes applied successfully.';
+
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === loadingMessage.id
+              ? { ...msg, content: displayMessage, isLoading: false }
+              : msg
+          )
+        );
       }
-
-      const displayMessage = data.reasoning
-        ? `**Reasoning:** ${data.reasoning}\n\n${data.summary || 'Changes applied.'}`
-        : data.summary || 'Changes applied successfully.';
-
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.id === loadingMessage.id
-            ? { ...msg, content: displayMessage, isLoading: false }
-            : msg
-        )
-      );
     } catch (error) {
       console.error('[AIAssistant] Error:', error);
       setMessages(prev =>
@@ -249,7 +386,7 @@ export default function AIAssistantSidebar({
     } finally {
       setIsLoading(false);
     }
-  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets]);
+  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, handleStreamingResponse]);
 
   // Automatic AI onboarding for anonymous users
   useEffect(() => {
@@ -402,6 +539,13 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                         <div></div>
                       </div>
                       <span>Thinking...</span>
+                    </div>
+                  ) : message.isStreaming ? (
+                    <div className="ai-message-streaming">
+                      <div className="ai-message-text">
+                        {message.content}
+                        <span className="ai-streaming-cursor">▊</span>
+                      </div>
                     </div>
                   ) : (
                     <>

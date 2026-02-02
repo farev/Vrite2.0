@@ -1,6 +1,6 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { verifyAuth, checkRateLimit } from '../_shared/auth.ts';
-import { getOpenAIClient, createChatCompletion, type ChatMessage, type Tool } from '../_shared/openai.ts';
+import { getOpenAIClient, createChatCompletion, createChatCompletionStream, type ChatMessage, type Tool, type ChatCompletionChunk } from '../_shared/openai.ts';
 
 // ============== Formatting Standards ==============
 
@@ -168,6 +168,7 @@ interface CommandRequest {
   instruction: string;
   conversation_history?: Array<{ role: string; content: string }>;
   context_snippets?: string[];
+  stream?: boolean;
 }
 
 interface CommandResponse {
@@ -175,6 +176,330 @@ interface CommandResponse {
   reasoning?: string;
   changes?: any[];
   summary: string;
+}
+
+// ============== Streaming Helper Functions ==============
+
+async function processOpenAIStream(
+  openaiStream: ReadableStream<Uint8Array>,
+  writer: WritableStreamDefaultWriter,
+  messages: ChatMessage[],
+  openaiConfig: any
+) {
+  const reader = openaiStream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let accumulatedToolCalls: any[] = [];
+  let toolCallsMap = new Map<number, any>();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim() || !line.startsWith('data: ')) continue;
+        if (line.includes('[DONE]')) continue;
+
+        try {
+          const jsonStr = line.slice(6);
+          const chunk: ChatCompletionChunk = JSON.parse(jsonStr);
+          const delta = chunk.choices[0]?.delta;
+
+          // Handle content tokens
+          if (delta?.content) {
+            const event = {
+              type: 'token',
+              content: delta.content,
+            };
+            await writer.write(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+          }
+
+          // Accumulate tool calls
+          if (delta?.tool_calls) {
+            for (const toolCallDelta of delta.tool_calls) {
+              const index = toolCallDelta.index;
+
+              if (!toolCallsMap.has(index)) {
+                toolCallsMap.set(index, {
+                  id: toolCallDelta.id || '',
+                  type: toolCallDelta.type || 'function',
+                  function: {
+                    name: toolCallDelta.function?.name || '',
+                    arguments: toolCallDelta.function?.arguments || '',
+                  },
+                });
+              } else {
+                const existing = toolCallsMap.get(index);
+                if (toolCallDelta.id) existing.id = toolCallDelta.id;
+                if (toolCallDelta.type) existing.type = toolCallDelta.type;
+                if (toolCallDelta.function?.name) {
+                  existing.function.name = toolCallDelta.function.name;
+                }
+                if (toolCallDelta.function?.arguments) {
+                  existing.function.arguments += toolCallDelta.function.arguments;
+                }
+              }
+            }
+          }
+
+          // Check for finish
+          if (chunk.choices[0]?.finish_reason) {
+            console.log('[ai-command] Stream finished with reason:', chunk.choices[0].finish_reason);
+          }
+        } catch (parseError) {
+          console.error('[ai-command] Error parsing SSE line:', parseError);
+        }
+      }
+    }
+
+    // Convert tool calls map to array
+    accumulatedToolCalls = Array.from(toolCallsMap.values());
+
+    // Extract changes from tool calls
+    const changes: any[] = [];
+    for (const toolCall of accumulatedToolCalls) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments);
+        if (toolCall.function.name === 'edit_document') {
+          changes.push(...(args.changes || []));
+        }
+      } catch (error) {
+        console.error('[ai-command] Error parsing tool call arguments:', error);
+      }
+    }
+
+    // Emit changes
+    if (changes.length > 0) {
+      const event = {
+        type: 'changes',
+        changes,
+      };
+      await writer.write(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+      console.log('[ai-command] Emitted', changes.length, 'changes');
+    }
+
+    // Get reasoning and summary
+    if (accumulatedToolCalls.length > 0) {
+      console.log('[ai-command] Getting reasoning and summary...');
+
+      // Build messages for reasoning request
+      const reasoningMessages = [...messages];
+      reasoningMessages.push({
+        role: 'assistant',
+        content: '',
+        tool_calls: accumulatedToolCalls,
+      });
+
+      for (const toolCall of accumulatedToolCalls) {
+        reasoningMessages.push({
+          role: 'tool',
+          content: 'Applied successfully',
+          tool_call_id: toolCall.id,
+        });
+      }
+
+      reasoningMessages.push({
+        role: 'user',
+        content: 'Now provide your reasoning and summary in JSON format with fields: reasoning, summary',
+      });
+
+      const finalResponse = await createChatCompletion(openaiConfig, {
+        model: 'gpt-5-mini',
+        messages: reasoningMessages,
+        max_completion_tokens: 500,
+        reasoning_effort: 'minimal',
+        response_format: { type: 'json_object' },
+      });
+
+      const result = JSON.parse(finalResponse.choices[0].message.content || '{}');
+      const reasoning = result.reasoning || '';
+      const summary = result.summary || 'Changes applied.';
+
+      if (reasoning) {
+        await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'reasoning', reasoning })}\n\n`));
+      }
+      await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'summary', summary })}\n\n`));
+    }
+
+    // Emit complete
+    await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'complete' })}\n\n`));
+    console.log('[ai-command] Stream processing complete');
+  } catch (error) {
+    console.error('[ai-command] Error in stream processing:', error);
+    const errorEvent = {
+      type: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+    await writer.write(new TextEncoder().encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
+  } finally {
+    try {
+      await writer.close();
+    } catch (e) {
+      console.error('[ai-command] Error closing writer:', e);
+    }
+  }
+}
+
+async function handleStreamingRequest(
+  messages: ChatMessage[],
+  openaiConfig: any
+): Promise<Response> {
+  console.log('[ai-command] Handling streaming request');
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+
+  // Start stream processing in background
+  (async () => {
+    try {
+      const openaiStream = await createChatCompletionStream(openaiConfig, {
+        model: 'gpt-5-mini',
+        messages,
+        tools: [EDIT_DOCUMENT_TOOL],
+        tool_choice: 'auto',
+        max_completion_tokens: 128000,
+        reasoning_effort: 'low',
+      });
+
+      await processOpenAIStream(openaiStream, writer, messages, openaiConfig);
+    } catch (error) {
+      console.error('[ai-command] Error in streaming handler:', error);
+      const errorEvent = {
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+      try {
+        await writer.write(new TextEncoder().encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
+        await writer.close();
+      } catch (e) {
+        console.error('[ai-command] Error writing error event:', e);
+      }
+    }
+  })();
+
+  return new Response(readable, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
+
+async function handleNonStreamingRequest(
+  messages: ChatMessage[],
+  openaiConfig: any
+): Promise<Response> {
+  console.log('[ai-command] Handling non-streaming request');
+
+  // Make OpenAI API call
+  const response = await createChatCompletion(openaiConfig, {
+    model: 'gpt-5-mini',
+    messages,
+    tools: [EDIT_DOCUMENT_TOOL],
+    tool_choice: 'auto',
+    max_completion_tokens: 128000,
+    reasoning_effort: 'low',
+  });
+
+  const message = response.choices[0].message;
+  const finishReason = response.choices[0].finish_reason;
+  const toolCalls = message.tool_calls || [];
+
+  console.log('[ai-command] Finish reason:', finishReason);
+  console.log('[ai-command] Tool calls received:', toolCalls.length);
+
+  if (finishReason === 'length') {
+    throw new Error('Response was truncated due to length. Try a simpler request.');
+  }
+
+  // Extract changes from tool calls
+  const changes: any[] = [];
+  for (const toolCall of toolCalls) {
+    try {
+      const args = JSON.parse(toolCall.function.arguments);
+      if (toolCall.function.name === 'edit_document') {
+        changes.push(...(args.changes || []));
+        console.log('[ai-command] Extracted', args.changes?.length || 0, 'changes from tool call');
+      }
+    } catch (error) {
+      console.error('[ai-command] JSON parse error:', error);
+      throw new Error('Model returned malformed JSON. Try a simpler request or break it into smaller steps.');
+    }
+  }
+  console.log('[ai-command] Total changes extracted:', changes.length);
+
+  // Get reasoning and summary
+  let reasoning = '';
+  let summary = '';
+
+  if (toolCalls.length > 0) {
+    console.log('[ai-command] Processing tool calls for reasoning and summary...');
+    messages.push({
+      role: 'assistant',
+      content: message.content || '',
+      tool_calls: toolCalls,
+    });
+
+    for (const toolCall of toolCalls) {
+      messages.push({
+        role: 'tool',
+        content: 'Applied successfully',
+        tool_call_id: toolCall.id,
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      content: 'Now provide your reasoning and summary in JSON format with fields: reasoning, summary',
+    });
+
+    console.log('[ai-command] Requesting final reasoning/summary from OpenAI...');
+    const finalResponse = await createChatCompletion(openaiConfig, {
+      model: 'gpt-5-mini',
+      messages,
+      max_completion_tokens: 500,
+      reasoning_effort: 'minimal',
+      response_format: { type: 'json_object' },
+    });
+
+    const result = JSON.parse(finalResponse.choices[0].message.content || '{}');
+    reasoning = result.reasoning || '';
+    summary = result.summary || 'Changes applied.';
+    console.log('[ai-command] Reasoning:', reasoning?.substring(0, 100));
+    console.log('[ai-command] Summary:', summary?.substring(0, 100));
+  } else {
+    console.log('[ai-command] No tool calls, using fallback mode');
+    summary = message.content || 'No changes needed.';
+    console.log('[ai-command] Fallback summary:', summary?.substring(0, 100));
+  }
+
+  // Return response
+  const responseData: CommandResponse = changes.length > 0
+    ? {
+        type: 'lexical_changes',
+        reasoning,
+        changes,
+        summary,
+      }
+    : {
+        type: 'no_changes',
+        summary,
+        reasoning,
+      };
+
+  console.log('[ai-command] Response type:', responseData.type);
+  console.log('[ai-command] Response changes count:', changes.length);
+
+  return new Response(JSON.stringify(responseData), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 }
 
 Deno.serve(async (req) => {
@@ -214,13 +539,14 @@ Deno.serve(async (req) => {
     // Parse request body
     console.log('[ai-command] Parsing request body...');
     const requestData: CommandRequest = await req.json();
-    const { document, instruction, conversation_history, context_snippets } = requestData;
+    const { document, instruction, conversation_history, context_snippets, stream = false } = requestData;
 
     console.log('[ai-command] Request data received:');
     console.log('  - Document blocks:', document?.blocks?.length || 0);
     console.log('  - Instruction:', instruction?.substring(0, 100) || 'MISSING');
     console.log('  - Conversation history length:', conversation_history?.length || 0);
     console.log('  - Context snippets:', context_snippets?.length || 0);
+    console.log('  - Stream mode:', stream);
 
     if (!instruction?.trim() || !document) {
       console.error('[ai-command] ❌ Missing required fields');
@@ -294,117 +620,17 @@ Use the edit_document tool to make changes, then provide reasoning and summary.`
     });
     console.log('[ai-command] Total messages prepared:', messages.length);
 
-    // Make OpenAI API call
-    console.log('[ai-command] Making OpenAI API call with model: gpt-5-mini');
-    const response = await createChatCompletion(openaiConfig, {
-      model: 'gpt-5-mini',
-      messages,
-      tools: [EDIT_DOCUMENT_TOOL],
-      tool_choice: 'auto',
-      max_completion_tokens: 128000, // GPT-5-mini supports up to 128k completion tokens
-      reasoning_effort: 'low', // GPT-5-mini is a reasoning model: minimal, low, medium, high
-      // Note: temperature is not supported with GPT-5 reasoning models (defaults to 1)
-    });
-    console.log('[ai-command] ✅ OpenAI API call completed successfully');
-
-    const message = response.choices[0].message;
-    const finishReason = response.choices[0].finish_reason;
-    const toolCalls = message.tool_calls || [];
-
-    console.log('[ai-command] Finish reason:', finishReason);
-    console.log('[ai-command] Tool calls received:', toolCalls.length);
-
-    // Check if response was truncated
-    if (finishReason === 'length') {
-      throw new Error('Response was truncated due to length. Try a simpler request.');
-    }
-
-    // Extract changes from tool calls
-    const changes: any[] = [];
-    for (const toolCall of toolCalls) {
-      try {
-        const args = JSON.parse(toolCall.function.arguments);
-        if (toolCall.function.name === 'edit_document') {
-          changes.push(...(args.changes || []));
-          console.log('[ai-command] Extracted', args.changes?.length || 0, 'changes from tool call');
-        }
-      } catch (error) {
-        console.error('[ai-command] JSON parse error:', error);
-        throw new Error('Model returned malformed JSON. Try a simpler request or break it into smaller steps.');
-      }
-    }
-    console.log('[ai-command] Total changes extracted:', changes.length);
-
-    // Get reasoning and summary
-    let reasoning = '';
-    let summary = '';
-
-    if (toolCalls.length > 0) {
-      console.log('[ai-command] Processing tool calls for reasoning and summary...');
-      // Add tool call and responses to messages
-      messages.push({
-        role: 'assistant',
-        content: message.content || '',
-        tool_calls: toolCalls,
-      });
-
-      for (const toolCall of toolCalls) {
-        messages.push({
-          role: 'tool',
-          content: 'Applied successfully',
-          tool_call_id: toolCall.id,
-        });
-      }
-
-      // Request final JSON response
-      messages.push({
-        role: 'user',
-        content: 'Now provide your reasoning and summary in JSON format with fields: reasoning, summary',
-      });
-
-      console.log('[ai-command] Requesting final reasoning/summary from OpenAI...');
-      const finalResponse = await createChatCompletion(openaiConfig, {
-        model: 'gpt-5-mini',
-        messages,
-        max_completion_tokens: 500, // GPT-5-mini uses max_completion_tokens instead of max_tokens
-        reasoning_effort: 'minimal', // Fast response for simple summary
-        response_format: { type: 'json_object' },
-      });
-
-      const result = JSON.parse(finalResponse.choices[0].message.content || '{}');
-      reasoning = result.reasoning || '';
-      summary = result.summary || 'Changes applied.';
-      console.log('[ai-command] Reasoning:', reasoning?.substring(0, 100));
-      console.log('[ai-command] Summary:', summary?.substring(0, 100));
+    // Branch based on streaming mode
+    if (stream) {
+      console.log('[ai-command] Using streaming mode');
+      return await handleStreamingRequest(messages, openaiConfig);
     } else {
-      // No tool calls - fallback
-      console.log('[ai-command] No tool calls, using fallback mode');
-      summary = message.content || 'No changes needed.';
-      console.log('[ai-command] Fallback summary:', summary?.substring(0, 100));
+      console.log('[ai-command] Using non-streaming mode');
+      const response = await handleNonStreamingRequest(messages, openaiConfig);
+      console.log('[ai-command] ✅ Request completed successfully');
+      console.log('=== AI Command Function Completed ===');
+      return response;
     }
-
-    // Return response
-    const responseData: CommandResponse = changes.length > 0
-      ? {
-          type: 'lexical_changes',
-          reasoning,
-          changes,
-          summary,
-        }
-      : {
-          type: 'no_changes',
-          summary,
-          reasoning,
-        };
-
-    console.log('[ai-command] Response type:', responseData.type);
-    console.log('[ai-command] Response changes count:', changes.length);
-    console.log('[ai-command] ✅ Request completed successfully');
-    console.log('=== AI Command Function Completed ===');
-
-    return new Response(JSON.stringify(responseData), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
 
   } catch (error) {
     console.error('=== AI Command Function ERROR ===');

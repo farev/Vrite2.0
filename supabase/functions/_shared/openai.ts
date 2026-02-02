@@ -80,6 +80,102 @@ export interface ChatCompletionResponse {
   };
 }
 
+export interface ChatCompletionChunk {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    delta: {
+      role?: string;
+      content?: string;
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        type?: string;
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
+    };
+    finish_reason: string | null;
+  }>;
+}
+
+export async function createChatCompletionStream(
+  config: OpenAIConfig,
+  options: {
+    model: string;
+    messages: ChatMessage[];
+    tools?: Tool[];
+    tool_choice?: string;
+    max_tokens?: number;
+    max_completion_tokens?: number;
+    temperature?: number;
+    reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high';
+    response_format?: { type: string };
+  }
+): Promise<ReadableStream<Uint8Array>> {
+  console.log('=== [OpenAI] Creating Chat Completion Stream ===');
+  console.log('[OpenAI] Model:', options.model);
+  console.log('[OpenAI] Messages count:', options.messages.length);
+  console.log('[OpenAI] Tools provided:', options.tools?.length || 0);
+
+  const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
+  if (!apiKey) {
+    throw new Error('OpenAI API key is missing or invalid');
+  }
+
+  const url = `${config.baseUrl}/chat/completions`;
+  console.log('[OpenAI] API URL:', url);
+
+  const requestBody = JSON.stringify({
+    ...options,
+    stream: true,
+  });
+  console.log('[OpenAI] Request body size:', requestBody.length, 'bytes');
+
+  try {
+    console.log('[OpenAI] Sending streaming request to OpenAI...');
+    const startTime = Date.now();
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: requestBody,
+    });
+
+    const elapsed = Date.now() - startTime;
+    console.log('[OpenAI] Stream response received in', elapsed, 'ms');
+    console.log('[OpenAI] Response status:', response.status, response.statusText);
+
+    if (!response.ok) {
+      console.error('[OpenAI] ❌ Stream API request failed');
+      console.error('[OpenAI] Status:', response.status);
+      const errorText = await response.text();
+      console.error('[OpenAI] Error response body:', errorText);
+      throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
+
+    console.log('[OpenAI] ✅ Stream established successfully');
+    console.log('=== [OpenAI] Chat Completion Stream Started ===');
+    return response.body;
+  } catch (error) {
+    console.error('=== [OpenAI] Chat Completion Stream FAILED ===');
+    console.error('[OpenAI] ❌ Exception during stream setup:', error);
+    throw error;
+  }
+}
+
 export async function createChatCompletion(
   config: OpenAIConfig,
   options: {

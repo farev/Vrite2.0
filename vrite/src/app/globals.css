@@ -1256,6 +1256,22 @@ body {
   40% { transform: scale(1); }
 }
 
+.ai-message-streaming {
+  padding: 12px 16px;
+}
+
+.ai-streaming-cursor {
+  animation: ai-cursor-blink 1s infinite;
+  color: #2563eb;
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+@keyframes ai-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
 .ai-message-actions {
   display: flex;
   gap: 4px;
