@@ -3,7 +3,12 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export type SignupModalTrigger = 'save' | 'ai-success' | 'ai-limit-reached' | 'storage-full';
+export type SignupModalTrigger =
+  | 'save'
+  | 'ai-success'
+  | 'ai-limit-reached'
+  | 'storage-full'
+  | 'permissions-missing';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -47,9 +52,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session) {
-        // Check if this is an authenticated user (has OAuth provider_token)
-        const authenticated = !!session.provider_token;
-        const anonymous = !authenticated && !!session.user.is_anonymous;
+        // Treat any non-anonymous session as authenticated
+        const anonymous = !!session.user.is_anonymous;
+        const authenticated = !anonymous;
 
         setIsAuthenticated(authenticated);
         setIsAnonymous(anonymous);
@@ -130,8 +135,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.log('[AuthContext] Auth state changed:', event, session?.user.id);
 
       if (session) {
-        const authenticated = !!session.provider_token;
-        const anonymous = !authenticated && !!session.user.is_anonymous;
+        const anonymous = !!session.user.is_anonymous;
+        const authenticated = !anonymous;
 
         setIsAuthenticated(authenticated);
         setIsAnonymous(anonymous);

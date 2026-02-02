@@ -70,6 +70,7 @@ import {
 import type { LexicalChange } from '../lib/lexicalChangeApplicator';
 import { useAuth } from '../contexts/AuthContext';
 import { useDocumentSync } from '../hooks/useDocumentSync';
+import { createClient } from '@/lib/supabase/client';
 
 const theme = {
   root: 'document-editor-root',
@@ -359,6 +360,11 @@ const PAGE_SIZES = {
 const PAGE_GAP = 24; // Gap between pages in pixels
 const PT_TO_PX = 1.333; // Convert points to pixels (1pt = 1.333px at 96 DPI)
 const PAGE_FOOTER_HEIGHT_PX = 40; // Footer height in pixels
+const AUTO_TITLE_STORAGE_PREFIX = 'vrite_auto_title_generated';
+const AUTO_TITLE_SESSION_KEY = 'vrite_auto_title_session_id';
+const AUTO_TITLE_TRIGGER_RATIO = 0.25;
+const AUTO_TITLE_MAX_CONTEXT_CHARS = 2000;
+const AUTO_TITLE_MAX_LENGTH = 80;
 
 interface DocumentEditorProps {
   documentTitle: string;
@@ -387,6 +393,7 @@ export default function DocumentEditor({
   isAuthenticated,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
+  const supabase = useMemo(() => createClient(), []);
   const [documentContent, setDocumentContent] = useState('');
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
 
@@ -439,6 +446,14 @@ export default function DocumentEditor({
   const isDocumentEmpty = documentContent.trim().length === 0;
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
+  const autoTitleTriggeredRef = useRef(false);
+  const autoTitleInFlightRef = useRef(false);
+  const autoTitleDocIdentityRef = useRef<string | null>(null);
+  const autoTitleLocalIdRef = useRef(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
   
   const currentPageSize = PAGE_SIZES[pageSize];
   const pageStackHeight = useMemo(() => {
@@ -481,6 +496,175 @@ export default function DocumentEditor({
     }),
     [documentMargins]
   );
+
+  const isTitleUnnamed = useCallback((title: string) => {
+    const normalized = title.trim().toLowerCase();
+    return (
+      normalized === '' ||
+      normalized === 'untitled document' ||
+      normalized === 'untitled' ||
+      normalized.startsWith('untitled')
+    );
+  }, []);
+
+  const markAutoTitleTriggered = useCallback((docIdentity: string) => {
+    autoTitleTriggeredRef.current = true;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`${AUTO_TITLE_STORAGE_PREFIX}_${docIdentity}`, '1');
+    }
+  }, []);
+
+  const getAutoTitleSessionId = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    const stored = localStorage.getItem(AUTO_TITLE_SESSION_KEY);
+    if (stored) {
+      return stored;
+    }
+
+    const generated =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(AUTO_TITLE_SESSION_KEY, generated);
+    return generated;
+  }, []);
+
+  const requestAutoTitle = useCallback(
+    async (reason: string, contentOverride?: string) => {
+      const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
+      const sourceContent = (contentOverride ?? documentContent).trim();
+
+      console.log('[Editor] Auto-title request start', {
+        reason,
+        docIdentity,
+        hasContent: sourceContent.length > 0,
+        contentLength: sourceContent.length,
+        currentTitle: documentTitle,
+      });
+
+      if (!sourceContent) {
+        console.log('[Editor] Auto-title aborted: empty content');
+        return;
+      }
+
+      if (autoTitleInFlightRef.current || autoTitleTriggeredRef.current) {
+        console.log('[Editor] Auto-title aborted: already in flight or triggered', {
+          inFlight: autoTitleInFlightRef.current,
+          triggered: autoTitleTriggeredRef.current,
+        });
+        return;
+      }
+
+      if (!isTitleUnnamed(documentTitle)) {
+        console.log('[Editor] Auto-title aborted: title not unnamed', { title: documentTitle });
+        return;
+      }
+
+      autoTitleInFlightRef.current = true;
+
+      try {
+        const context = sourceContent.slice(0, AUTO_TITLE_MAX_CONTEXT_CHARS);
+
+        console.log('[Editor] Auto-title request triggered:', { reason, docIdentity });
+
+        const sessionId = getAutoTitleSessionId();
+        console.log('[Editor] Auto-title invoking auto-title', {
+          hasSessionId: !!sessionId,
+          contextChars: context.length,
+        });
+        const { data, error } = await supabase.functions.invoke('auto-title', {
+          body: {
+            content: context,
+          },
+          headers: {
+            ...(sessionId ? { 'x-session-id': sessionId } : {}),
+          },
+        });
+
+        if (error) {
+          console.error('[Editor] Auto-title request failed:', error);
+          return;
+        }
+
+        const rawTitle: string = typeof data?.title === 'string' ? data.title : '';
+        console.log('[Editor] Auto-title response received', {
+          rawLength: rawTitle.length,
+          preview: rawTitle.slice(0, 80),
+        });
+        const firstLine =
+          rawTitle
+            .split('\n')
+            .map((line) => line.trim())
+            .find((line) => line.length > 0) || '';
+        const cleaned = firstLine
+          .replace(/^["']+|["']+$/g, '')
+          .replace(/[.!?;:]+$/g, '')
+          .trim();
+        const finalTitle = cleaned.slice(0, AUTO_TITLE_MAX_LENGTH).trim();
+
+        if (!finalTitle || isTitleUnnamed(finalTitle)) {
+          return;
+        }
+
+        onTitleChange(finalTitle);
+        markAutoTitleTriggered(docIdentity);
+      } catch (error) {
+        console.error('[Editor] Auto-title error:', error);
+      } finally {
+        autoTitleInFlightRef.current = false;
+      }
+    },
+    [documentId, initialDocumentId, documentContent, documentTitle, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, supabase]
+  );
+
+  const triggerAutoTitleIfEligible = useCallback(
+    (reason: string, contentOverride?: string) => {
+      console.log('[Editor] Auto-title eligibility check', {
+        reason,
+        title: documentTitle,
+        inFlight: autoTitleInFlightRef.current,
+        triggered: autoTitleTriggeredRef.current,
+        hasOverride: !!contentOverride,
+      });
+      if (autoTitleInFlightRef.current || autoTitleTriggeredRef.current) {
+        console.log('[Editor] Auto-title not eligible: already in flight/triggered');
+        return;
+      }
+
+      if (!isTitleUnnamed(documentTitle)) {
+        console.log('[Editor] Auto-title not eligible: title already set', { title: documentTitle });
+        return;
+      }
+
+      requestAutoTitle(reason, contentOverride);
+    },
+    [documentTitle, isTitleUnnamed, requestAutoTitle]
+  );
+
+  useEffect(() => {
+    const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
+    const previousIdentity = autoTitleDocIdentityRef.current;
+
+    if (previousIdentity !== docIdentity) {
+      autoTitleDocIdentityRef.current = docIdentity;
+      if (!(previousIdentity === 'new' && autoTitleTriggeredRef.current)) {
+        autoTitleTriggeredRef.current = false;
+        autoTitleInFlightRef.current = false;
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`${AUTO_TITLE_STORAGE_PREFIX}_${docIdentity}`);
+      if (stored === '1') {
+        autoTitleTriggeredRef.current = true;
+      } else if (autoTitleTriggeredRef.current) {
+        localStorage.setItem(`${AUTO_TITLE_STORAGE_PREFIX}_${docIdentity}`, '1');
+      }
+    }
+  }, [documentId, initialDocumentId]);
   
   // Detect title changes
   useEffect(() => {
@@ -497,6 +681,52 @@ export default function DocumentEditor({
     setEditorState(editorState);
     setHasUnsavedChanges(true); // Mark document as having unsaved changes
   };
+
+  const isContentPastQuarterPage = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    if (pageContentHeight <= 0) {
+      return false;
+    }
+
+    const contentElement = document.querySelector('.document-content-editable') as HTMLElement | null;
+    if (!contentElement) {
+      return false;
+    }
+
+    const contentHeight = contentElement.scrollHeight;
+    return contentHeight >= pageContentHeight * AUTO_TITLE_TRIGGER_RATIO;
+  }, [pageContentHeight]);
+
+  useEffect(() => {
+    if (isDocumentEmpty || !isTitleUnnamed(documentTitle)) {
+      console.log('[Editor] Auto-title content-fill skip', {
+        empty: isDocumentEmpty,
+        title: documentTitle,
+      });
+      return;
+    }
+
+    if (autoTitleInFlightRef.current || autoTitleTriggeredRef.current) {
+      console.log('[Editor] Auto-title content-fill skip: already in flight/triggered');
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      const pastQuarter = isContentPastQuarterPage();
+      console.log('[Editor] Auto-title content-fill check', {
+        pastQuarter,
+        pageContentHeight,
+      });
+      if (pastQuarter) {
+        triggerAutoTitleIfEligible('content-fill');
+      }
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [documentTitle, documentContent, isDocumentEmpty, isContentPastQuarterPage, isTitleUnnamed, triggerAutoTitleIfEligible]);
 
   // Manual save function with debouncing and deduplication
   const handleManualSave = useCallback(async (isManualTrigger = true) => {
@@ -894,6 +1124,17 @@ export default function DocumentEditor({
     console.log('Diff applied to editor');
   }, []);
 
+  const handleDiffAccepted = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      console.log('[Editor] Auto-title AI accept trigger');
+      triggerAutoTitleIfEligible('ai-accepted');
+    });
+  }, [triggerAutoTitleIfEligible]);
+
   const handleAllDiffsResolved = useCallback((finalContent: string) => {
     // Called when all diff nodes have been accepted/rejected
     // finalContent is markdown, need to convert to Lexical
@@ -960,7 +1201,10 @@ export default function DocumentEditor({
     setOriginalContent(null);
     setSuggestedContent(null);
     setPendingChanges(null);
-  }, [editorRef, suggestedContent]);
+    if (suggestedContent) {
+      triggerAutoTitleIfEligible('ai-accepted', suggestedContent);
+    }
+  }, [editorRef, suggestedContent, triggerAutoTitleIfEligible]);
 
   const handleRejectAllChanges = useCallback(() => {
     // Reject all changes - find all DiffNodes and reject them
@@ -1030,6 +1274,7 @@ export default function DocumentEditor({
       });
     }
     setIsDiffViewerOpen(false);
+    triggerAutoTitleIfEligible('ai-accepted', content);
   };
 
   const handleRejectChanges = () => {
@@ -1158,7 +1403,11 @@ export default function DocumentEditor({
                 className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
                 onScroll={handleDocumentScroll}
               >
-                <div className="document-editor-wrapper" style={editorWrapperStyle}>
+              <div
+                className="document-editor-wrapper"
+                style={editorWrapperStyle}
+                data-page-size={pageSize}
+              >
                   <div className="document-page">
                     <div className="document-page-content" style={editorSurfaceStyle}>
                       <div className="document-editor-surface">
@@ -1195,6 +1444,7 @@ export default function DocumentEditor({
                     changes={pendingChanges}
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
+                    onAnyAccepted={handleDiffAccepted}
                   />
                   <SelectionContextPlugin onSelectionChange={setSelectionInfo} />
                 </div>

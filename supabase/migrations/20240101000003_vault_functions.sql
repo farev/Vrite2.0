@@ -2,11 +2,11 @@
 -- This function will be used by Edge Functions to access the OpenAI API key
 CREATE OR REPLACE FUNCTION get_secret(secret_name TEXT)
 RETURNS TEXT AS $$
-  SELECT decrypted_secret 
-  FROM vault.decrypted_secrets 
+  SELECT decrypted_secret
+  FROM vault.decrypted_secrets
   WHERE name = secret_name
   LIMIT 1;
-$$ LANGUAGE SQL SECURITY DEFINER;
+$$ LANGUAGE SQL SECURITY DEFINER SET search_path = public;
 
 -- Grant execute permission to authenticated users (will be called by Edge Functions)
 GRANT EXECUTE ON FUNCTION get_secret(TEXT) TO service_role;

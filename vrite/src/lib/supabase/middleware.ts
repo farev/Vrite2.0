@@ -44,6 +44,7 @@ export async function updateSession(request: NextRequest) {
   // Check if route is anonymous-accessible or a temporary document
   const isAnonymousRoute =
     anonymousRoutes.includes(pathname) ||
+    pathname.startsWith('/document/') ||
     pathname.startsWith('/document/temp-') ||
     pathname.startsWith('/api/ai-anonymous');
 

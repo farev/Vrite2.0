@@ -281,7 +281,7 @@ export { AUTO_SAVE_INTERVAL };
 export async function isUserAuthenticated(): Promise<boolean> {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
-  return !!session?.provider_token;
+  return !!session && !session.user.is_anonymous;
 }
 
 /**

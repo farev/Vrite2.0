@@ -6,7 +6,16 @@ import { useAuth, type SignupModalTrigger } from '@/contexts/AuthContext';
 import { X } from 'lucide-react';
 import Image from 'next/image';
 
-const TRIGGER_MESSAGES: Record<SignupModalTrigger, { title: string; description: string }> = {
+type SignupModalCopy = {
+  title: string;
+  description: string;
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  details?: string[];
+  showFeatures?: boolean;
+};
+
+const TRIGGER_MESSAGES: Record<SignupModalTrigger, SignupModalCopy> = {
   save: {
     title: 'Save your work to the cloud',
     description: 'Sign in to save your document permanently and access it from anywhere.',
@@ -22,6 +31,18 @@ const TRIGGER_MESSAGES: Record<SignupModalTrigger, { title: string; description:
   'storage-full': {
     title: 'Storage limit reached',
     description: 'Your browser storage is full. Sign in to save unlimited documents to the cloud.',
+  },
+  'permissions-missing': {
+    title: 'Enable Google Drive permissions',
+    description:
+      'Your Google account is connected, but Drive access is not enabled yet. Re-authenticate to grant Drive permissions.',
+    primaryLabel: 'Enable Drive permissions',
+    secondaryLabel: 'Continue without enabling',
+    details: [
+      'We will keep saving to your Vrite cloud storage until Drive access is enabled.',
+      'After enabling, your documents will sync to Google Drive.',
+    ],
+    showFeatures: false,
   },
 };
 
@@ -86,6 +107,9 @@ export default function SignupModal() {
   }
 
   const message = TRIGGER_MESSAGES[signupModalState.trigger];
+  const primaryLabel = message.primaryLabel ?? 'Continue with Google';
+  const secondaryLabel = message.secondaryLabel ?? 'Continue editing without signing in';
+  const showFeatures = message.showFeatures !== false;
 
   return (
     <div
@@ -159,7 +183,7 @@ export default function SignupModal() {
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
             />
           </svg>
-          {loading ? 'Signing in...' : 'Continue with Google'}
+          {loading ? 'Signing in...' : primaryLabel}
         </button>
 
         {/* Continue without signing in */}
@@ -167,26 +191,41 @@ export default function SignupModal() {
           onClick={hideSignupModal}
           className="w-full mt-4 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
         >
-          Continue editing without signing in
+          {secondaryLabel}
         </button>
 
-        {/* Features */}
-        <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-          <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></div>
-              <span>Unlimited AI assistance</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></div>
-              <span>Cloud storage and sync</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></div>
-              <span>Access from anywhere</span>
+        {message.details && message.details.length > 0 && (
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+              {message.details.map((detail) => (
+                <div key={detail} className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></div>
+                  <span>{detail}</span>
+                </div>
+              ))}
             </div>
           </div>
-        </div>
+        )}
+
+        {/* Features */}
+        {showFeatures && (
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></div>
+                <span>Unlimited AI assistance</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></div>
+                <span>Cloud storage and sync</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></div>
+                <span>Access from anywhere</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Terms */}
         <p className="text-center text-xs text-gray-500 dark:text-gray-500 mt-6">

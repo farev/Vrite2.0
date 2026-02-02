@@ -6,21 +6,56 @@ import dynamic from 'next/dynamic';
 import MenuBar from '@/components/MenuBar';
 import { createClient } from '@/lib/supabase/client';
 import { loadDocumentById, loadTemporaryDocument } from '@/lib/storage';
+import { useAuth } from '@/contexts/AuthContext';
 
 const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), { 
   ssr: false 
 });
 
+const DRIVE_PERMISSION_PROMPT_KEY = 'vrite_drive_permission_prompt_shown';
+
 export default function DocumentPage() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const saveCallbackRef = useRef<(() => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const router = useRouter();
   const params = useParams();
   const supabase = createClient();
+  const { showSignupModal } = useAuth();
+
+  const shouldPromptForDrivePermissions = useCallback((session: any) => {
+    if (!session?.user || session.user.is_anonymous) {
+      return false;
+    }
+
+    const provider = session.user.app_metadata?.provider;
+    const providers = session.user.app_metadata?.providers;
+    const isGoogleUser =
+      provider === 'google' || (Array.isArray(providers) && providers.includes('google'));
+
+    return isGoogleUser && !session.provider_token;
+  }, []);
+
+  const showDrivePermissionsPromptOnce = useCallback((session: any) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (!shouldPromptForDrivePermissions(session)) {
+      return;
+    }
+
+    if (sessionStorage.getItem(DRIVE_PERMISSION_PROMPT_KEY) === 'true') {
+      return;
+    }
+
+    sessionStorage.setItem(DRIVE_PERMISSION_PROMPT_KEY, 'true');
+    showSignupModal('permissions-missing');
+  }, [showSignupModal, shouldPromptForDrivePermissions]);
 
   // Define all callbacks at the top level (before any conditional returns)
   const handleSaveCallbackReady = useCallback((callback: () => void) => {
@@ -33,11 +68,11 @@ export default function DocumentPage() {
 
     // Check authentication status
     supabase.auth.getSession().then(({ data: { session } }) => {
-      const authenticated = !!session?.provider_token;
-      setIsAuthenticated(authenticated);
+      const signedIn = !!session && !session.user?.is_anonymous;
+      setIsAuthenticated(signedIn);
 
       // Allow anonymous access for temporary documents
-      if (!authenticated) {
+      if (!signedIn) {
         if (isTempDoc) {
           console.log('[DocumentPage] Anonymous mode - temporary document access');
           return;
@@ -51,21 +86,7 @@ export default function DocumentPage() {
       // Verify cloud storage access for authenticated users
       if (!session.provider_token) {
         console.error('[DocumentPage] ⚠️ No cloud storage access token!');
-
-        setTimeout(() => {
-          const shouldReauth = confirm(
-            '⚠️ Cloud Storage Access Missing\n\n' +
-            'Your session does not have access to cloud storage.\n' +
-            'You need to log out and log in again to grant permissions.\n\n' +
-            'Click OK to log out now, or Cancel to continue (saving will not work).'
-          );
-
-          if (shouldReauth) {
-            supabase.auth.signOut().then(() => {
-              router.push('/login');
-            });
-          }
-        }, 1000);
+        showDrivePermissionsPromptOnce(session);
       } else {
         console.log('[DocumentPage] ✅ User authenticated with cloud storage access');
       }
@@ -75,12 +96,15 @@ export default function DocumentPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      const authenticated = !!session?.provider_token;
-      setIsAuthenticated(authenticated);
+      const signedIn = !!session && !session.user?.is_anonymous;
+      setIsAuthenticated(signedIn);
+      if (session) {
+        showDrivePermissionsPromptOnce(session);
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, [router, supabase, params.id]);
+  }, [router, supabase, params.id, showDrivePermissionsPromptOnce]);
 
   // Load document if ID is provided
   useEffect(() => {
@@ -173,6 +197,12 @@ export default function DocumentPage() {
     }
   };
 
+  const getCurrentPageSize = () => {
+    const wrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
+    const size = wrapper?.dataset.pageSize;
+    return size === 'a4' ? 'a4' : 'letter';
+  };
+
   const handleExportDocument = async (format: 'pdf' | 'docx' | 'txt') => {
     try {
       if (format === 'txt') {
@@ -223,35 +253,90 @@ export default function DocumentPage() {
       if (format === 'pdf') {
         // Get HTML content from editor (clean version without UI elements)
         const contentElement = document.querySelector('.document-content-editable');
-        const html = contentElement?.innerHTML || '';
-
-        // Call PDF export API
-        const response = await fetch('/api/export/pdf', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            html,
-            title: documentTitle,
-            pageSize: 'letter', // Could be made configurable later
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('PDF export failed');
+        if (!contentElement) {
+          throw new Error('Document content not found');
         }
 
-        // Download the PDF
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${documentTitle}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
+        setIsExporting(true);
+
+        const pageWrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
+        const pageContentElement = document.querySelector('.document-page-content') as HTMLElement | null;
+        const pageWidth = pageWrapper
+          ? getComputedStyle(pageWrapper).getPropertyValue('--page-width').trim()
+          : '';
+        const pageSize = getCurrentPageSize();
+        const pageContentStyles = pageContentElement ? getComputedStyle(pageContentElement) : null;
+
+        const exportRoot = document.createElement('div');
+        exportRoot.className = 'pdf-export-root';
+        exportRoot.style.position = 'fixed';
+        exportRoot.style.left = '-99999px';
+        exportRoot.style.top = '0';
+        exportRoot.style.background = '#ffffff';
+        exportRoot.style.color = '#0f172a';
+        if (pageWidth) {
+          exportRoot.style.width = pageWidth;
+        }
+
+        const exportPage = document.createElement('div');
+        exportPage.className = 'document-page';
+        if (pageWidth) {
+          exportPage.style.width = pageWidth;
+        }
+
+        const exportPageContent = document.createElement('div');
+        exportPageContent.className = 'document-page-content';
+        exportPageContent.style.boxSizing = 'border-box';
+        if (pageContentStyles) {
+          exportPageContent.style.paddingTop = pageContentStyles.paddingTop;
+          exportPageContent.style.paddingRight = pageContentStyles.paddingRight;
+          exportPageContent.style.paddingBottom = pageContentStyles.paddingBottom;
+          exportPageContent.style.paddingLeft = pageContentStyles.paddingLeft;
+        }
+
+        const exportContent = document.createElement('div');
+        exportContent.className = 'document-content-editable';
+        exportContent.innerHTML = contentElement.innerHTML;
+        exportContent.style.width = '100%';
+
+        exportPageContent.appendChild(exportContent);
+        exportPage.appendChild(exportPageContent);
+        exportRoot.appendChild(exportPage);
+        document.body.appendChild(exportRoot);
+
+        try {
+          const html2pdfModule = await import('html2pdf.js');
+          const html2pdf =
+            (html2pdfModule as { default?: typeof import('html2pdf.js') }).default ??
+            html2pdfModule;
+
+          await html2pdf()
+            .set({
+              margin: 0,
+              filename: `${documentTitle}.pdf`,
+              pagebreak: { mode: ['css', 'legacy'] },
+              image: { type: 'jpeg', quality: 0.98 },
+              html2canvas: {
+                scale: 3,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                letterRendering: true,
+              },
+              jsPDF: {
+                unit: 'pt',
+                format: pageSize,
+                orientation: 'portrait',
+              },
+            })
+            .from(exportPage)
+            .save();
+        } finally {
+          document.body.removeChild(exportRoot);
+          setIsExporting(false);
+        }
       }
     } catch (error) {
+      setIsExporting(false);
       console.error('Export error:', error);
       alert(`Failed to export as ${format.toUpperCase()}`);
     }
@@ -271,6 +356,16 @@ export default function DocumentPage() {
 
   return (
     <div className="app-shell">
+      {isExporting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30">
+          <div className="rounded-lg bg-white px-4 py-3 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600"></div>
+              <span className="text-sm text-slate-700">Generating PDF...</span>
+            </div>
+          </div>
+        </div>
+      )}
       <MenuBar
         onNewDocument={handleNewDocument}
         onSaveDocument={handleSaveDocument}
