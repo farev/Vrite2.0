@@ -512,7 +512,6 @@ export default function DocumentEditor({
       pendingSaveTimeout = null;
     }
 
-    console.log('[Editor] Save triggered, title:', documentTitle, 'content length:', documentContent.length);
     saveInProgress = true;
     setIsSaving(true);
 
@@ -575,9 +574,7 @@ export default function DocumentEditor({
         lastModified: Date.now(),
       };
 
-      console.log('[Editor] Calling saveDocument with data:', { id: documentData.id, title: documentData.title, editorStateLength: documentData.editorState.length });
       const savedDoc = await saveDocument(documentData);
-      console.log('[Editor] Save successful, ID:', savedDoc.id);
 
       // Update local ID if it was a new document
       if (!documentId && savedDoc.id) {
@@ -721,11 +718,8 @@ export default function DocumentEditor({
 
       // Set new timeout for debounced save
       pendingSaveTimeout = setTimeout(() => {
-        console.log('[Editor] Debounced auto-save triggered');
-
         if (!canSaveToCloud) {
           // Silent save to localStorage only (no modal)
-          console.log('[Editor] Auto-save (no session) - silent save to localStorage');
           try {
             if (editorState) {
               const tempId = documentId || (initialDocumentId && initialDocumentId.startsWith('temp-') ? initialDocumentId : undefined);
