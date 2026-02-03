@@ -1162,7 +1162,14 @@ export default function DocumentEditor({
                     <div className="document-page-content" style={editorSurfaceStyle}>
                       <div className="document-editor-surface">
                         <RichTextPlugin
-                          contentEditable={<ContentEditable className="document-content-editable" />}
+                          contentEditable={
+                            <ContentEditable
+                              className="document-content-editable"
+                              spellCheck="true"
+                              autoCorrect="on"
+                              autoCapitalize="on"
+                            />
+                          }
                           placeholder={null}
                           ErrorBoundary={LexicalErrorBoundary}
                         />
