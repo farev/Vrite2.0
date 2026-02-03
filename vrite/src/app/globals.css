@@ -198,7 +198,7 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--ai-panel-width, 380px);
   gap: 0;
-  padding: 0 0 0 16px;
+  padding: 0;
   box-sizing: border-box;
   align-items: stretch;
   flex: 1;
@@ -301,9 +301,8 @@ body {
   background: white;
   border-bottom: 1px solid #e5e7eb;
   min-height: var(--app-top-bar-height);
-  padding: 0 16px;
-  margin-left: -16px;
-  width: calc(100% + 16px);
+  padding: 0 2px;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -317,6 +316,10 @@ body {
   gap: 4px;
   flex-wrap: nowrap;
   min-width: 0;
+  flex: 1;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
 }
 
 .toolbar-icon-button {
@@ -325,7 +328,9 @@ body {
 }
 
 .toolbar-more {
-  margin-left: auto;
+  margin-left: 4px;
+  flex-shrink: 0;
+  position: relative;
 }
 
 .toolbar-more-button {
@@ -347,7 +352,14 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+}
+
+.toolbar-more-bar.overflow-items {
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  margin-bottom: 4px;
 }
 
 .toolbar-dropdown {

@@ -8,13 +8,11 @@ import {
   FORMAT_ELEMENT_COMMAND,
   UNDO_COMMAND,
   REDO_COMMAND,
-  $getNodeByKey,
   ElementFormatType,
   $isElementNode,
 } from 'lexical';
 import {
   $createHeadingNode,
-  $createQuoteNode,
   HeadingTagType,
   $isHeadingNode,
 } from '@lexical/rich-text';
@@ -25,7 +23,6 @@ import {
   INSERT_ORDERED_LIST_COMMAND,
   REMOVE_LIST_COMMAND,
   $isListNode,
-  ListNode,
 } from '@lexical/list';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $createEquationNode } from './nodes/EquationNode';
@@ -90,18 +87,20 @@ export default function FormattingToolbar({
   const [isNumberedList, setIsNumberedList] = useState(false);
   const [fontSize, setFontSize] = useState('12pt');
   const [fontFamily, setFontFamily] = useState('Times New Roman');
-  const [lineHeight, setLineHeight] = useState('1.5');
   const [blockType, setBlockType] = useState('paragraph');
   const [textColor, setTextColor] = useState('#000000');
-  const [highlightColor, setHighlightColor] = useState('transparent');
   const [textAlign, setTextAlign] = useState('left');
 
   // Dropdown states - only one can be open at a time
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
 
-  // Ref for click-outside detection
+  // Refs for click-outside detection and overflow calculation
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const mainToolbarRef = useRef<HTMLDivElement>(null);
+
+  // Track which items are overflowing
+  const [overflowItems, setOverflowItems] = useState<Set<string>>(new Set());
 
   const fontSizes = ['8pt', '9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '18pt', '20pt', '24pt', '28pt', '36pt', '48pt', '72pt'];
   const fontFamilies = [
@@ -204,6 +203,90 @@ export default function FormattingToolbar({
     };
   }, []);
 
+  // Handle responsive overflow with ResizeObserver
+  useEffect(() => {
+    const mainToolbar = mainToolbarRef.current;
+    const toolbar = toolbarRef.current;
+    if (!mainToolbar || !toolbar) return;
+
+    const calculateOverflow = () => {
+      // Get the actual container width from the parent toolbar
+      const containerWidth = toolbar.offsetWidth;
+      const children = Array.from(mainToolbar.children) as HTMLElement[];
+
+      // Reserve space for the more button (40px) plus gaps and padding
+      const moreButtonWidth = 50;
+      const totalPadding = 32; // Left and right padding
+      const availableWidth = containerWidth - moreButtonWidth - totalPadding - 8;
+
+      let usedWidth = 0;
+      const newOverflowItems = new Set<string>();
+
+      // Build array of items with their actual widths
+      const items: { id: string; width: number; alwaysVisible: boolean }[] = [];
+
+      children.forEach((child) => {
+        const itemId = child.getAttribute('data-toolbar-item');
+        if (!itemId) return;
+
+        // Skip the more menu button - it's always visible
+        if (itemId === 'more-menu') return;
+
+        // Temporarily make visible to measure
+        const currentDisplay = (child as HTMLElement).style.display;
+        (child as HTMLElement).style.display = '';
+
+        const childWidth = child.offsetWidth + 4; // Add gap
+
+        // Restore display
+        (child as HTMLElement).style.display = currentDisplay;
+
+        // Always keep visible: undo/redo, their divider, AI button, and AI divider
+        const alwaysVisible = itemId === 'undo-redo' ||
+                             itemId === 'undo-redo-divider' ||
+                             itemId === 'ai-assistant' ||
+                             itemId === 'ai-divider';
+
+        if (alwaysVisible) {
+          usedWidth += childWidth;
+        } else {
+          items.push({ id: itemId, width: childWidth, alwaysVisible: false });
+        }
+      });
+
+      // Determine which items overflow
+      for (const item of items) {
+        if (usedWidth + item.width > availableWidth) {
+          newOverflowItems.add(item.id);
+        } else {
+          usedWidth += item.width;
+        }
+      }
+
+      // Only update if there's a change to avoid infinite loops
+      setOverflowItems(prev => {
+        const hasChanged = prev.size !== newOverflowItems.size ||
+          Array.from(newOverflowItems).some(id => !prev.has(id));
+        return hasChanged ? newOverflowItems : prev;
+      });
+    };
+
+    // Initial calculation
+    const timeoutId = setTimeout(calculateOverflow, 150);
+
+    // Watch for resize
+    const resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(calculateOverflow);
+    });
+
+    resizeObserver.observe(toolbar);
+
+    return () => {
+      clearTimeout(timeoutId);
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   const formatHeading = (headingSize: HeadingTagType) => {
     editor.update(() => {
       const selection = $getSelection();
@@ -289,7 +372,6 @@ export default function FormattingToolbar({
         }
       }
     });
-    setLineHeight(height);
     setOpenDropdown(null);
   };
 
@@ -334,7 +416,6 @@ export default function FormattingToolbar({
         });
       }
     });
-    setHighlightColor(color);
     setOpenDropdown(null);
   };
 
@@ -412,11 +493,8 @@ export default function FormattingToolbar({
     setOpenDropdown(null);
   };
 
-  const toggleDropdown = (dropdown: string, closeMore = false) => {
+  const toggleDropdown = (dropdown: string) => {
     setOpenDropdown((prev) => (prev === dropdown ? null : dropdown));
-    if (closeMore) {
-      setIsMoreOpen(false);
-    }
   };
 
   const toggleMoreMenu = () => {
@@ -424,14 +502,41 @@ export default function FormattingToolbar({
     setOpenDropdown(null);
   };
 
+  // Helper function to check if an item should be hidden (overflow)
+  const isOverflowing = (itemId: string) => overflowItems.has(itemId);
+
   return (
     <div className="formatting-toolbar" ref={toolbarRef}>
-      <div className="formatting-toolbar-main">
+      <div className="formatting-toolbar-main" ref={mainToolbarRef}>
+        {/* Undo/Redo - Always visible at the left */}
+        <div className="toolbar-section" data-toolbar-item="undo-redo" style={{ marginLeft: '8px' }}>
+          <button
+            className="toolbar-button"
+            onClick={() => editor.dispatchCommand(UNDO_COMMAND, undefined)}
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo size={18} />
+          </button>
+          <button
+            className="toolbar-button"
+            onClick={() => editor.dispatchCommand(REDO_COMMAND, undefined)}
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo size={18} />
+          </button>
+        </div>
+
+        <div className="toolbar-divider" data-toolbar-item="undo-redo-divider" />
+
         {/* Style Dropdown */}
-        <div className="toolbar-dropdown">
+        <div
+          className="toolbar-dropdown"
+          data-toolbar-item="style"
+          style={{ display: isOverflowing('style') ? 'none' : 'inline-block' }}
+        >
           <button
             className="toolbar-dropdown-button"
-            onClick={() => toggleDropdown('style', true)}
+            onClick={() => toggleDropdown('style')}
           >
             <span className="toolbar-dropdown-label">
               {blockType === 'paragraph' ? 'Normal' : blockType.toUpperCase()}
@@ -457,10 +562,14 @@ export default function FormattingToolbar({
         </div>
 
         {/* Font Family Dropdown */}
-        <div className="toolbar-dropdown">
+        <div
+          className="toolbar-dropdown"
+          data-toolbar-item="font-family"
+          style={{ display: isOverflowing('font-family') ? 'none' : 'inline-block' }}
+        >
           <button
             className="toolbar-dropdown-button"
-            onClick={() => toggleDropdown('font', true)}
+            onClick={() => toggleDropdown('font')}
           >
             <span className="toolbar-dropdown-label">{fontFamily}</span>
             <ChevronDown size={14} />
@@ -482,10 +591,14 @@ export default function FormattingToolbar({
         </div>
 
         {/* Font Size Dropdown */}
-        <div className="toolbar-dropdown">
+        <div
+          className="toolbar-dropdown"
+          data-toolbar-item="font-size"
+          style={{ display: isOverflowing('font-size') ? 'none' : 'inline-block' }}
+        >
           <button
             className="toolbar-dropdown-button"
-            onClick={() => toggleDropdown('size', true)}
+            onClick={() => toggleDropdown('size')}
           >
             <span className="toolbar-dropdown-label">{fontSize}</span>
             <ChevronDown size={14} />
@@ -505,10 +618,18 @@ export default function FormattingToolbar({
           )}
         </div>
 
-        <div className="toolbar-divider" />
+        <div
+          className="toolbar-divider"
+          data-toolbar-item="formatting-divider-1"
+          style={{ display: isOverflowing('formatting-divider-1') ? 'none' : 'block' }}
+        />
 
         {/* Text Formatting */}
-        <div className="toolbar-section">
+        <div
+          className="toolbar-section"
+          data-toolbar-item="text-formatting"
+          style={{ display: isOverflowing('text-formatting') ? 'none' : 'flex' }}
+        >
           <button
             className={`toolbar-button ${isBold ? 'active' : ''}`}
             onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')}
@@ -533,10 +654,14 @@ export default function FormattingToolbar({
         </div>
 
         {/* List Formatting */}
-        <div className="toolbar-dropdown">
+        <div
+          className="toolbar-dropdown"
+          data-toolbar-item="lists"
+          style={{ display: isOverflowing('lists') ? 'none' : 'inline-block' }}
+        >
           <button
             className={`toolbar-dropdown-button toolbar-icon-button ${isBulletList || isNumberedList ? 'active' : ''}`}
-            onClick={() => toggleDropdown('lists', true)}
+            onClick={() => toggleDropdown('lists')}
             title="Lists"
           >
             {isBulletList ? <List size={18} /> : isNumberedList ? <ListOrdered size={18} /> : <List size={18} />}
@@ -563,108 +688,124 @@ export default function FormattingToolbar({
         </div>
 
         {/* Text Color and Highlight */}
-        <div className="toolbar-section">
-          <div className="toolbar-dropdown">
-            <button
-              className="toolbar-dropdown-button toolbar-icon-button"
-              onClick={() => toggleDropdown('textColor', true)}
-              title="Text Color"
-            >
-              <Palette size={18} />
-              <ChevronDown size={14} />
-            </button>
-            {openDropdown === 'textColor' && (
-              <div className="toolbar-dropdown-menu color-picker-menu">
-                <input
-                  type="color"
-                  value={textColor}
-                  onChange={(e) => applyTextColor(e.target.value)}
-                  className="color-picker-input"
-                />
-                <div className="color-presets">
-                  {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map(color => (
-                    <button
-                      key={color}
-                      className="color-preset"
-                      style={{ backgroundColor: color }}
-                      onClick={() => applyTextColor(color)}
-                    />
-                  ))}
+        <div
+          className="toolbar-section"
+          data-toolbar-item="colors"
+          style={{ display: isOverflowing('colors') ? 'none' : 'flex' }}
+        >
+            <div className="toolbar-dropdown">
+              <button
+                className="toolbar-dropdown-button toolbar-icon-button"
+                onClick={() => toggleDropdown('textColor')}
+                title="Text Color"
+              >
+                <Palette size={18} />
+                <ChevronDown size={14} />
+              </button>
+              {openDropdown === 'textColor' && (
+                <div className="toolbar-dropdown-menu color-picker-menu">
+                  <input
+                    type="color"
+                    value={textColor}
+                    onChange={(e) => applyTextColor(e.target.value)}
+                    className="color-picker-input"
+                  />
+                  <div className="color-presets">
+                    {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map(color => (
+                      <button
+                        key={color}
+                        className="color-preset"
+                        style={{ backgroundColor: color }}
+                        onClick={() => applyTextColor(color)}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-          <div className="toolbar-dropdown">
-            <button
-              className="toolbar-dropdown-button toolbar-icon-button"
-              onClick={() => toggleDropdown('highlight', true)}
-              title="Highlight"
-            >
-              <Highlighter size={18} />
-              <ChevronDown size={14} />
-            </button>
-            {openDropdown === 'highlight' && (
-              <div className="toolbar-dropdown-menu color-picker-menu">
-                <button
-                  className="toolbar-dropdown-item"
-                  onClick={() => applyHighlight('transparent')}
-                >
-                  No Highlight
-                </button>
-                <div className="color-presets">
-                  {['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FFA500', '#FFB6C1'].map(color => (
-                    <button
-                      key={color}
-                      className="color-preset"
-                      style={{ backgroundColor: color }}
-                      onClick={() => applyHighlight(color)}
-                    />
-                  ))}
+              )}
+            </div>
+            <div className="toolbar-dropdown">
+              <button
+                className="toolbar-dropdown-button toolbar-icon-button"
+                onClick={() => toggleDropdown('highlight')}
+                title="Highlight"
+              >
+                <Highlighter size={18} />
+                <ChevronDown size={14} />
+              </button>
+              {openDropdown === 'highlight' && (
+                <div className="toolbar-dropdown-menu color-picker-menu">
+                  <button
+                    className="toolbar-dropdown-item"
+                    onClick={() => applyHighlight('transparent')}
+                  >
+                    No Highlight
+                  </button>
+                  <div className="color-presets">
+                    {['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FFA500', '#FFB6C1'].map(color => (
+                      <button
+                        key={color}
+                        className="color-preset"
+                        style={{ backgroundColor: color }}
+                        onClick={() => applyHighlight(color)}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className="toolbar-divider" />
+        <div
+          className="toolbar-divider"
+          data-toolbar-item="alignment-divider"
+          style={{ display: isOverflowing('alignment-divider') ? 'none' : 'block' }}
+        />
 
         {/* Alignment */}
-        <div className="toolbar-section">
-          <button
-            className={`toolbar-button ${textAlign === 'left' ? 'active' : ''}`}
-            onClick={() => applyTextAlign('left')}
-            title="Align Left"
-          >
-            <AlignLeft size={18} />
-          </button>
-          <button
-            className={`toolbar-button ${textAlign === 'center' ? 'active' : ''}`}
-            onClick={() => applyTextAlign('center')}
-            title="Align Center"
-          >
-            <AlignCenter size={18} />
-          </button>
-          <button
-            className={`toolbar-button ${textAlign === 'right' ? 'active' : ''}`}
-            onClick={() => applyTextAlign('right')}
-            title="Align Right"
-          >
-            <AlignRight size={18} />
-          </button>
-          <button
-            className={`toolbar-button ${textAlign === 'justify' ? 'active' : ''}`}
-            onClick={() => applyTextAlign('justify')}
-            title="Justify"
-          >
-            <AlignJustify size={18} />
-          </button>
-        </div>
+        <div
+          className="toolbar-section"
+          data-toolbar-item="alignment"
+          style={{ display: isOverflowing('alignment') ? 'none' : 'flex' }}
+        >
+            <button
+              className={`toolbar-button ${textAlign === 'left' ? 'active' : ''}`}
+              onClick={() => applyTextAlign('left')}
+              title="Align Left"
+            >
+              <AlignLeft size={18} />
+            </button>
+            <button
+              className={`toolbar-button ${textAlign === 'center' ? 'active' : ''}`}
+              onClick={() => applyTextAlign('center')}
+              title="Align Center"
+            >
+              <AlignCenter size={18} />
+            </button>
+            <button
+              className={`toolbar-button ${textAlign === 'right' ? 'active' : ''}`}
+              onClick={() => applyTextAlign('right')}
+              title="Align Right"
+            >
+              <AlignRight size={18} />
+            </button>
+            <button
+              className={`toolbar-button ${textAlign === 'justify' ? 'active' : ''}`}
+              onClick={() => applyTextAlign('justify')}
+              title="Justify"
+            >
+              <AlignJustify size={18} />
+            </button>
+          </div>
 
         {/* Line Spacing */}
-        <div className="toolbar-dropdown">
+        <div
+          className="toolbar-dropdown"
+          data-toolbar-item="line-spacing"
+          style={{ display: isOverflowing('line-spacing') ? 'none' : 'inline-block' }}
+        >
           <button
             className="toolbar-dropdown-button toolbar-icon-button"
-            onClick={() => toggleDropdown('lineSpacing', true)}
+            onClick={() => toggleDropdown('lineSpacing')}
             title="Line Spacing"
           >
             <AlignVerticalJustifyStart size={18} />
@@ -685,30 +826,18 @@ export default function FormattingToolbar({
           )}
         </div>
 
-        <div className="toolbar-divider" />
-
-        {/* Undo/Redo */}
-        <div className="toolbar-section">
-          <button
-            className="toolbar-button"
-            onClick={() => editor.dispatchCommand(UNDO_COMMAND, undefined)}
-            title="Undo (Ctrl+Z)"
-          >
-            <Undo size={18} />
-          </button>
-          <button
-            className="toolbar-button"
-            onClick={() => editor.dispatchCommand(REDO_COMMAND, undefined)}
-            title="Redo (Ctrl+Y)"
-          >
-            <Redo size={18} />
-          </button>
-        </div>
-
-        <div className="toolbar-divider" />
+        <div
+          className="toolbar-divider"
+          data-toolbar-item="ai-divider"
+          style={{ display: isOverflowing('ai-divider') ? 'none' : 'block' }}
+        />
 
         {/* AI Assistant */}
-        <div className="toolbar-section">
+        <div
+          className="toolbar-section"
+          data-toolbar-item="ai-assistant"
+          style={{ display: isOverflowing('ai-assistant') ? 'none' : 'flex' }}
+        >
           <button
             className="toolbar-button ai-toolbar-button"
             onClick={onAIToggle}
@@ -717,22 +846,303 @@ export default function FormattingToolbar({
             <Sparkles size={18} />
           </button>
         </div>
-      </div>
 
-      <div className="toolbar-dropdown toolbar-more">
-        <button
-          className={`toolbar-button toolbar-more-button${isMoreOpen ? ' is-open' : ''}`}
-          onClick={toggleMoreMenu}
-          title="More tools"
-          aria-label="More tools"
-          aria-expanded={isMoreOpen}
-        >
-          <MoreVertical size={18} />
-        </button>
-        {isMoreOpen && (
-          <div className="toolbar-dropdown-menu toolbar-more-menu">
-            <div className="toolbar-more-bar">
-              <div className="toolbar-section">
+        {/* More Menu - Always visible */}
+        <div className="toolbar-dropdown toolbar-more" data-toolbar-item="more-menu" style={{ marginRight: '8px' }}>
+          <button
+            className={`toolbar-button toolbar-more-button${isMoreOpen ? ' is-open' : ''}`}
+            onClick={toggleMoreMenu}
+            title="More tools"
+            aria-label="More tools"
+            aria-expanded={isMoreOpen}
+          >
+            <MoreVertical size={18} />
+          </button>
+          {isMoreOpen && (
+            <div className="toolbar-dropdown-menu toolbar-more-menu">
+              {/* Overflow Items Section */}
+              {overflowItems.size > 0 && (
+                <>
+                  <div className="toolbar-dropdown-header">
+                    <strong>Formatting Options</strong>
+                  </div>
+                  <div className="toolbar-more-bar overflow-items">
+                    {overflowItems.has('style') && (
+                      <div className="toolbar-dropdown">
+                        <button
+                          className="toolbar-dropdown-button"
+                          onClick={() => toggleDropdown('style')}
+                        >
+                          <span className="toolbar-dropdown-label">
+                            {blockType === 'paragraph' ? 'Normal' : blockType.toUpperCase()}
+                          </span>
+                          <ChevronDown size={14} />
+                        </button>
+                        {openDropdown === 'style' && (
+                          <div className="toolbar-dropdown-menu">
+                            <button onClick={formatParagraph} className="toolbar-dropdown-item">
+                              Normal Text
+                            </button>
+                            <button onClick={() => formatHeading('h1')} className="toolbar-dropdown-item">
+                              <span style={{ fontSize: '18pt', fontWeight: 'bold' }}>Heading 1</span>
+                            </button>
+                            <button onClick={() => formatHeading('h2')} className="toolbar-dropdown-item">
+                              <span style={{ fontSize: '14pt', fontWeight: 'bold' }}>Heading 2</span>
+                            </button>
+                            <button onClick={() => formatHeading('h3')} className="toolbar-dropdown-item">
+                              <span style={{ fontSize: '12pt', fontWeight: 'bold' }}>Heading 3</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {overflowItems.has('font-family') && (
+                      <div className="toolbar-dropdown">
+                        <button
+                          className="toolbar-dropdown-button"
+                          onClick={() => toggleDropdown('font')}
+                        >
+                          <span className="toolbar-dropdown-label">{fontFamily}</span>
+                          <ChevronDown size={14} />
+                        </button>
+                        {openDropdown === 'font' && (
+                          <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable">
+                            {fontFamilies.map((font) => (
+                              <button
+                                key={font}
+                                onClick={() => applyFontFamily(font)}
+                                className="toolbar-dropdown-item"
+                                style={{ fontFamily: font }}
+                              >
+                                {font}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {overflowItems.has('font-size') && (
+                      <div className="toolbar-dropdown">
+                        <button
+                          className="toolbar-dropdown-button"
+                          onClick={() => toggleDropdown('size')}
+                        >
+                          <span className="toolbar-dropdown-label">{fontSize}</span>
+                          <ChevronDown size={14} />
+                        </button>
+                        {openDropdown === 'size' && (
+                          <div className="toolbar-dropdown-menu">
+                            {fontSizes.map((size) => (
+                              <button
+                                key={size}
+                                onClick={() => applyFontSize(size)}
+                                className="toolbar-dropdown-item"
+                              >
+                                {size}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {overflowItems.has('text-formatting') && (
+                      <div className="toolbar-section">
+                        <button
+                          className={`toolbar-button ${isBold ? 'active' : ''}`}
+                          onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')}
+                          title="Bold (Ctrl+B)"
+                        >
+                          <Bold size={18} />
+                        </button>
+                        <button
+                          className={`toolbar-button ${isItalic ? 'active' : ''}`}
+                          onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')}
+                          title="Italic (Ctrl+I)"
+                        >
+                          <Italic size={18} />
+                        </button>
+                        <button
+                          className={`toolbar-button ${isUnderline ? 'active' : ''}`}
+                          onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline')}
+                          title="Underline (Ctrl+U)"
+                        >
+                          <Underline size={18} />
+                        </button>
+                      </div>
+                    )}
+                    {overflowItems.has('lists') && (
+                      <div className="toolbar-dropdown">
+                        <button
+                          className={`toolbar-dropdown-button toolbar-icon-button ${isBulletList || isNumberedList ? 'active' : ''}`}
+                          onClick={() => toggleDropdown('lists')}
+                          title="Lists"
+                        >
+                          {isBulletList ? <List size={18} /> : isNumberedList ? <ListOrdered size={18} /> : <List size={18} />}
+                          <ChevronDown size={14} />
+                        </button>
+                        {openDropdown === 'lists' && (
+                          <div className="toolbar-dropdown-menu">
+                            <button
+                              onClick={toggleBulletList}
+                              className={`toolbar-dropdown-item ${isBulletList ? 'active' : ''}`}
+                            >
+                              <List size={18} style={{ marginRight: '8px' }} />
+                              Bullet List
+                            </button>
+                            <button
+                              onClick={toggleNumberedList}
+                              className={`toolbar-dropdown-item ${isNumberedList ? 'active' : ''}`}
+                            >
+                              <ListOrdered size={18} style={{ marginRight: '8px' }} />
+                              Numbered List
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {overflowItems.has('colors') && (
+                      <div className="toolbar-section">
+                        <div className="toolbar-dropdown">
+                          <button
+                            className="toolbar-dropdown-button toolbar-icon-button"
+                            onClick={() => toggleDropdown('textColor')}
+                            title="Text Color"
+                          >
+                            <Palette size={18} />
+                            <ChevronDown size={14} />
+                          </button>
+                          {openDropdown === 'textColor' && (
+                            <div className="toolbar-dropdown-menu color-picker-menu">
+                              <input
+                                type="color"
+                                value={textColor}
+                                onChange={(e) => applyTextColor(e.target.value)}
+                                className="color-picker-input"
+                              />
+                              <div className="color-presets">
+                                {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map(color => (
+                                  <button
+                                    key={color}
+                                    className="color-preset"
+                                    style={{ backgroundColor: color }}
+                                    onClick={() => applyTextColor(color)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="toolbar-dropdown">
+                          <button
+                            className="toolbar-dropdown-button toolbar-icon-button"
+                            onClick={() => toggleDropdown('highlight')}
+                            title="Highlight"
+                          >
+                            <Highlighter size={18} />
+                            <ChevronDown size={14} />
+                          </button>
+                          {openDropdown === 'highlight' && (
+                            <div className="toolbar-dropdown-menu color-picker-menu">
+                              <button
+                                className="toolbar-dropdown-item"
+                                onClick={() => applyHighlight('transparent')}
+                              >
+                                No Highlight
+                              </button>
+                              <div className="color-presets">
+                                {['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FFA500', '#FFB6C1'].map(color => (
+                                  <button
+                                    key={color}
+                                    className="color-preset"
+                                    style={{ backgroundColor: color }}
+                                    onClick={() => applyHighlight(color)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {overflowItems.has('alignment') && (
+                      <div className="toolbar-section">
+                        <button
+                          className={`toolbar-button ${textAlign === 'left' ? 'active' : ''}`}
+                          onClick={() => applyTextAlign('left')}
+                          title="Align Left"
+                        >
+                          <AlignLeft size={18} />
+                        </button>
+                        <button
+                          className={`toolbar-button ${textAlign === 'center' ? 'active' : ''}`}
+                          onClick={() => applyTextAlign('center')}
+                          title="Align Center"
+                        >
+                          <AlignCenter size={18} />
+                        </button>
+                        <button
+                          className={`toolbar-button ${textAlign === 'right' ? 'active' : ''}`}
+                          onClick={() => applyTextAlign('right')}
+                          title="Align Right"
+                        >
+                          <AlignRight size={18} />
+                        </button>
+                        <button
+                          className={`toolbar-button ${textAlign === 'justify' ? 'active' : ''}`}
+                          onClick={() => applyTextAlign('justify')}
+                          title="Justify"
+                        >
+                          <AlignJustify size={18} />
+                        </button>
+                      </div>
+                    )}
+                    {overflowItems.has('line-spacing') && (
+                      <div className="toolbar-dropdown">
+                        <button
+                          className="toolbar-dropdown-button toolbar-icon-button"
+                          onClick={() => toggleDropdown('lineSpacing')}
+                          title="Line Spacing"
+                        >
+                          <AlignVerticalJustifyStart size={18} />
+                          <ChevronDown size={14} />
+                        </button>
+                        {openDropdown === 'lineSpacing' && (
+                          <div className="toolbar-dropdown-menu">
+                            {lineSpacings.map((spacing) => (
+                              <button
+                                key={spacing.value}
+                                onClick={() => applyLineHeight(spacing.value)}
+                                className="toolbar-dropdown-item"
+                              >
+                                {spacing.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {overflowItems.has('ai-assistant') && (
+                      <div className="toolbar-section">
+                        <button
+                          className="toolbar-button ai-toolbar-button"
+                          onClick={onAIToggle}
+                          title="AI Assistant (Ctrl+K)"
+                        >
+                          <Sparkles size={18} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="toolbar-divider" />
+                </>
+              )}
+
+              {/* Additional Tools Section (always in More menu) */}
+              <div className="toolbar-dropdown-header">
+                <strong>Additional Tools</strong>
+              </div>
+              <div className="toolbar-more-bar">
+                <div className="toolbar-section">
                 <button
                   className={`toolbar-button ${isStrikethrough ? 'active' : ''}`}
                   onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough')}
@@ -920,6 +1330,7 @@ export default function FormattingToolbar({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
