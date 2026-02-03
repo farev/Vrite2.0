@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { generateTempId } from '@/lib/storage';
 import {
   migrateTemporaryDocuments,
@@ -20,20 +21,53 @@ const HomePage = dynamic(() => import('@/components/HomePage'), {
   ssr: false
 });
 
+const DRIVE_PERMISSION_PROMPT_KEY = 'vrite_drive_permission_prompt_shown';
+
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationMessage, setMigrationMessage] = useState('');
   const router = useRouter();
   const supabase = createClient();
+  const { showSignupModal } = useAuth();
+
+  const shouldPromptForDrivePermissions = useCallback((session: any) => {
+    if (!session?.user || session.user.is_anonymous) {
+      return false;
+    }
+
+    const provider = session.user.app_metadata?.provider;
+    const providers = session.user.app_metadata?.providers;
+    const isGoogleUser =
+      provider === 'google' || (Array.isArray(providers) && providers.includes('google'));
+
+    return isGoogleUser && !session.provider_token;
+  }, []);
+
+  const showDrivePermissionsPromptOnce = useCallback((session: any) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (!shouldPromptForDrivePermissions(session)) {
+      return;
+    }
+
+    if (sessionStorage.getItem(DRIVE_PERMISSION_PROMPT_KEY) === 'true') {
+      return;
+    }
+
+    sessionStorage.setItem(DRIVE_PERMISSION_PROMPT_KEY, 'true');
+    showSignupModal('permissions-missing');
+  }, [showSignupModal, shouldPromptForDrivePermissions]);
 
   useEffect(() => {
     // Check authentication status (but don't redirect)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const authenticated = !!session?.provider_token;
-      setIsAuthenticated(authenticated);
+      const signedIn = !!session && !session.user?.is_anonymous;
+      setIsAuthenticated(signedIn);
 
-      if (!authenticated) {
+      if (!signedIn) {
         console.log('[Home] No session - anonymous mode enabled');
         // For anonymous users, redirect to new temporary document
         const tempId = generateTempId();
@@ -142,22 +176,7 @@ export default function Home() {
       // Verify cloud storage access for authenticated users
       if (!session.provider_token) {
         console.error('[Home] ⚠️ No cloud storage access token!');
-
-        // Show a user-friendly alert
-        setTimeout(() => {
-          const shouldReauth = confirm(
-            '⚠️ Cloud Storage Access Missing\n\n' +
-            'Your session does not have access to cloud storage.\n' +
-            'You need to log out and log in again to grant permissions.\n\n' +
-            'Click OK to log out now, or Cancel to continue (saving will not work).'
-          );
-
-          if (shouldReauth) {
-            supabase.auth.signOut().then(() => {
-              router.push('/login');
-            });
-          }
-        }, 1000);
+        showDrivePermissionsPromptOnce(session);
       } else {
         console.log('[Home] ✅ User authenticated with cloud storage access');
       }
@@ -167,12 +186,15 @@ export default function Home() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      const authenticated = !!session?.provider_token;
-      setIsAuthenticated(authenticated);
+      const signedIn = !!session && !session.user?.is_anonymous;
+      setIsAuthenticated(signedIn);
+      if (session) {
+        showDrivePermissionsPromptOnce(session);
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, [router, supabase]);
+  }, [router, supabase, showDrivePermissionsPromptOnce]);
 
   // Show loading state while checking authentication
   if (isAuthenticated === null) {

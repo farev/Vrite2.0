@@ -21,12 +21,14 @@ interface DiffPluginProps {
   changes: LexicalChange[] | null;
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
+  onAnyAccepted?: () => void;
 }
 
 export default function DiffPlugin({
   changes,
   onDiffComplete,
   onAllResolved,
+  onAnyAccepted,
 }: DiffPluginProps) {
   const [editor] = useLexicalComposerContext();
 
@@ -62,6 +64,7 @@ export default function DiffPlugin({
   // Handle accepting a diff node
   const handleAccept = useCallback(
     (nodeKey: NodeKey) => {
+      let didAccept = false;
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
@@ -75,11 +78,15 @@ export default function DiffPlugin({
           // Replace the DiffNode with the new TextNode
           // The parent element already has the new alignment set (from createBlockNodeWithDiff)
           node.replace(textNode);
+          didAccept = true;
         }
         checkAllResolved();
       });
+      if (didAccept) {
+        onAnyAccepted?.();
+      }
     },
-    [editor, checkAllResolved]
+    [editor, checkAllResolved, onAnyAccepted]
   );
 
   // Handle rejecting a diff node
