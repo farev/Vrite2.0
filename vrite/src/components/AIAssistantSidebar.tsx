@@ -24,6 +24,36 @@ interface Message {
   isStreaming?: boolean;
 }
 
+// Helper component to format message content with special styling for tool usage
+function FormattedMessageContent({ content }: { content: string }) {
+  // Split content by tool usage pattern
+  const parts = content.split(/(Using \w+[\w_-]* tool\.\.\.)/g);
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        // Check if this part is a tool usage message
+        const toolMatch = part.match(/Using (\w+[\w_-]*) tool\.\.\./);
+        if (toolMatch) {
+          const toolName = toolMatch[1];
+          return (
+            <span key={index} style={{ color: '#888', opacity: 0.8 }}>
+              Using <strong>{toolName}</strong> tool...
+            </span>
+          );
+        }
+        // Regular content - preserve line breaks
+        return part.split('\n').map((line, i, arr) => (
+          <span key={`${index}-${i}`}>
+            {line}
+            {i < arr.length - 1 && <br />}
+          </span>
+        ));
+      })}
+    </>
+  );
+}
+
 export interface ContextSnippet {
   id: string;
   text: string;
@@ -159,6 +189,15 @@ export default function AIAssistantSidebar({
               case 'changes':
                 // Buffer changes - don't apply yet
                 changes = event.changes;
+                // Add tool usage indicator to the content
+                if (accumulatedContent && !accumulatedContent.includes('\n\nUsing edit_document tool...')) {
+                  accumulatedContent += '\n\nUsing edit_document tool...';
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === messageId
+                      ? { ...msg, content: accumulatedContent, isStreaming: true, isLoading: false }
+                      : msg
+                  ));
+                }
                 break;
 
               case 'reasoning':
@@ -167,18 +206,29 @@ export default function AIAssistantSidebar({
 
               case 'summary':
                 summary = event.summary;
+                // Append summary to the accumulated content
+                if (summary && !accumulatedContent.includes(summary)) {
+                  accumulatedContent += `\n\n${summary}`;
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === messageId
+                      ? { ...msg, content: accumulatedContent, isStreaming: true, isLoading: false }
+                      : msg
+                  ));
+                }
                 break;
 
               case 'complete':
-                console.log('[AIAssistant] Stream complete. Changes:', changes.length, 'Reasoning:', !!reasoning, 'Summary:', !!summary);
-                // Now apply all buffered changes with diff highlighting
+                console.log('[AIAssistant] Stream complete. Changes:', changes.length, 'Summary:', !!summary);
+                console.log('[AIAssistant] Final accumulated content:', accumulatedContent);
+
+                // Apply all buffered changes with diff highlighting
                 if (changes.length > 0 && onApplyLexicalChanges) {
                   onApplyLexicalChanges(changes);
                 }
 
-                const finalContent = reasoning
-                  ? `**Reasoning:** ${reasoning}\n\n${summary || 'Changes applied.'}`
-                  : summary || 'Changes applied successfully.';
+                // Use accumulated content (reasoning + tool indicator + summary)
+                // Fallback only if nothing was captured
+                const finalContent = accumulatedContent.trim() || summary || 'Changes applied successfully.';
 
                 setMessages(prev => prev.map(msg =>
                   msg.id === messageId
@@ -532,14 +582,14 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                   ) : message.isStreaming ? (
                     <div className="ai-message-streaming">
                       <div className="ai-message-text">
-                        {message.content}
+                        <FormattedMessageContent content={message.content} />
                         <span className="ai-streaming-cursor">▊</span>
                       </div>
                     </div>
                   ) : (
                     <>
                       <div className="ai-message-text">
-                        {message.content}
+                        <FormattedMessageContent content={message.content} />
                       </div>
                       {message.type === 'assistant' && !message.isLoading && (
                         <div className="ai-message-actions">

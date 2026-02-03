@@ -13,7 +13,22 @@ IEEE: Section numbering, column format, citation brackets
 
 // ============== V2 System Prompt (Lexical JSON) ==============
 
-const EDITOR_SYSTEM_PROMPT_V2 = `You are the best document editing assistant called Vrite. Use edit_document tool for ALL changes.
+const EDITOR_SYSTEM_PROMPT_V2 = `You are the best document editing assistant called Vrite.
+
+CRITICAL WORKFLOW - YOU MUST FOLLOW THIS EXACT ORDER:
+
+Step 1 - EXPLANATION (as text content):
+Write 1-2 sentences explaining what you plan to do. Output this as regular text, NOT as JSON or tool arguments.
+Example: "I'll apply bold formatting to the first paragraph."
+
+Step 2 - TOOL EXECUTION (as function call):
+Use the edit_document FUNCTION CALL (not text) to make your changes. The system will handle this automatically.
+DO NOT write JSON in your text response - use the actual function calling mechanism.
+
+Step 3 - SUMMARY (provided after tool execution):
+After the tool completes, you'll be asked for a summary. Keep it brief.
+
+REMEMBER: Your initial response should contain ONLY the explanation text, followed by the function call. DO NOT include JSON or code blocks in your text content.
 
 RULES:
 - Be surgical - only change what's requested
@@ -56,11 +71,7 @@ EDITING PRINCIPLES:
 - Do NOT regenerate unchanged content
 
 FORMATTING STANDARDS:
-${FORMATTING_STANDARDS}
-
-AFTER using tools, provide:
-- "reasoning": Brief analysis of what changes were made and why (1-3 sentences)
-- "summary": Concise statement of what was changed (no pleasantries)`;
+${FORMATTING_STANDARDS}`;
 
 // ============== V2 Tool Definition ==============
 
@@ -283,47 +294,82 @@ async function processOpenAIStream(
       console.log('[ai-command] Emitted', changes.length, 'changes');
     }
 
-    // Get reasoning and summary
+    // Get summary only (reasoning was already provided upfront)
     if (accumulatedToolCalls.length > 0) {
-      console.log('[ai-command] Getting reasoning and summary...');
+      console.log('[ai-command] Getting summary with streaming...');
 
-      // Build messages for reasoning request
-      const reasoningMessages = [...messages];
-      reasoningMessages.push({
+      // Build messages for summary request
+      const summaryMessages = [...messages];
+      summaryMessages.push({
         role: 'assistant',
         content: '',
         tool_calls: accumulatedToolCalls,
       });
 
       for (const toolCall of accumulatedToolCalls) {
-        reasoningMessages.push({
+        summaryMessages.push({
           role: 'tool',
           content: 'Applied successfully',
           tool_call_id: toolCall.id,
         });
       }
 
-      reasoningMessages.push({
+      summaryMessages.push({
         role: 'user',
-        content: 'Now provide your reasoning and summary in JSON format with fields: reasoning, summary',
+        content: 'Now provide a brief summary of what was done in JSON format with field: summary',
       });
 
-      const finalResponse = await createChatCompletion(openaiConfig, {
+      // Stream the summary response
+      const summaryStream = await createChatCompletionStream(openaiConfig, {
         model: 'gpt-5-mini',
-        messages: reasoningMessages,
-        max_completion_tokens: 500,
+        messages: summaryMessages,
+        max_completion_tokens: 300,
         reasoning_effort: 'minimal',
         response_format: { type: 'json_object' },
       });
 
-      const result = JSON.parse(finalResponse.choices[0].message.content || '{}');
-      const reasoning = result.reasoning || '';
-      const summary = result.summary || 'Changes applied.';
+      const summaryReader = summaryStream.getReader();
+      const summaryDecoder = new TextDecoder();
+      let summaryBuffer = '';
+      let summaryContent = '';
 
-      if (reasoning) {
-        await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'reasoning', reasoning })}\n\n`));
+      while (true) {
+        const { done, value } = await summaryReader.read();
+        if (done) break;
+
+        summaryBuffer += summaryDecoder.decode(value, { stream: true });
+        const lines = summaryBuffer.split('\n');
+        summaryBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          if (line.includes('[DONE]')) continue;
+
+          try {
+            const jsonStr = line.slice(6);
+            const chunk: ChatCompletionChunk = JSON.parse(jsonStr);
+            const delta = chunk.choices[0]?.delta;
+
+            if (delta?.content) {
+              summaryContent += delta.content;
+              // Don't emit summary tokens as they're JSON - we'll send the parsed summary instead
+            }
+          } catch (parseError) {
+            console.error('[ai-command] Error parsing summary SSE:', parseError);
+          }
+        }
       }
-      await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'summary', summary })}\n\n`));
+
+      // Parse the accumulated JSON response
+      try {
+        const result = JSON.parse(summaryContent || '{}');
+        const summary = result.summary || 'Changes applied.';
+
+        await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'summary', summary })}\n\n`));
+      } catch (parseError) {
+        console.error('[ai-command] Error parsing summary JSON:', parseError);
+        await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'summary', summary: 'Changes applied.' })}\n\n`));
+      }
     }
 
     // Emit complete
@@ -435,12 +481,12 @@ async function handleNonStreamingRequest(
   }
   console.log('[ai-command] Total changes extracted:', changes.length);
 
-  // Get reasoning and summary
+  // Get summary only (reasoning was already provided upfront)
   let reasoning = '';
   let summary = '';
 
   if (toolCalls.length > 0) {
-    console.log('[ai-command] Processing tool calls for reasoning and summary...');
+    console.log('[ai-command] Processing tool calls for summary...');
     messages.push({
       role: 'assistant',
       content: message.content || '',
@@ -457,22 +503,23 @@ async function handleNonStreamingRequest(
 
     messages.push({
       role: 'user',
-      content: 'Now provide your reasoning and summary in JSON format with fields: reasoning, summary',
+      content: 'Now provide a brief summary of what was done in JSON format with field: summary',
     });
 
-    console.log('[ai-command] Requesting final reasoning/summary from OpenAI...');
+    console.log('[ai-command] Requesting final summary from OpenAI...');
     const finalResponse = await createChatCompletion(openaiConfig, {
       model: 'gpt-5-mini',
       messages,
-      max_completion_tokens: 500,
+      max_completion_tokens: 300,
       reasoning_effort: 'minimal',
       response_format: { type: 'json_object' },
     });
 
     const result = JSON.parse(finalResponse.choices[0].message.content || '{}');
-    reasoning = result.reasoning || '';
     summary = result.summary || 'Changes applied.';
-    console.log('[ai-command] Reasoning:', reasoning?.substring(0, 100));
+    // Reasoning is captured from the initial response content
+    reasoning = message.content || '';
+    console.log('[ai-command] Reasoning (from initial response):', reasoning?.substring(0, 100));
     console.log('[ai-command] Summary:', summary?.substring(0, 100));
   } else {
     console.log('[ai-command] No tool calls, using fallback mode');
