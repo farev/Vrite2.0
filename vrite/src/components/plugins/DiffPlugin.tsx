@@ -69,16 +69,29 @@ export default function DiffPlugin({
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
           const text = node.getText();
+          const diffType = node.getDiffType();
           const nodeData = node.exportJSON();
+          const parent = node.getParent();
 
-          const textNode = $createTextNode(text);
-          if (nodeData.isBold) textNode.toggleFormat('bold');
-          if (nodeData.isItalic) textNode.toggleFormat('italic');
+          if (diffType === 'deletion') {
+            // For deletions, accepting means removing the content entirely
+            node.remove();
+            // Remove empty parent paragraph if it only contained the deletion
+            if (parent && parent.getTextContent().trim() === '') {
+              parent.remove();
+            }
+            didAccept = true;
+          } else {
+            // For additions/replacements, replace with the new text
+            const textNode = $createTextNode(text);
+            if (nodeData.isBold) textNode.toggleFormat('bold');
+            if (nodeData.isItalic) textNode.toggleFormat('italic');
 
-          // Replace the DiffNode with the new TextNode
-          // The parent element already has the new alignment set (from createBlockNodeWithDiff)
-          node.replace(textNode);
-          didAccept = true;
+            // Replace the DiffNode with the new TextNode
+            // The parent element already has the new alignment set (from createBlockNodeWithDiff)
+            node.replace(textNode);
+            didAccept = true;
+          }
         }
         checkAllResolved();
       });
