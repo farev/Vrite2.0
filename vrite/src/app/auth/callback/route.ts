@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 import { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
+import { recordDriveConnection } from '@/lib/check-drive-integration';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -22,6 +23,12 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('[AuthCallback] Session established for user:', data.session?.user.email);
+
+    // Record successful Drive connection if user has provider_token
+    if (data.session?.provider_token && data.session?.user?.id) {
+      await recordDriveConnection(data.session.user.id, data.session.user.email, supabase);
+      console.log('[AuthCallback] Recorded Drive connection for user');
+    }
 
     // Check if there are temporary documents to migrate
     // Note: We can't check localStorage here (server-side), but we can set a flag

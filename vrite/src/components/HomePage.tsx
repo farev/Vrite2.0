@@ -11,6 +11,7 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [userEmail, setUserEmail] = useState<string>('');
+  const [isLoadingRef, setIsLoadingRef] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -20,14 +21,36 @@ export default function HomePage() {
   }, []);
 
   const loadDocuments = async () => {
+    // Prevent multiple simultaneous loads
+    if (isLoadingRef) {
+      console.log('[HomePage] Already loading documents, skipping...');
+      return;
+    }
+
+    setIsLoadingRef(true);
     setIsLoading(true);
     try {
       const docs = await listAllDocuments();
-      setDocuments(docs);
+
+      // Deduplicate documents by ID (keep the most recently modified version)
+      const uniqueDocsMap = new Map<string, DocumentData>();
+      docs.forEach(doc => {
+        if (doc.id) {
+          const existing = uniqueDocsMap.get(doc.id);
+          if (!existing || doc.lastModified > existing.lastModified) {
+            uniqueDocsMap.set(doc.id, doc);
+          }
+        }
+      });
+
+      const uniqueDocs = Array.from(uniqueDocsMap.values());
+      console.log(`[HomePage] Loaded ${docs.length} documents, ${uniqueDocs.length} unique after deduplication`);
+      setDocuments(uniqueDocs);
     } catch (error) {
       console.error('Failed to load documents:', error);
     } finally {
       setIsLoading(false);
+      setIsLoadingRef(false);
     }
   };
 

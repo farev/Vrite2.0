@@ -16,24 +16,27 @@ import {
   hasSupabaseDocuments,
   getSupabaseDocumentCount,
 } from '@/lib/migrate-supabase-to-cloud';
+import { hasEverConnectedDrive } from '@/lib/check-drive-integration';
+import DrivePermissionsToast from '@/components/DrivePermissionsToast';
 
 const HomePage = dynamic(() => import('@/components/HomePage'), {
   ssr: false
 });
 
-const DRIVE_PERMISSION_PROMPT_KEY = 'vrite_drive_permission_prompt_shown';
+const DRIVE_PERMISSION_TOAST_DISMISSED_KEY = 'vrite_drive_permission_toast_dismissed';
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationMessage, setMigrationMessage] = useState('');
+  const [showDriveToast, setShowDriveToast] = useState(false);
   const router = useRouter();
   const supabase = createClient();
   const { showSignupModal } = useAuth();
 
-  const shouldPromptForDrivePermissions = useCallback((session: any) => {
-    if (!session?.user || session.user.is_anonymous) {
-      return false;
+  const handleMissingDriveToken = useCallback(async (session: any) => {
+    if (typeof window === 'undefined' || !session?.user || session.user.is_anonymous) {
+      return;
     }
 
     const provider = session.user.app_metadata?.provider;
@@ -41,25 +44,53 @@ export default function Home() {
     const isGoogleUser =
       provider === 'google' || (Array.isArray(providers) && providers.includes('google'));
 
-    return isGoogleUser && !session.provider_token;
-  }, []);
-
-  const showDrivePermissionsPromptOnce = useCallback((session: any) => {
-    if (typeof window === 'undefined') {
+    // Only handle if user signed in with Google but has no provider_token
+    if (!isGoogleUser || session.provider_token) {
       return;
     }
 
-    if (!shouldPromptForDrivePermissions(session)) {
-      return;
-    }
+    console.log('[Home] User has Google account but no provider token');
 
-    if (sessionStorage.getItem(DRIVE_PERMISSION_PROMPT_KEY) === 'true') {
-      return;
-    }
+    // Check if user has ever successfully connected Drive before
+    const hadDrivePreviously = await hasEverConnectedDrive(session.user.id);
 
-    sessionStorage.setItem(DRIVE_PERMISSION_PROMPT_KEY, 'true');
-    showSignupModal('permissions-missing');
-  }, [showSignupModal, shouldPromptForDrivePermissions]);
+    if (hadDrivePreviously) {
+      // Token expired - auto redirect to sign in
+      console.log('[Home] Drive token expired, redirecting to sign in...');
+
+      // Save current path for return
+      localStorage.setItem('oauth_return_path', window.location.pathname);
+
+      // Redirect to sign in
+      const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+          scopes: 'email profile openid https://www.googleapis.com/auth/drive.file',
+        },
+      });
+
+      if (error) {
+        console.error('[Home] Failed to initiate OAuth:', error);
+        // Fall back to showing toast
+        setShowDriveToast(true);
+      }
+    } else {
+      // User never granted Drive permissions - show toast notification
+      console.log('[Home] User never granted Drive permissions, showing notification');
+
+      // Check if user dismissed the toast before
+      const dismissed = sessionStorage.getItem(DRIVE_PERMISSION_TOAST_DISMISSED_KEY);
+      if (!dismissed) {
+        setShowDriveToast(true);
+      }
+    }
+  }, [supabase]);
 
   useEffect(() => {
     // Check authentication status (but don't redirect)
@@ -176,7 +207,7 @@ export default function Home() {
       // Verify cloud storage access for authenticated users
       if (!session.provider_token) {
         console.error('[Home] ⚠️ No cloud storage access token!');
-        showDrivePermissionsPromptOnce(session);
+        handleMissingDriveToken(session);
       } else {
         console.log('[Home] ✅ User authenticated with cloud storage access');
       }
@@ -188,13 +219,26 @@ export default function Home() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       const signedIn = !!session && !session.user?.is_anonymous;
       setIsAuthenticated(signedIn);
-      if (session) {
-        showDrivePermissionsPromptOnce(session);
+      if (session && !session.provider_token) {
+        handleMissingDriveToken(session);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [router, supabase, showDrivePermissionsPromptOnce]);
+  }, [router, supabase, handleMissingDriveToken]);
+
+  const handleEnableDrivePermissions = () => {
+    setShowDriveToast(false);
+    showSignupModal('permissions-missing');
+  };
+
+  const handleDismissToast = () => {
+    setShowDriveToast(false);
+    // Remember that user dismissed the toast for this session
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(DRIVE_PERMISSION_TOAST_DISMISSED_KEY, 'true');
+    }
+  };
 
   // Show loading state while checking authentication
   if (isAuthenticated === null) {
@@ -254,5 +298,15 @@ export default function Home() {
     return null;
   }
 
-  return <HomePage />;
+  return (
+    <>
+      <HomePage />
+      {showDriveToast && (
+        <DrivePermissionsToast
+          onEnablePermissions={handleEnableDrivePermissions}
+          onDismiss={handleDismissToast}
+        />
+      )}
+    </>
+  );
 }
