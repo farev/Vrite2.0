@@ -10,9 +10,11 @@ import {
   type NodeKey,
   type SerializedLexicalNode,
   type Spread,
+  $getNodeByKey,
 } from 'lexical';
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { Edit2, Check, X } from 'lucide-react';
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 
 export type SerializedEquationNode = Spread<
   {
@@ -161,7 +163,8 @@ function EquationComponent({
   inline: boolean;
   nodeKey: NodeKey;
 }) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [editor] = useLexicalComposerContext();
+  const [isEditing, setIsEditing] = useState(equation === '');
   const [editValue, setEditValue] = useState(equation);
   const [katex, setKatex] = useState<typeof import('katex').default | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -191,18 +194,14 @@ function EquationComponent({
   }, [katex, equation, inline, isEditing]);
 
   const handleSave = useCallback(() => {
-    // Update the node
-    const editor = (window as unknown as { __lexicalEditor?: { update: (cb: () => void) => void; getEditorState: () => { _nodeMap: Map<string, LexicalNode> } } }).__lexicalEditor;
-    if (editor) {
-      editor.update(() => {
-        const node = editor.getEditorState()._nodeMap.get(nodeKey);
-        if ($isEquationNode(node)) {
-          node.setEquation(editValue);
-        }
-      });
-    }
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if ($isEquationNode(node)) {
+        node.setEquation(editValue);
+      }
+    });
     setIsEditing(false);
-  }, [editValue, nodeKey]);
+  }, [editor, editValue, nodeKey]);
 
   const handleCancel = useCallback(() => {
     setEditValue(equation);
@@ -215,12 +214,25 @@ function EquationComponent({
 
   if (isEditing) {
     return (
-      <span className="equation-editor">
+      <span
+        className="equation-editor"
+        onKeyDown={(e) => {
+          // Prevent Lexical from handling these events
+          e.stopPropagation();
+        }}
+        onInput={(e) => {
+          // Prevent Lexical from handling input events
+          e.stopPropagation();
+        }}
+        contentEditable={false}
+      >
         <input
           type="text"
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onKeyDown={(e) => {
+            // Stop propagation to prevent Lexical from capturing keystrokes
+            e.stopPropagation();
             if (e.key === 'Enter') {
               e.preventDefault();
               handleSave();
@@ -232,10 +244,22 @@ function EquationComponent({
           className="equation-input"
           autoFocus
         />
-        <button onClick={handleSave} className="equation-btn equation-btn-save">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleSave();
+          }}
+          className="equation-btn equation-btn-save"
+        >
           <Check size={14} />
         </button>
-        <button onClick={handleCancel} className="equation-btn equation-btn-cancel">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCancel();
+          }}
+          className="equation-btn equation-btn-cancel"
+        >
           <X size={14} />
         </button>
       </span>
@@ -245,7 +269,12 @@ function EquationComponent({
   return (
     <span
       className={inline ? 'equation-inline-wrapper' : 'equation-block-wrapper'}
-      onClick={() => setIsEditing(true)}
+      onClick={(e) => {
+        e.stopPropagation();
+        setIsEditing(true);
+      }}
+      contentEditable={false}
+      suppressContentEditableWarning
     >
       <span ref={containerRef} className="equation-content" />
       {error && <span className="equation-error">{error}</span>}
