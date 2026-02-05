@@ -16,7 +16,8 @@ import {
 import { $createHeadingNode, type HeadingTagType } from '@lexical/rich-text';
 import { $createListItemNode, $createListNode, type ListItemNode } from '@lexical/list';
 import { $createDiffNode } from '@/components/nodes/DiffNode';
-import type { SimplifiedBlock, TextSegment, BlockKeyMap } from './lexicalSerializer';
+import { $createEquationNode, $isEquationNode } from '@/components/nodes/EquationNode';
+import type { SimplifiedBlock, Segment, BlockKeyMap } from './lexicalSerializer';
 
 // ============== Change Types ==============
 
@@ -40,7 +41,7 @@ export interface DeleteBlockChange {
 export interface ModifySegmentsChange {
   operation: 'modify_segments';
   blockId: string;
-  newSegments: TextSegment[];
+  newSegments: Segment[];
 }
 
 export type LexicalChange =
@@ -234,7 +235,7 @@ function createListItemNodeWithDiff(block: SimplifiedBlock): ListItemNode {
     (listItemNode as unknown as ElementNode).setFormat(block.align);
   }
 
-  const newText = block.segments.map(s => s.text).join('');
+  const newText = getTextFromSegments(block.segments);
   const isBold = hasFormat(block.segments, 1);
   const isItalic = hasFormat(block.segments, 2);
 
@@ -334,8 +335,8 @@ function applyModifySegments(change: ModifySegmentsChange, blockKeyMap: BlockKey
   // Get original text
   const originalText = node.getTextContent();
 
-  // Build new text for comparison
-  const newText = change.newSegments.map(s => s.text).join('');
+  // Build new text for comparison (equations shown as [Equation: ...])
+  const newText = getTextFromSegments(change.newSegments);
 
   // Clear existing children
   if ('clear' in node && typeof node.clear === 'function') {
@@ -377,6 +378,46 @@ function applyModifySegments(change: ModifySegmentsChange, blockKeyMap: BlockKey
 // ============== Helper Functions ==============
 
 /**
+ * Extract text content from segments for display in diffs.
+ * Equations are shown as [Equation: latex].
+ */
+function getTextFromSegments(segments: Segment[]): string {
+  return segments.map(s => {
+    if ('text' in s) {
+      return s.text;
+    } else if (s.type === 'equation') {
+      return `[Equation: ${s.equation}]`;
+    }
+    return '';
+  }).join('');
+}
+
+/**
+ * Append segments (text or equations) to a paragraph/heading/list-item node.
+ */
+function appendSegmentsToNode(
+  node: LexicalNode,
+  segments: Segment[],
+  isOriginal: boolean = false
+): void {
+  for (const segment of segments) {
+    if ('text' in segment) {
+      // Text segment - create text node
+      const textNode = $createTextNode(segment.text);
+      applyFormatToTextNode(textNode, segment.format);
+      (node as { append?: (child: LexicalNode) => void }).append?.(textNode);
+    } else if (segment.type === 'equation') {
+      // Equation segment - create inline EquationNode
+      const equationNode = $createEquationNode(
+        segment.equation,
+        true  // Inline equation
+      );
+      (node as { append?: (child: LexicalNode) => void }).append?.(equationNode);
+    }
+  }
+}
+
+/**
  * Create a Lexical block node with diff highlighting.
  */
 function createBlockNodeWithDiff(
@@ -397,6 +438,55 @@ function createBlockNodeWithDiff(
         (node as ListItemNode).setIndent(block.indent);
       }
       break;
+    case 'equation':
+      if (!block.equationData) {
+        throw new Error('Equation block missing equationData');
+      }
+
+      // Convert block equations to inline equations in paragraphs for better editing
+      // Create a paragraph with an inline equation instead of a block equation
+      node = $createParagraphNode();
+
+      // Apply alignment if specified
+      if (block.align && $isElementNode(node)) {
+        (node as ElementNode).setFormat(block.align);
+      }
+
+      // Create inline equation (even for "display" equations)
+      const equationNode = $createEquationNode(
+        block.equationData.equation,
+        true  // Always use inline: true for better editing
+      );
+
+      if (originalText !== null) {
+        // Show diff for replacement
+        const diffNode = $createDiffNode(
+          'addition',
+          `Equation: ${block.equationData.equation}`,
+          originalText ? `Original: ${originalText}` : undefined,
+          false,
+          true,  // italic styling
+          undefined,
+          undefined,
+          { equation: block.equationData.equation, inline: true }  // Always inline
+        );
+        (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
+        return node;
+      } else {
+        // New equation - show diff
+        const diffNode = $createDiffNode(
+          'addition',
+          `Equation: ${block.equationData.equation}`,
+          undefined,
+          false,
+          true,  // italic styling
+          undefined,
+          undefined,
+          { equation: block.equationData.equation, inline: true }  // Always inline
+        );
+        (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
+        return node;
+      }
     case 'paragraph':
     default:
       node = $createParagraphNode();
@@ -413,8 +503,32 @@ function createBlockNodeWithDiff(
   const oldAlign = originalAlign || 'left';
   const alignmentChange = (newAlign !== oldAlign) ? { from: oldAlign, to: newAlign } : undefined;
 
+  // Check if this is a paragraph with only an equation segment (standalone equation)
+  const hasSingleEquation = block.segments.length === 1 &&
+    'type' in block.segments[0] &&
+    block.segments[0].type === 'equation';
+
+  if (hasSingleEquation) {
+    // Standalone equation - show diff with equation data for proper rendering
+    const equationSeg = block.segments[0];
+    if ('equation' in equationSeg) {
+      const diffNode = $createDiffNode(
+        'addition',
+        `Equation: ${equationSeg.equation}`,
+        originalText || undefined,  // Include original text if replacing
+        false,
+        true,  // italic
+        undefined,
+        alignmentChange,
+        { equation: equationSeg.equation, inline: true }  // Store equation data
+      );
+      (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
+      return node;
+    }
+  }
+
   // Build new text from segments
-  const newText = block.segments.map(s => s.text).join('');
+  const newText = getTextFromSegments(block.segments);
   const isBold = hasFormat(block.segments, 1);
   const isItalic = hasFormat(block.segments, 2);
 
@@ -458,11 +572,7 @@ function createBlockNodeWithDiff(
       (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
     } else {
       // No changes - apply segments directly without diff
-      for (const segment of block.segments) {
-        const textNode = $createTextNode(segment.text);
-        applyFormatToTextNode(textNode, segment.format);
-        (node as { append?: (child: LexicalNode) => void }).append?.(textNode);
-      }
+      appendSegmentsToNode(node, block.segments);
     }
   }
 
@@ -470,10 +580,10 @@ function createBlockNodeWithDiff(
 }
 
 /**
- * Check if any segment has a specific format bit set.
+ * Check if any text segment has a specific format bit set.
  */
-function hasFormat(segments: TextSegment[], formatBit: number): boolean {
-  return segments.some(s => (s.format & formatBit) !== 0);
+function hasFormat(segments: Segment[], formatBit: number): boolean {
+  return segments.some(s => 'text' in s && (s.format & formatBit) !== 0);
 }
 
 /**
@@ -490,16 +600,28 @@ function applyFormatToTextNode(textNode: TextNode, format: number): void {
 }
 
 /**
- * Create text nodes from segments (for non-diff cases).
+ * Create nodes from segments (text or equation) for non-diff cases.
  */
-export function createTextNodesFromSegments(segments: TextSegment[]): TextNode[] {
-  const nodes: TextNode[] = [];
+export function createNodesFromSegments(segments: Segment[]): LexicalNode[] {
+  const nodes: LexicalNode[] = [];
 
   for (const segment of segments) {
-    const textNode = $createTextNode(segment.text);
-    applyFormatToTextNode(textNode, segment.format);
-    nodes.push(textNode);
+    if ('text' in segment) {
+      const textNode = $createTextNode(segment.text);
+      applyFormatToTextNode(textNode, segment.format);
+      nodes.push(textNode);
+    } else if (segment.type === 'equation') {
+      const equationNode = $createEquationNode(segment.equation, true);
+      nodes.push(equationNode);
+    }
   }
 
   return nodes;
+}
+
+/**
+ * @deprecated Use createNodesFromSegments instead
+ */
+export function createTextNodesFromSegments(segments: Segment[]): LexicalNode[] {
+  return createNodesFromSegments(segments);
 }

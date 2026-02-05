@@ -16,7 +16,7 @@ import {
   HeadingTagType,
   $isHeadingNode,
 } from '@lexical/rich-text';
-import { $setBlocksType } from '@lexical/selection';
+import { $setBlocksType, $patchStyleText } from '@lexical/selection';
 import { $createParagraphNode, $isTextNode } from 'lexical';
 import {
   INSERT_UNORDERED_LIST_COMMAND,
@@ -176,6 +176,45 @@ export default function FormattingToolbar({
       } else {
         setTextAlign('left');
       }
+
+      // Get font family and font size from the selected text node
+      const node = selection.anchor.type === 'text'
+        ? selection.anchor.getNode()
+        : selection.getNodes().find($isTextNode);
+
+      if (node && $isTextNode(node)) {
+        const style = node.getStyle();
+        if (style) {
+          // Parse font-family
+          const fontFamilyMatch = style.match(/font-family:\s*["']?([^;"']+)["']?/);
+          if (fontFamilyMatch) {
+            setFontFamily(fontFamilyMatch[1]);
+          } else {
+            setFontFamily('Times New Roman'); // Default
+          }
+
+          // Parse font-size
+          const fontSizeMatch = style.match(/font-size:\s*([^;]+)/);
+          if (fontSizeMatch) {
+            setFontSize(fontSizeMatch[1].trim());
+          } else {
+            setFontSize('12pt'); // Default
+          }
+
+          // Parse text color
+          const colorMatch = style.match(/color:\s*([^;]+)/);
+          if (colorMatch) {
+            setTextColor(colorMatch[1].trim());
+          } else {
+            setTextColor('#000000'); // Default
+          }
+        } else {
+          // No style, use defaults
+          setFontFamily('Times New Roman');
+          setFontSize('12pt');
+          setTextColor('#000000');
+        }
+      }
     }
   }, [editor]);
 
@@ -329,12 +368,7 @@ export default function FormattingToolbar({
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        const nodes = selection.getNodes();
-        nodes.forEach((node) => {
-          if ($isTextNode(node)) {
-            node.setStyle(`font-size: ${size};`);
-          }
-        });
+        $patchStyleText(selection, { 'font-size': size });
       }
     });
     setFontSize(size);
@@ -345,12 +379,7 @@ export default function FormattingToolbar({
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        const nodes = selection.getNodes();
-        nodes.forEach((node) => {
-          if ($isTextNode(node)) {
-            node.setStyle(`font-family: "${family}";`);
-          }
-        });
+        $patchStyleText(selection, { 'font-family': `"${family}"` });
       }
     });
     setFontFamily(family);
@@ -384,16 +413,7 @@ export default function FormattingToolbar({
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        const nodes = selection.getNodes();
-        nodes.forEach((node) => {
-          if ($isTextNode(node)) {
-            const currentStyle = node.getStyle();
-            const newStyle = currentStyle
-              ? `${currentStyle}; color: ${color}`
-              : `color: ${color}`;
-            node.setStyle(newStyle);
-          }
-        });
+        $patchStyleText(selection, { 'color': color });
       }
     });
     setTextColor(color);
@@ -404,16 +424,7 @@ export default function FormattingToolbar({
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        const nodes = selection.getNodes();
-        nodes.forEach((node) => {
-          if ($isTextNode(node)) {
-            const currentStyle = node.getStyle();
-            const newStyle = currentStyle
-              ? `${currentStyle}; background-color: ${color}`
-              : `background-color: ${color}`;
-            node.setStyle(newStyle);
-          }
-        });
+        $patchStyleText(selection, { 'background-color': color });
       }
     });
     setOpenDropdown(null);
@@ -477,7 +488,8 @@ export default function FormattingToolbar({
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        const equationNode = $createEquationNode('E = mc^2', true);
+        // Insert an empty equation which will open in edit mode automatically
+        const equationNode = $createEquationNode('', true);
         selection.insertNodes([equationNode]);
       }
     });

@@ -49,6 +49,7 @@ import DiffPlugin from './plugins/DiffPlugin';
 import ClipboardPlugin from './plugins/ClipboardPlugin';
 import AutocompletePlugin from './plugins/AutocompletePlugin';
 import PaginationPlugin from './plugins/PaginationPlugin';
+import { SpellCheckPlugin } from './plugins/SpellCheckPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
@@ -1452,6 +1453,7 @@ export default function DocumentEditor({
                     onAllResolved={handleAllDiffsResolved}
                     onAnyAccepted={handleDiffAccepted}
                   />
+                  <SpellCheckPlugin />
                   <SelectionContextPlugin onSelectionChange={setSelectionInfo} />
                 </div>
               </div>

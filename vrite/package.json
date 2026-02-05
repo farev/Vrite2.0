@@ -31,6 +31,7 @@
     "lexical": "^0.39.0",
     "lucide-react": "^0.542.0",
     "next": "^16.1.2",
+    "onnxruntime-web": "^1.23.2",
     "puppeteer": "^24.34.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

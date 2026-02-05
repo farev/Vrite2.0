@@ -7,6 +7,8 @@ import type { LexicalNode, TextNode, ElementNode } from 'lexical';
 import { $isElementNode } from 'lexical';
 import type { HeadingNode } from '@lexical/rich-text';
 import type { ListItemNode, ListNode } from '@lexical/list';
+import type { EquationNode } from '@/components/nodes/EquationNode';
+import { $isEquationNode } from '@/components/nodes/EquationNode';
 
 // ============== Types ==============
 
@@ -15,14 +17,27 @@ export interface TextSegment {
   format: number; // Bitmask: 0=normal, 1=bold, 2=italic, 4=underline, etc.
 }
 
+export interface EquationSegment {
+  type: 'equation';
+  equation: string;  // LaTeX string
+}
+
+export type Segment = TextSegment | EquationSegment;
+
+export interface EquationBlockData {
+  equation: string;
+  inline: boolean;  // Always false for block equations
+}
+
 export interface SimplifiedBlock {
   id: string;
-  type: 'paragraph' | 'heading' | 'list-item';
+  type: 'paragraph' | 'heading' | 'list-item' | 'equation';
   tag?: 'h1' | 'h2' | 'h3';
   listType?: 'bullet' | 'number';
   indent?: number;
   align?: 'left' | 'center' | 'right' | 'justify' | 'start' | 'end'; // Text alignment
-  segments: TextSegment[];
+  segments: Segment[];
+  equationData?: EquationBlockData;  // For equation blocks
 }
 
 export interface SimplifiedDocument {
@@ -88,6 +103,21 @@ export function serializeLexicalToSimplified(root: LexicalNode): SimplifiedDocum
       }
 
       blocks.push(block);
+    } else if (type === 'equation') {
+      const equationNode = node as EquationNode;
+      if (!equationNode.isInline()) {
+        // Block equation - create equation block
+        blocks.push({
+          id: `block-${blockIndex++}`,
+          type: 'equation',
+          equationData: {
+            equation: equationNode.getEquation(),
+            inline: false,
+          },
+          segments: [],
+        });
+      }
+      // Inline equations are handled in extractSegments()
     } else if (type === 'list') {
       const listNode = node as ListNode;
       const listType = listNode.getListType() === 'bullet' ? 'bullet' : 'number';
@@ -131,8 +161,8 @@ export function serializeLexicalToSimplified(root: LexicalNode): SimplifiedDocum
 /**
  * Extract text segments from an element node, preserving formatting.
  */
-function extractSegments(elementNode: LexicalNode): TextSegment[] {
-  const segments: TextSegment[] = [];
+function extractSegments(elementNode: LexicalNode): Segment[] {
+  const segments: Segment[] = [];
 
   if (!('getChildren' in elementNode) || typeof elementNode.getChildren !== 'function') {
     return segments;
@@ -147,6 +177,14 @@ function extractSegments(elementNode: LexicalNode): TextSegment[] {
         text: textNode.getTextContent(),
         format: textNode.getFormat(),
       });
+    } else if (child.getType() === 'equation') {
+      const equationNode = child as EquationNode;
+      if (equationNode.isInline()) {
+        segments.push({
+          type: 'equation',
+          equation: equationNode.getEquation(),
+        });
+      }
     } else if (child.getType() === 'linebreak') {
       // Represent line breaks as newline in text
       segments.push({
@@ -171,25 +209,29 @@ function extractSegments(elementNode: LexicalNode): TextSegment[] {
     }
   }
 
-  // Merge adjacent segments with same format
+  // Merge adjacent text segments with same format
   return mergeSegments(segments);
 }
 
 /**
- * Merge adjacent segments with the same format.
+ * Merge adjacent text segments with the same format.
+ * Equation segments are never merged.
  */
-function mergeSegments(segments: TextSegment[]): TextSegment[] {
+function mergeSegments(segments: Segment[]): Segment[] {
   if (segments.length === 0) return [];
 
-  const merged: TextSegment[] = [];
-  let current = { ...segments[0] };
+  const merged: Segment[] = [];
+  let current = segments[0];
 
   for (let i = 1; i < segments.length; i++) {
-    if (segments[i].format === current.format) {
-      current.text += segments[i].text;
+    const segment = segments[i];
+
+    // Only merge text segments with matching format
+    if ('text' in current && 'text' in segment && current.format === segment.format) {
+      current = { text: current.text + segment.text, format: current.format };
     } else {
       merged.push(current);
-      current = { ...segments[i] };
+      current = segment;
     }
   }
   merged.push(current);
@@ -210,7 +252,7 @@ export function buildBlockKeyMap(root: LexicalNode): BlockKeyMap {
   const processNode = (node: LexicalNode) => {
     const type = node.getType();
 
-    if (type === 'paragraph' || type === 'heading') {
+    if (type === 'paragraph' || type === 'heading' || type === 'equation') {
       map[`block-${blockIndex++}`] = node.getKey();
     } else if (type === 'listitem') {
       map[`block-${blockIndex++}`] = node.getKey();
@@ -249,9 +291,14 @@ export function getLastBlockId(document: SimplifiedDocument): string | null {
 export function isDocumentEmpty(document: SimplifiedDocument): boolean {
   if (document.blocks.length === 0) return true;
 
-  // Check if all blocks have empty segments
-  return document.blocks.every(block =>
-    block.segments.length === 0 ||
-    (block.segments.length === 1 && block.segments[0].text.trim() === '')
-  );
+  // Check if all blocks have empty segments or are empty equations
+  return document.blocks.every(block => {
+    if (block.type === 'equation') {
+      return !block.equationData || block.equationData.equation.trim() === '';
+    }
+    return (
+      block.segments.length === 0 ||
+      (block.segments.length === 1 && 'text' in block.segments[0] && block.segments[0].text.trim() === '')
+    );
+  });
 }

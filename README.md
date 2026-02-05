@@ -83,6 +83,9 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-key
 # Your app URL
 NEXT_PUBLIC_APP_URL=http://localhost:3001
 
+# Email (welcome on first login)
+INTERNAL_API_SECRET=your-internal-secret
+
 # OpenAI API key is now stored in Supabase Vault (see step 4)
 ```
 
@@ -161,6 +164,9 @@ supabase secrets set GOOGLE_CLIENT_ID=...
 supabase secrets set GOOGLE_CLIENT_SECRET=...
 supabase secrets set MICROSOFT_CLIENT_ID=...
 supabase secrets set MICROSOFT_CLIENT_SECRET=...
+supabase secrets set RESEND_API_KEY=your-resend-api-key
+supabase secrets set RESEND_FROM=your-verified-from@domain.com
+supabase secrets set INTERNAL_API_SECRET=your-internal-secret
 ```
 
 ### Deploy Next.js to Vercel
@@ -178,6 +184,9 @@ vercel
 # - NEXT_PUBLIC_SUPABASE_URL (from Supabase dashboard)
 # - NEXT_PUBLIC_SUPABASE_ANON_KEY
 # - SUPABASE_SERVICE_ROLE_KEY
+# - RESEND_API_KEY
+# - RESEND_FROM
+# - INTERNAL_API_SECRET
 ```
 
 ## 🗄️ Database Schema

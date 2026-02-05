@@ -5,6 +5,7 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import {
   $getRoot,
   $createTextNode,
+  $createParagraphNode,
   $getNodeByKey,
   $setSelection,
   $isElementNode,
@@ -14,8 +15,9 @@ import {
 } from 'lexical';
 import { $convertToMarkdownString, TRANSFORMERS } from '@lexical/markdown';
 import { DiffNode, $isDiffNode } from '../nodes/DiffNode';
+import { $createEquationNode, $isEquationNode } from '../nodes/EquationNode';
 import { buildBlockKeyMap } from '@/lib/lexicalSerializer';
-import { applyChangesWithDiff, type LexicalChange } from '@/lib/lexicalChangeApplicator';
+import { applyChangesWithDiff, type LexicalChange, createNodesFromSegments } from '@/lib/lexicalChangeApplicator';
 
 interface DiffPluginProps {
   changes: LexicalChange[] | null;
@@ -82,15 +84,28 @@ export default function DiffPlugin({
             }
             didAccept = true;
           } else {
-            // For additions/replacements, replace with the new text
-            const textNode = $createTextNode(text);
-            if (nodeData.isBold) textNode.toggleFormat('bold');
-            if (nodeData.isItalic) textNode.toggleFormat('italic');
+            // For additions/replacements, check if it's an equation
+            if (nodeData.equationData) {
+              // Create an inline EquationNode (all equations are inline now)
+              const equationNode = $createEquationNode(
+                nodeData.equationData.equation,
+                true  // Always inline
+              );
 
-            // Replace the DiffNode with the new TextNode
-            // The parent element already has the new alignment set (from createBlockNodeWithDiff)
-            node.replace(textNode);
-            didAccept = true;
+              // Replace the DiffNode with the inline EquationNode
+              node.replace(equationNode);
+              didAccept = true;
+            } else {
+              // Regular text replacement
+              const textNode = $createTextNode(text);
+              if (nodeData.isBold) textNode.toggleFormat('bold');
+              if (nodeData.isItalic) textNode.toggleFormat('italic');
+
+              // Replace the DiffNode with the new TextNode
+              // The parent element already has the new alignment set (from createBlockNodeWithDiff)
+              node.replace(textNode);
+              didAccept = true;
+            }
           }
         }
         checkAllResolved();

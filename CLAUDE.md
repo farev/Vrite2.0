@@ -179,6 +179,39 @@ User signs in → Google OAuth → /auth/callback
    - Block-level operations: modify_segments, replace_block, insert_block, delete_block
    - Applied precisely to editor state
 
+**CRITICAL: Change Applicator Rules**
+
+When implementing or modifying change handling in `lexicalChangeApplicator.ts`:
+
+⚠️ **Always test both `insert_block` AND `replace_block` operations**
+
+- `insert_block`: Creates new content (originalText is null)
+- `replace_block`: Replaces existing content (originalText is set)
+
+Many bugs occur when code only handles one operation type. Example:
+```typescript
+// ❌ BAD - Only works for inserts
+if (hasSpecialContent && originalText === null) {
+  // Handle special content
+}
+
+// ✅ GOOD - Works for both inserts and replacements
+if (hasSpecialContent) {
+  const diffNode = $createDiffNode(
+    'addition',
+    newContent,
+    originalText || undefined,  // Show original if replacing
+    ...
+  );
+}
+```
+
+Common scenarios requiring both:
+- Inserting equations (insert_block)
+- Converting text to equations (replace_block)
+- Adding formatted content (insert_block)
+- Changing paragraph to heading (replace_block)
+
 ### Cloud Storage Integration
 
 **Google Drive Client** (`src/lib/google-drive.ts`):

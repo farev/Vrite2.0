@@ -70,6 +70,62 @@ EDITING PRINCIPLES:
 - Only modify blocks that actually need changing
 - Do NOT regenerate unchanged content
 
+EQUATION SUPPORT:
+
+CRITICAL: Equations are SEGMENTS, not blocks. Put equations INSIDE the segments array.
+
+1. STANDALONE EQUATIONS (paragraph with only an equation segment):
+{
+  "operation": "insert_block",
+  "afterBlockId": "block-2",
+  "newBlock": {
+    "id": "new-eq-1",
+    "type": "paragraph",
+    "align": "center",
+    "segments": [
+      { "type": "equation", "equation": "x = \\\\frac{-b \\\\pm \\\\sqrt{b^2-4ac}}{2a}" }
+    ]
+  }
+}
+NOTE: The equation goes IN segments array! Do NOT use equationData field.
+
+2. INLINE EQUATIONS (equation within text):
+{
+  "operation": "modify_segments",
+  "blockId": "block-0",
+  "newSegments": [
+    { "text": "Einstein's equation ", "format": 0 },
+    { "type": "equation", "equation": "E=mc^2" },
+    { "text": " is famous.", "format": 0 }
+  ]
+}
+
+LaTeX Syntax Examples (MUST MATCH BRACES):
+- Fractions: \\\\frac{numerator}{denominator} (2 pairs of braces!)
+- Square root: \\\\sqrt{x} or \\\\sqrt[n]{x}
+- Exponents: x^2 (single char) or x^{2+3} (multi-char needs braces)
+- Subscripts: x_i (single char) or x_{i+1} (multi-char needs braces)
+- Summation: \\\\sum_{i=1}^{n} x_i (note: subscript and superscript both have braces)
+- Integration: \\\\int_0^\\\\infty f(x)\\\\,dx (note the spacing)
+- Greek letters: \\\\alpha, \\\\beta, \\\\gamma, \\\\pi
+- Matrices: \\\\begin{bmatrix} a & b \\\\\\\\ c & d \\\\end{bmatrix}
+
+More Complex Examples:
+- Quadratic formula: x = \\\\frac{-b \\\\pm \\\\sqrt{b^2 - 4ac}}{2a}
+- Pythagorean: a^2 + b^2 = c^2
+- Derivative: f'(x) = \\\\lim_{h \\\\to 0} \\\\frac{f(x+h) - f(x)}{h}
+
+CRITICAL EQUATION RULES:
+- NEVER use $ or $$ delimiters - just provide the LaTeX content
+- ALWAYS match opening { with closing }
+- ALWAYS use braces {} for multi-character subscripts or superscripts
+- ALL equations must be inline equations (type: "equation" in segments)
+- For standalone equations, put them in a paragraph by themselves with align: "center"
+- For equations within text, include them as segments alongside text
+- NEVER use type: "equation" for blocks - use type: "paragraph" with equation segments
+- Always escape backslashes in JSON (use \\\\ instead of \\)
+- DOUBLE-CHECK your braces before responding!
+
 FORMATTING STANDARDS:
 ${FORMATTING_STANDARDS}`;
 
@@ -118,16 +174,31 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
                   type: { type: 'string', enum: ['paragraph', 'heading', 'list-item'] },
                   tag: { type: 'string', enum: ['h1', 'h2', 'h3'], description: 'Heading level (for headings only)' },
                   listType: { type: 'string', enum: ['bullet', 'number'], description: 'List type (for list-items only)' },
-                  align: { type: 'string', enum: ['left', 'center', 'right', 'justify', 'start', 'end'], description: 'Text alignment (optional, defaults to left)' },
+                  align: { type: 'string', enum: ['left', 'center', 'right', 'justify', 'start', 'end'], description: 'Text alignment (optional, defaults to left). Use "center" for standalone equations.' },
                   segments: {
                     type: 'array',
+                    description: 'Text and equation segments. For standalone equations, use a single equation segment. For inline equations, mix with text segments.',
                     items: {
-                      type: 'object',
-                      properties: {
-                        text: { type: 'string' },
-                        format: { type: 'integer', description: 'Format bitmask: 0=normal, 1=bold, 2=italic, 4=underline' },
-                      },
-                      required: ['text', 'format'],
+                      oneOf: [
+                        {
+                          type: 'object',
+                          description: 'Text segment',
+                          properties: {
+                            text: { type: 'string' },
+                            format: { type: 'integer', description: 'Format bitmask: 0=normal, 1=bold, 2=italic, 4=underline' },
+                          },
+                          required: ['text', 'format'],
+                        },
+                        {
+                          type: 'object',
+                          description: 'Inline equation segment',
+                          properties: {
+                            type: { type: 'string', enum: ['equation'] },
+                            equation: { type: 'string', description: 'LaTeX equation (no $ delimiters)' },
+                          },
+                          required: ['type', 'equation'],
+                        }
+                      ]
                     },
                   },
                 },
@@ -135,14 +206,28 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
               },
               newSegments: {
                 type: 'array',
-                description: 'New text segments (for modify_segments only)',
+                description: 'New text and equation segments (for modify_segments only)',
                 items: {
-                  type: 'object',
-                  properties: {
-                    text: { type: 'string' },
-                    format: { type: 'integer' },
-                  },
-                  required: ['text', 'format'],
+                  oneOf: [
+                    {
+                      type: 'object',
+                      description: 'Text segment',
+                      properties: {
+                        text: { type: 'string' },
+                        format: { type: 'integer' },
+                      },
+                      required: ['text', 'format'],
+                    },
+                    {
+                      type: 'object',
+                      description: 'Inline equation segment',
+                      properties: {
+                        type: { type: 'string', enum: ['equation'] },
+                        equation: { type: 'string' },
+                      },
+                      required: ['type', 'equation'],
+                    }
+                  ]
                 },
               },
             },
@@ -160,6 +245,18 @@ interface TextSegment {
   format: number;
 }
 
+interface EquationSegment {
+  type: 'equation';
+  equation: string;
+}
+
+type Segment = TextSegment | EquationSegment;
+
+interface EquationBlockData {
+  equation: string;
+  inline: boolean;
+}
+
 interface SimplifiedBlock {
   id: string;
   type: 'paragraph' | 'heading' | 'list-item';
@@ -167,7 +264,8 @@ interface SimplifiedBlock {
   listType?: 'bullet' | 'number';
   indent?: number;
   align?: 'left' | 'center' | 'right' | 'justify' | 'start' | 'end';
-  segments: TextSegment[];
+  segments: Segment[];
+  equationData?: EquationBlockData;  // Legacy - no longer used
 }
 
 interface SimplifiedDocument {
@@ -648,7 +746,8 @@ Deno.serve(async (req) => {
     // Check if document is blank or nearly blank
     const isBlank = document.blocks.length === 0 || (
       document.blocks.length === 1 &&
-      document.blocks[0].segments.every(s => s.text.trim() === '')
+      document.blocks[0].type === 'paragraph' &&
+      document.blocks[0].segments.every(s => 'text' in s && s.text.trim() === '')
     );
     const blankNote = isBlank
       ? '\n\nIMPORTANT: The document is BLANK. You MUST use multiple insert_block operations (one per paragraph/heading/list-item). Do NOT use modify_segments. Create each piece of content as a separate block with its own insert_block operation.'
