@@ -32,13 +32,10 @@ export async function GET(request: NextRequest) {
 
     // Trigger one-time welcome email via Supabase Edge Function (best effort)
     if (data.session?.user?.id && data.session?.user?.email) {
-      const internalSecret = process.env.INTERNAL_API_SECRET;
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-      if (!internalSecret || !supabaseUrl || !supabaseAnonKey) {
-        console.warn('[AuthCallback] Missing config for welcome email, skipping');
-      } else {
+      if (supabaseUrl && supabaseAnonKey) {
         try {
           const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-login-email`;
           await fetch(edgeFunctionUrl, {
@@ -47,7 +44,6 @@ export async function GET(request: NextRequest) {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${supabaseAnonKey}`,
               apikey: supabaseAnonKey,
-              'x-internal-secret': internalSecret,
             },
             body: JSON.stringify({
               userId: data.session.user.id,
@@ -58,6 +54,8 @@ export async function GET(request: NextRequest) {
         } catch (error) {
           console.warn('[AuthCallback] Failed to trigger welcome email:', error);
         }
+      } else {
+        console.warn('[AuthCallback] Missing Supabase URL/key for welcome email, skipping');
       }
     }
 

@@ -19,24 +19,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const internalSecret = Deno.env.get('INTERNAL_API_SECRET');
-    if (!internalSecret) {
-      console.error('[send-login-email] INTERNAL_API_SECRET not configured');
-      return new Response(
-        JSON.stringify({ error: 'Server configuration error' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const providedSecret = req.headers.get('x-internal-secret');
-    if (providedSecret !== internalSecret) {
-      console.warn('[send-login-email] Unauthorized request blocked');
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     const payload = (await req.json()) as SendLoginEmailPayload;
     if (!payload?.userId) {
       return new Response(
@@ -102,7 +84,7 @@ Welcome to VibeWrite.
 
 We built this because we were tired of "dumb" word processors. VibeWrite is AI-native from the ground up—think Cursor, but for documents. Instead of staring at a blank page, just hit Cmd + K and let the editor work with you. Whether you're drafting a memo or refactoring an entire essay, the goal is to keep you in flow.
 
-We need your help: We’re building this in the open and want to make sure we’re solving the right problems. If you have 15 minutes, we’d love to hop on a quick call to hear your thoughts.
+We need your help: We’re building this in the open and want to make sure we’re solving the right problems. If you have 15 minutes, we’d love to hop on a quick call to hear your thoughts https://calendly.com/d/ctmj-ssb-tdc/vibewrite.
 
 If you're short on time, just reply to this email and tell us: what’s the one thing you wish your current writing tool could do?
 
