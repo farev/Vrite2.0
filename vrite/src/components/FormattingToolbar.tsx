@@ -10,6 +10,8 @@ import {
   REDO_COMMAND,
   ElementFormatType,
   $isElementNode,
+  ElementNode,
+  TextNode,
 } from 'lexical';
 import {
   $createHeadingNode,
@@ -379,7 +381,7 @@ export default function FormattingToolbar({
           const selection = $getSelection();
           if ($isRangeSelection(selection)) {
             const anchor = selection.anchor.getNode();
-            let node = anchor;
+            let node: ElementNode | TextNode | null = anchor;
 
             // Find the table node
             while (node && node.getType() !== 'table') {

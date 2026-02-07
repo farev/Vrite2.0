@@ -12,6 +12,8 @@ import {
   KEY_ARROW_UP_COMMAND,
   KEY_ENTER_COMMAND,
   $setSelection,
+  ElementNode,
+  TextNode,
 } from 'lexical';
 import {
   $isTableNode,
@@ -31,7 +33,7 @@ export default function TableNavigationPlugin() {
         if (!$isRangeSelection(selection)) return false;
 
         const anchor = selection.anchor.getNode();
-        let cellNode = anchor;
+        let cellNode: ElementNode | TextNode | null = anchor;
 
         // Find the table cell
         while (cellNode && !$isTableCellNode(cellNode)) {
@@ -82,7 +84,7 @@ export default function TableNavigationPlugin() {
         if (!$isRangeSelection(selection)) return false;
 
         const anchor = selection.anchor.getNode();
-        let cellNode = anchor;
+        let cellNode: ElementNode | TextNode | null = anchor;
 
         // Find the table cell
         while (cellNode && !$isTableCellNode(cellNode)) {
@@ -136,7 +138,7 @@ export default function TableNavigationPlugin() {
         if (!$isRangeSelection(selection)) return false;
 
         const anchor = selection.anchor.getNode();
-        let cellNode = anchor;
+        let cellNode: ElementNode | TextNode | null = anchor;
 
         // Find the table cell
         while (cellNode && !$isTableCellNode(cellNode)) {
