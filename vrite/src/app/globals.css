@@ -848,6 +848,119 @@ body {
   user-select: none;
 }
 
+/* Table Grid Selector */
+.table-grid-dropdown {
+  min-width: 250px;
+  padding: 12px;
+}
+
+.table-grid-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.table-grid-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.table-grid-row {
+  display: flex;
+  gap: 2px;
+}
+
+.table-grid-cell {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #d1d5db;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.table-grid-cell:hover,
+.table-grid-cell-hover {
+  background: #2563eb;
+  border-color: #1d4ed8;
+}
+
+.table-grid-label {
+  font-size: 13px;
+  color: #6b7280;
+  text-align: center;
+  padding: 4px;
+}
+
+/* Table Context Menu */
+.table-context-menu {
+  z-index: 1000;
+}
+
+.color-picker-submenu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  margin-left: 4px;
+  min-width: 140px;
+}
+
+/* Table Styles */
+.document-content-editable table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  width: 100%;
+  margin: 16px 0;
+  border: 1px solid #d1d5db;
+  font-size: 12pt;
+  line-height: 1.5;
+  cursor: default;
+}
+
+.document-content-editable th,
+.document-content-editable td {
+  border: 1px solid #d1d5db;
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  min-width: 40px;
+}
+
+.document-content-editable th {
+  background-color: #f9fafb;
+  font-weight: 600;
+}
+
+.document-content-editable tr:hover {
+  background-color: #fafafa;
+}
+
+.document-content-editable td p {
+  margin: 0;
+}
+
+/* Allow text selection in tables */
+.document-content-editable table {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+}
+
+.document-content-editable td,
+.document-content-editable th {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+}
+
 /* Equation Styles */
 .equation-inline-wrapper,
 .equation-block-wrapper {

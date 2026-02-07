@@ -24,6 +24,7 @@ import {
   REMOVE_LIST_COMMAND,
   $isListNode,
 } from '@lexical/list';
+import { INSERT_TABLE_COMMAND } from '@lexical/table';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $createEquationNode } from './nodes/EquationNode';
 import {
@@ -52,6 +53,7 @@ import {
   MoreVertical,
   List,
   ListOrdered,
+  Table,
 } from 'lucide-react';
 
 interface FormattingToolbarProps {
@@ -361,6 +363,40 @@ export default function FormattingToolbar({
     } else {
       editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined);
     }
+    setOpenDropdown(null);
+  };
+
+  const insertTable = (rows: number, columns: number) => {
+    editor.update(() => {
+      editor.dispatchCommand(INSERT_TABLE_COMMAND, {
+        rows: rows.toString(),
+        columns: columns.toString(),
+      });
+
+      // Add a paragraph after the table for easier navigation
+      setTimeout(() => {
+        editor.update(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            const anchor = selection.anchor.getNode();
+            let node = anchor;
+
+            // Find the table node
+            while (node && node.getType() !== 'table') {
+              node = node.getParent();
+            }
+
+            if (node && node.getType() === 'table') {
+              const nextSibling = node.getNextSibling();
+              if (!nextSibling) {
+                const newParagraph = $createParagraphNode();
+                node.insertAfter(newParagraph);
+              }
+            }
+          }
+        });
+      }, 10);
+    });
     setOpenDropdown(null);
   };
 
@@ -695,6 +731,61 @@ export default function FormattingToolbar({
                 <ListOrdered size={18} style={{ marginRight: '8px' }} />
                 Numbered List
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* Table Insertion */}
+        <div
+          className="toolbar-dropdown"
+          data-toolbar-item="table"
+          style={{ display: isOverflowing('table') ? 'none' : 'inline-block' }}
+        >
+          <button
+            className="toolbar-dropdown-button toolbar-icon-button"
+            onClick={() => toggleDropdown('table')}
+            title="Insert Table"
+          >
+            <Table size={18} />
+            <ChevronDown size={14} />
+          </button>
+          {openDropdown === 'table' && (
+            <div className="toolbar-dropdown-menu table-grid-dropdown">
+              <div className="table-grid-header">Insert Table</div>
+              <div className="table-grid-selector">
+                {Array.from({ length: 8 }, (_, row) => (
+                  <div key={row} className="table-grid-row">
+                    {Array.from({ length: 10 }, (_, col) => (
+                      <div
+                        key={col}
+                        className="table-grid-cell"
+                        onMouseEnter={(e) => {
+                          // Highlight cells up to this one
+                          const gridCells = e.currentTarget.parentElement?.parentElement?.querySelectorAll('.table-grid-cell');
+                          gridCells?.forEach((cell, idx) => {
+                            const cellRow = Math.floor(idx / 10);
+                            const cellCol = idx % 10;
+                            if (cellRow <= row && cellCol <= col) {
+                              cell.classList.add('table-grid-cell-hover');
+                            } else {
+                              cell.classList.remove('table-grid-cell-hover');
+                            }
+                          });
+                          // Update label
+                          const label = document.getElementById('table-grid-label');
+                          if (label) {
+                            label.textContent = `${row + 1} × ${col + 1} Table`;
+                          }
+                        }}
+                        onClick={() => insertTable(row + 1, col + 1)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div className="table-grid-label" id="table-grid-label">
+                1 × 1 Table
+              </div>
             </div>
           )}
         </div>

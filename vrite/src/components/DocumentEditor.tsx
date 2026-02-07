@@ -25,6 +25,7 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { ListPlugin } from '@lexical/react/LexicalListPlugin';
 import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin';
+import { TablePlugin } from '@lexical/react/LexicalTablePlugin';
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin';
 import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPlugin';
 import { $convertToMarkdownString, $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
@@ -50,6 +51,8 @@ import ClipboardPlugin from './plugins/ClipboardPlugin';
 import AutocompletePlugin from './plugins/AutocompletePlugin';
 import PaginationPlugin from './plugins/PaginationPlugin';
 import { SpellCheckPlugin } from './plugins/SpellCheckPlugin';
+import TableActionMenuPlugin from './plugins/TableActionMenuPlugin';
+import TableNavigationPlugin from './plugins/TableNavigationPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
@@ -1432,6 +1435,9 @@ export default function DocumentEditor({
                   <HistoryPlugin />
                   <ListPlugin />
                   <LinkPlugin />
+                  <TablePlugin />
+                  <TableActionMenuPlugin />
+                  <TableNavigationPlugin />
                   <TabIndentationPlugin />
                   <KeyboardShortcutPlugin onCommandK={handleCommandK} />
                   <ClipboardPlugin />

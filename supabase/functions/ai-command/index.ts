@@ -126,6 +126,74 @@ CRITICAL EQUATION RULES:
 - Always escape backslashes in JSON (use \\\\ instead of \\)
 - DOUBLE-CHECK your braces before responding!
 
+TABLE SUPPORT:
+
+You can insert tables to organize data in rows and columns.
+
+Example - Simple 2x2 table:
+{
+  "operation": "insert_block",
+  "afterBlockId": "block-3",
+  "newBlock": {
+    "id": "new-table-1",
+    "type": "table",
+    "segments": [],
+    "tableData": {
+      "rows": [
+        {
+          "cells": [
+            { "segments": [{ "text": "Header 1", "format": 1 }] },
+            { "segments": [{ "text": "Header 2", "format": 1 }] }
+          ]
+        },
+        {
+          "cells": [
+            { "segments": [{ "text": "Cell A", "format": 0 }] },
+            { "segments": [{ "text": "Cell B", "format": 0 }] }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+Table with equations:
+{
+  "operation": "insert_block",
+  "afterBlockId": "block-1",
+  "newBlock": {
+    "id": "new-table-2",
+    "type": "table",
+    "segments": [],
+    "tableData": {
+      "rows": [
+        {
+          "cells": [
+            { "segments": [{ "text": "Formula", "format": 1 }] },
+            { "segments": [{ "text": "Result", "format": 1 }] }
+          ]
+        },
+        {
+          "cells": [
+            { "segments": [{ "type": "equation", "equation": "E=mc^2" }] },
+            { "segments": [{ "text": "Energy-mass equivalence", "format": 0 }] }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+CRITICAL TABLE RULES:
+- Table blocks have type: "table"
+- segments array must be EMPTY for table blocks (use segments: [])
+- All content goes in tableData.rows
+- Each row has a cells array
+- Each cell has a segments array (text and/or equations)
+- All rows must have the same number of cells
+- Use format: 1 (bold) for header rows
+- Tables support both text and equation segments in cells
+
 FORMATTING STANDARDS:
 ${FORMATTING_STANDARDS}`;
 
@@ -171,7 +239,7 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
                 description: 'The new block content (for replace_block and insert_block)',
                 properties: {
                   id: { type: 'string', description: 'Unique ID for the block' },
-                  type: { type: 'string', enum: ['paragraph', 'heading', 'list-item'] },
+                  type: { type: 'string', enum: ['paragraph', 'heading', 'list-item', 'table'] },
                   tag: { type: 'string', enum: ['h1', 'h2', 'h3'], description: 'Heading level (for headings only)' },
                   listType: { type: 'string', enum: ['bullet', 'number'], description: 'List type (for list-items only)' },
                   align: { type: 'string', enum: ['left', 'center', 'right', 'justify', 'start', 'end'], description: 'Text alignment (optional, defaults to left). Use "center" for standalone equations.' },
@@ -200,6 +268,59 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
                         }
                       ]
                     },
+                  },
+                  tableData: {
+                    type: 'object',
+                    description: 'Table data (required for table blocks, omit for other types)',
+                    properties: {
+                      rows: {
+                        type: 'array',
+                        description: 'Array of table rows',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            cells: {
+                              type: 'array',
+                              description: 'Array of cells in this row',
+                              items: {
+                                type: 'object',
+                                properties: {
+                                  segments: {
+                                    type: 'array',
+                                    description: 'Text and equation segments in the cell',
+                                    items: {
+                                      oneOf: [
+                                        {
+                                          type: 'object',
+                                          description: 'Text segment',
+                                          properties: {
+                                            text: { type: 'string' },
+                                            format: { type: 'integer' },
+                                          },
+                                          required: ['text', 'format'],
+                                        },
+                                        {
+                                          type: 'object',
+                                          description: 'Inline equation segment',
+                                          properties: {
+                                            type: { type: 'string', enum: ['equation'] },
+                                            equation: { type: 'string' },
+                                          },
+                                          required: ['type', 'equation'],
+                                        }
+                                      ]
+                                    },
+                                  },
+                                },
+                                required: ['segments'],
+                              },
+                            },
+                          },
+                          required: ['cells'],
+                        },
+                      },
+                    },
+                    required: ['rows'],
                   },
                 },
                 required: ['id', 'type', 'segments'],
@@ -257,15 +378,28 @@ interface EquationBlockData {
   inline: boolean;
 }
 
+interface TableCell {
+  segments: Segment[];
+}
+
+interface TableRow {
+  cells: TableCell[];
+}
+
+interface TableBlockData {
+  rows: TableRow[];
+}
+
 interface SimplifiedBlock {
   id: string;
-  type: 'paragraph' | 'heading' | 'list-item';
+  type: 'paragraph' | 'heading' | 'list-item' | 'table';
   tag?: 'h1' | 'h2' | 'h3';
   listType?: 'bullet' | 'number';
   indent?: number;
   align?: 'left' | 'center' | 'right' | 'justify' | 'start' | 'end';
   segments: Segment[];
   equationData?: EquationBlockData;  // Legacy - no longer used
+  tableData?: TableBlockData;  // For table blocks
 }
 
 interface SimplifiedDocument {

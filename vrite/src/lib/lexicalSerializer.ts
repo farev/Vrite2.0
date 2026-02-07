@@ -7,6 +7,7 @@ import type { LexicalNode, TextNode, ElementNode } from 'lexical';
 import { $isElementNode } from 'lexical';
 import type { HeadingNode } from '@lexical/rich-text';
 import type { ListItemNode, ListNode } from '@lexical/list';
+import type { TableNode, TableRowNode, TableCellNode } from '@lexical/table';
 import type { EquationNode } from '@/components/nodes/EquationNode';
 import { $isEquationNode } from '@/components/nodes/EquationNode';
 
@@ -29,15 +30,28 @@ export interface EquationBlockData {
   inline: boolean;  // Always false for block equations
 }
 
+export interface TableCell {
+  segments: Segment[];
+}
+
+export interface TableRow {
+  cells: TableCell[];
+}
+
+export interface TableBlockData {
+  rows: TableRow[];
+}
+
 export interface SimplifiedBlock {
   id: string;
-  type: 'paragraph' | 'heading' | 'list-item' | 'equation';
+  type: 'paragraph' | 'heading' | 'list-item' | 'equation' | 'table';
   tag?: 'h1' | 'h2' | 'h3';
   listType?: 'bullet' | 'number';
   indent?: number;
   align?: 'left' | 'center' | 'right' | 'justify' | 'start' | 'end'; // Text alignment
   segments: Segment[];
   equationData?: EquationBlockData;  // For equation blocks
+  tableData?: TableBlockData;  // For table blocks
 }
 
 export interface SimplifiedDocument {
@@ -147,6 +161,41 @@ export function serializeLexicalToSimplified(root: LexicalNode): SimplifiedDocum
       }
 
       blocks.push(block);
+    } else if (type === 'table') {
+      const tableNode = node as TableNode;
+      const rows: TableRow[] = [];
+
+      if ('getChildren' in tableNode && typeof tableNode.getChildren === 'function') {
+        const rowNodes = tableNode.getChildren() as LexicalNode[];
+
+        for (const rowNode of rowNodes) {
+          if (rowNode.getType() === 'tablerow') {
+            const cells: TableCell[] = [];
+
+            if ('getChildren' in rowNode && typeof rowNode.getChildren === 'function') {
+              const cellNodes = rowNode.getChildren() as LexicalNode[];
+
+              for (const cellNode of cellNodes) {
+                if (cellNode.getType() === 'tablecell') {
+                  const cellSegments = extractSegments(cellNode);
+                  cells.push({
+                    segments: cellSegments.length > 0 ? cellSegments : [{ text: '', format: 0 }],
+                  });
+                }
+              }
+            }
+
+            rows.push({ cells });
+          }
+        }
+      }
+
+      blocks.push({
+        id: `block-${blockIndex++}`,
+        type: 'table',
+        segments: [],
+        tableData: { rows },
+      });
     } else if ('getChildren' in node && typeof node.getChildren === 'function') {
       // Process children of unknown container nodes (like root)
       const children = node.getChildren() as LexicalNode[];
@@ -252,7 +301,7 @@ export function buildBlockKeyMap(root: LexicalNode): BlockKeyMap {
   const processNode = (node: LexicalNode) => {
     const type = node.getType();
 
-    if (type === 'paragraph' || type === 'heading' || type === 'equation') {
+    if (type === 'paragraph' || type === 'heading' || type === 'equation' || type === 'table') {
       map[`block-${blockIndex++}`] = node.getKey();
     } else if (type === 'listitem') {
       map[`block-${blockIndex++}`] = node.getKey();
