@@ -2145,6 +2145,10 @@ body {
   z-index: 2;
 }
 
+.document-editor-container:not(.diff-mode-active) .diff-inline-actions {
+  display: none;
+}
+
 .diff-inline-btn {
   display: inline-flex;
   align-items: center;

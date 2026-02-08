@@ -1385,7 +1385,7 @@ export default function DocumentEditor({
   );
 
   return (
-    <div className="document-editor-container">
+    <div className={`document-editor-container${isDiffModeActive ? ' diff-mode-active' : ''}`}>
       <div
         className="document-editor-body"
         style={editorLayoutStyle}
