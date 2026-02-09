@@ -2,13 +2,13 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Send,
+  ArrowUp,
   Sparkles,
   X,
-  RefreshCw,
+  Plus,
   Copy,
   Check,
-  User
+  Pencil
 } from 'lucide-react';
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
@@ -27,17 +27,29 @@ interface Message {
 // Helper component to format message content with special styling for tool usage
 function FormattedMessageContent({ content }: { content: string }) {
   // Split content by tool usage pattern
-  const parts = content.split(/(Using \w+[\w_-]* tool\.\.\.)/g);
+  const parts = content.split(/(Using \w+[\w_-]* tool\.\.\.|Edited document)/g);
 
   return (
     <>
       {parts.map((part, index) => {
         // Check if this part is a tool usage message
+        if (part === 'Edited document') {
+          return (
+            <span key={index} className="ai-tool-usage">
+              <Pencil size={14} />
+              Edited document
+            </span>
+          );
+        }
+
         const toolMatch = part.match(/Using (\w+[\w_-]*) tool\.\.\./);
         if (toolMatch) {
           const toolName = toolMatch[1];
           return (
-            <span key={index} style={{ color: '#888', opacity: 0.8 }}>
+            <span key={index} className="ai-tool-usage">
+              {toolName === 'edit_document' && (
+                <Pencil size={14} />
+              )}
               Using <strong>{toolName}</strong> tool...
             </span>
           );
@@ -221,6 +233,11 @@ export default function AIAssistantSidebar({
                 console.log('[AIAssistant] Stream complete. Changes:', changes.length, 'Summary:', !!summary);
                 console.log('[AIAssistant] Final accumulated content:', accumulatedContent);
 
+                const finalizedContent = accumulatedContent.replace(
+                  /Using edit_document tool\.\.\./g,
+                  'Edited document'
+                );
+
                 // Apply all buffered changes with diff highlighting
                 if (changes.length > 0 && onApplyLexicalChanges) {
                   onApplyLexicalChanges(changes);
@@ -228,7 +245,7 @@ export default function AIAssistantSidebar({
 
                 // Use accumulated content (reasoning + tool indicator + summary)
                 // Fallback only if nothing was captured
-                const finalContent = accumulatedContent.trim() || summary || 'Changes applied successfully.';
+                const finalContent = finalizedContent.trim() || summary || 'Changes applied successfully.';
 
                 setMessages(prev => prev.map(msg =>
                   msg.id === messageId
@@ -545,7 +562,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
               className="ai-sidebar-control-btn"
               title="Clear Chat"
             >
-              <RefreshCw size={16} />
+              <Plus size={16} />
             </button>
             <button
               onClick={onToggle}
@@ -564,11 +581,6 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                 key={message.id}
                 className={`ai-message ai-message-${message.type}`}
               >
-                {message.type === 'user' && (
-                  <div className="ai-message-icon">
-                    <User size={16} />
-                  </div>
-                )}
                 <div className="ai-message-content">
                   {message.isLoading ? (
                     <div className="ai-message-loading">
@@ -614,31 +626,6 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Context Panel */}
-          {contextSnippets.length > 0 && (
-            <div className="ai-context-panel">
-              <div className="ai-context-panel-header">
-                <span>Selected text</span>
-                <button
-                  type="button"
-                  className="ai-context-chip-remove"
-                  onClick={() => onRemoveContextSnippet?.(contextSnippets[0]?.id)}
-                  aria-label="Clear selection"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="ai-context-chip-list">
-                {contextSnippets.map((snippet) => (
-                  <div key={snippet.id} className="ai-context-chip ai-context-chip-selected">
-                    <span>{snippet.text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-
           {isDiffModeActive && (
             <div className="ai-diff-actions">
               <div className="diff-mode-actions">
@@ -664,24 +651,45 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
           {/* Input */}
           <div className="ai-input-container">
-            <textarea
-              ref={inputRef}
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask me anything about your document..."
-              className="ai-input"
-              rows={3}
-              disabled={isLoading}
-            />
-            <button
-              onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || isLoading}
-              className="ai-send-btn"
-              title="Send message"
-            >
-              <Send size={16} />
-            </button>
+            <div className="ai-input-shell">
+              {contextSnippets.length > 0 && (
+                <div className="ai-input-context">
+                  <div className="ai-context-chip-list">
+                    {contextSnippets.map((snippet) => (
+                      <div key={snippet.id} className="ai-context-chip ai-context-chip-selected">
+                        <span>{snippet.text}</span>
+                        <button
+                          type="button"
+                          className="ai-context-chip-remove"
+                          onClick={() => onRemoveContextSnippet?.(snippet.id)}
+                          aria-label="Clear selection"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <textarea
+                ref={inputRef}
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask me anything about your document..."
+                className="ai-input"
+                rows={2}
+                disabled={isLoading}
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={!inputMessage.trim() || isLoading}
+                className="ai-send-btn"
+                title="Send message"
+              >
+                <ArrowUp size={20} className="ai-send-icon" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

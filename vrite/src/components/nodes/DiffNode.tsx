@@ -113,22 +113,24 @@ function DiffComponent({
   if (equationData) {
     return (
       <span className={classes}>
-        {isReplacement && originalText && (
-          <span className="diff-inline-original">{originalText}</span>
-        )}
-        <span className="diff-inline-text" style={{ ...textStyle, display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-          {katex ? (
-            <>
-              <span ref={equationRef} className="equation-preview" />
-              {renderError && (
-                <span style={{ fontSize: '0.85em', color: '#cc0000' }}>
-                  ({renderError})
-                </span>
-              )}
-            </>
-          ) : (
-            <span style={{ fontSize: '0.9em', opacity: 0.7 }}>Loading preview...</span>
+        <span className="diff-inline-body">
+          {isReplacement && originalText && (
+            <span className="diff-inline-original">{originalText}</span>
           )}
+          <span className="diff-inline-text" style={{ ...textStyle, display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            {katex ? (
+              <>
+                <span ref={equationRef} className="equation-preview" />
+                {renderError && (
+                  <span style={{ fontSize: '0.85em', color: '#cc0000' }}>
+                    ({renderError})
+                  </span>
+                )}
+              </>
+            ) : (
+              <span style={{ fontSize: '0.9em', opacity: 0.7 }}>Loading preview...</span>
+            )}
+          </span>
         </span>
         <span className="diff-inline-actions">
           <button
@@ -161,10 +163,12 @@ function DiffComponent({
   // Regular text diff
   return (
     <span className={classes}>
-      {isReplacement && (
-        <span className="diff-inline-original">{originalText}</span>
-      )}
-      <span className="diff-inline-text" style={textStyle}>{text}</span>
+      <span className="diff-inline-body">
+        {isReplacement && (
+          <span className="diff-inline-original">{originalText}</span>
+        )}
+        <span className="diff-inline-text" style={textStyle}>{text}</span>
+      </span>
       <span className="diff-inline-actions">
         <button
           onClick={(e) => {

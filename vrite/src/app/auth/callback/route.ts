@@ -30,6 +30,35 @@ export async function GET(request: NextRequest) {
       console.log('[AuthCallback] Recorded Drive connection for user');
     }
 
+    // Trigger one-time welcome email via Supabase Edge Function (best effort)
+    if (data.session?.user?.id && data.session?.user?.email) {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (supabaseUrl && supabaseAnonKey) {
+        try {
+          const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-login-email`;
+          await fetch(edgeFunctionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${supabaseAnonKey}`,
+              apikey: supabaseAnonKey,
+            },
+            body: JSON.stringify({
+              userId: data.session.user.id,
+              email: data.session.user.email,
+            }),
+          });
+          console.log('[AuthCallback] Welcome email request sent');
+        } catch (error) {
+          console.warn('[AuthCallback] Failed to trigger welcome email:', error);
+        }
+      } else {
+        console.warn('[AuthCallback] Missing Supabase URL/key for welcome email, skipping');
+      }
+    }
+
     // Check if there are temporary documents to migrate
     // Note: We can't check localStorage here (server-side), but we can set a flag
     // for the client to check and perform migration when provider_token is available

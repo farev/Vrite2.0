@@ -15,6 +15,7 @@ import {
 } from 'lexical';
 import { $createHeadingNode, type HeadingTagType } from '@lexical/rich-text';
 import { $createListItemNode, $createListNode, type ListItemNode } from '@lexical/list';
+import { $createTableNode, $createTableRowNode, $createTableCellNode } from '@lexical/table';
 import { $createDiffNode } from '@/components/nodes/DiffNode';
 import { $createEquationNode, $isEquationNode } from '@/components/nodes/EquationNode';
 import type { SimplifiedBlock, Segment, BlockKeyMap } from './lexicalSerializer';
@@ -487,6 +488,60 @@ function createBlockNodeWithDiff(
         (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
         return node;
       }
+    case 'table':
+      if (!block.tableData) {
+        throw new Error('Table block missing tableData');
+      }
+
+      // Create table structure
+      const tableNode = $createTableNode();
+
+      for (const row of block.tableData.rows) {
+        const rowNode = $createTableRowNode();
+
+        for (const cell of row.cells) {
+          // Use TableCellHeaderStates.ROW for first row (header)
+          const cellNode = $createTableCellNode(
+            row === block.tableData.rows[0] ? 1 : 0  // 1 = ROW header, 0 = normal cell
+          );
+
+          // Add cell content - always use diff nodes for AI-generated tables
+          const cellParagraph = $createParagraphNode();
+
+          // Create diff nodes for all cell content (this function is only called for AI changes)
+          for (const segment of cell.segments) {
+            if ('text' in segment) {
+              const diffNode = $createDiffNode(
+                'addition',
+                segment.text,
+                undefined,
+                !!(segment.format & 1), // bold
+                !!(segment.format & 2), // italic
+              );
+              cellParagraph.append(diffNode);
+            } else if (segment.type === 'equation') {
+              const diffNode = $createDiffNode(
+                'addition',
+                `Equation: ${segment.equation}`,
+                undefined,
+                false,
+                true,
+                undefined,
+                undefined,
+                { equation: segment.equation, inline: true }
+              );
+              cellParagraph.append(diffNode);
+            }
+          }
+
+          cellNode.append(cellParagraph);
+          rowNode.append(cellNode);
+        }
+
+        tableNode.append(rowNode);
+      }
+
+      return tableNode;
     case 'paragraph':
     default:
       node = $createParagraphNode();
