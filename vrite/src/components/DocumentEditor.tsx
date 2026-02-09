@@ -54,6 +54,8 @@ import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
 import { PageBreakNode } from './nodes/PageBreakNode';
+import { SimpleHeaderEditor } from './SimpleHeaderEditor';
+import { SimpleFooterEditor } from './SimpleFooterEditor';
 import {
   saveDocument,
   loadDocument,
@@ -360,7 +362,7 @@ const PAGE_SIZES = {
 // Constants for pagination
 const PAGE_GAP = 24; // Gap between pages in pixels
 const PT_TO_PX = 1.333; // Convert points to pixels (1pt = 1.333px at 96 DPI)
-const PAGE_FOOTER_HEIGHT_PX = 40; // Footer height in pixels
+const PAGE_FOOTER_HEIGHT_PX = 96; // Footer height in pixels (matches margin = 1 inch)
 const AUTO_TITLE_STORAGE_PREFIX = 'vrite_auto_title_generated';
 const AUTO_TITLE_SESSION_KEY = 'vrite_auto_title_session_id';
 const AUTO_TITLE_TRIGGER_RATIO = 0.25;
@@ -437,6 +439,12 @@ export default function DocumentEditor({
   const [suggestedContent, setSuggestedContent] = useState<string | null>(null);
   const [pendingChanges, setPendingChanges] = useState<LexicalChange[] | null>(null);
   const [pageCount, setPageCount] = useState(1);
+  const [headerFooterSettings, setHeaderFooterSettings] = useState({
+    headerEnabled: false,
+    headerContent: '',
+    footerEnabled: true,
+    footerShowPageNumber: true,
+  });
   const [editorRef, setEditorRef] = useState<LexicalEditor | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
@@ -490,9 +498,10 @@ export default function DocumentEditor({
 
   const editorSurfaceStyle = useMemo(
     () => ({
-      paddingTop: `${documentMargins.top}pt`,
+      // No top/bottom padding - SimpleHeaderEditor and SimpleFooterEditor provide that space
+      paddingTop: '0',
       paddingRight: `${documentMargins.right}pt`,
-      paddingBottom: `${documentMargins.bottom}pt`,
+      paddingBottom: '0',
       paddingLeft: `${documentMargins.left}pt`,
     }),
     [documentMargins]
@@ -1409,6 +1418,23 @@ export default function DocumentEditor({
                 data-page-size={pageSize}
               >
                   <div className="document-page">
+                    {/* Header - for page 1 */}
+                    <SimpleHeaderEditor
+                      documentTitle={documentTitle}
+                      headerEnabled={headerFooterSettings.headerEnabled}
+                      headerContent={headerFooterSettings.headerContent}
+                      onHeaderChange={(content) =>
+                        setHeaderFooterSettings({ ...headerFooterSettings, headerContent: content })
+                      }
+                      onHeaderToggle={() =>
+                        setHeaderFooterSettings({
+                          ...headerFooterSettings,
+                          headerEnabled: !headerFooterSettings.headerEnabled,
+                        })
+                      }
+                    />
+
+                    {/* Main content area */}
                     <div className="document-page-content" style={editorSurfaceStyle}>
                       <div className="document-editor-surface">
                         <RichTextPlugin
@@ -1425,6 +1451,19 @@ export default function DocumentEditor({
                         />
                       </div>
                     </div>
+
+                    {/* Footer - for last page */}
+                    <SimpleFooterEditor
+                      pageCount={pageCount}
+                      footerEnabled={headerFooterSettings.footerEnabled}
+                      footerShowPageNumber={headerFooterSettings.footerShowPageNumber}
+                      onFooterToggle={() =>
+                        setHeaderFooterSettings({
+                          ...headerFooterSettings,
+                          footerEnabled: !headerFooterSettings.footerEnabled,
+                        })
+                      }
+                    />
                   </div>
 
                   <MyOnChangePlugin onChange={handleEditorChange} />
@@ -1444,6 +1483,7 @@ export default function DocumentEditor({
                     pageGap={PAGE_GAP}
                     footerHeight={PAGE_FOOTER_HEIGHT_PX}
                     onPageCountChange={setPageCount}
+                    headerContent={headerFooterSettings.headerContent}
                   />
 
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}

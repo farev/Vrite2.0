@@ -613,11 +613,167 @@ body {
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border-radius: 4px;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .document-page-content {
   position: relative;
   box-sizing: border-box;
+  flex: 1;
+  order: 1; /* Place between header and footer */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Page headers and footers */
+.document-page-header,
+.document-page-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10pt;
+  color: #6b7280;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.document-page-header {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.document-page-footer {
+  border-top: 1px solid #e5e7eb;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Header and footer content */
+.page-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.page-footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.header-title {
+  font-style: italic;
+  font-size: 9pt;
+  color: #9ca3af;
+}
+
+.page-number {
+  text-align: center;
+  font-family: 'Times New Roman', serif;
+  font-size: 10pt;
+  color: #6b7280;
+}
+
+/* Header/Footer Editor Styles */
+.document-header-editor {
+  height: 96px; /* Matches margin height (1 inch) */
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0 16px;
+  padding-top: 48px; /* 0.5 inch from top edge */
+  border-bottom: none; /* No border by default */
+  cursor: default;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  color: #6b7280;
+  order: 0; /* Place at top */
+}
+
+.document-header-editor.editing {
+  border-bottom: 1px solid #c5d1de;
+}
+
+.document-footer-editor {
+  height: 96px; /* Matches margin height (1 inch) */
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0 16px;
+  padding-top: 48px; /* 0.5 inch from top of footer area */
+  border-top: none; /* No border by default */
+  border-bottom: none;
+  cursor: default;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  color: #6b7280;
+  order: 2; /* Place at bottom */
+}
+
+.document-footer-editor.editing {
+  border-top: 1px solid #c5d1de;
+}
+
+/* Display text (non-editing state) */
+.header-display-text,
+.footer-display-text {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Editable content (editing state) */
+.header-content-editable,
+.footer-content-editable {
+  outline: none;
+  cursor: text;
+  padding: 2px 4px;
+  display: inline-block;
+  min-width: 150px;
+  color: #374151;
+}
+
+.header-footer-input {
+  flex: 1;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  outline: none;
+  background: white;
+}
+
+.header-toggle-btn {
+  padding: 4px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.header-toggle-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.header-text,
+.footer-text {
+  font-style: italic;
+  color: #6b7280;
+}
+
+.header-placeholder,
+.footer-placeholder {
+  color: #d1d5db;
+  font-style: italic;
 }
 
 /* Content Editable */
@@ -638,6 +794,162 @@ body {
   box-sizing: border-box;
 }
 
+/* Page break container - holds the full page break structure */
+.page-break-container {
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  position: relative;
+}
+
+/* White space at top - end of current page (normal width, blends with page) */
+.page-break-top {
+  width: 100%;
+  background: white;
+}
+
+/* Gray gap - visual page separation (extends to cover shadows) */
+.page-break-gap {
+  width: calc(100% + 220px);
+  margin-left: -110px;
+  margin-right: -110px;
+  background: #f3f4f6; /* Same as editor background */
+}
+
+/* White space at bottom - start of next page (normal width, blends with page) */
+.page-break-bottom {
+  width: 100%;
+  background: white;
+}
+
+/* Footer - end of current page */
+.page-break-footer {
+  width: 100%;
+  background: white;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: auto;
+  font-size: 10pt;
+  color: #6b7280;
+  font-family: 'Times New Roman', serif;
+  border-top: none; /* No border by default */
+  border-bottom: none;
+  padding: 0 20px;
+  padding-top: 48px; /* 0.5 inch from top of footer area */
+  cursor: default;
+}
+
+.page-break-footer.editing {
+  border-top: 1px solid #c5d1de; /* Show border only when editing */
+}
+
+/* Header - start of next page */
+.page-break-header {
+  width: 100%;
+  background: white;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: auto;
+  font-size: 10pt;
+  color: #6b7280;
+  font-family: 'Times New Roman', serif;
+  border-top: none; /* No border by default */
+  border-bottom: none;
+  padding: 0 20px;
+  padding-top: 48px; /* 0.5 inch from top of header area */
+  cursor: default;
+}
+
+.page-break-header.editing {
+  border-bottom: 1px solid #c5d1de; /* Show border only when editing */
+}
+
+/* Display text (non-editing state) */
+.page-footer-display,
+.page-header-display {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Editable content areas (editing state) */
+.page-footer-content.editing,
+.page-header-content.editing {
+  text-align: center;
+  min-width: 150px;
+  padding: 2px 4px;
+  outline: none;
+  cursor: text;
+  color: #374151;
+}
+
+/* Legacy selectors for page numbers */
+.page-number-text,
+.page-header-text {
+  text-align: center;
+  user-select: none;
+}
+
+/* Overlay headers and footers for every page */
+.page-headers-footers-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.page-header-overlay,
+.page-footer-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.page-header-overlay {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.page-footer-overlay {
+  border-top: 1px solid #e5e7eb;
+}
+
+.page-header-content-editable,
+.page-footer-content-editable {
+  font-size: 10pt;
+  color: #6b7280;
+  font-family: 'Times New Roman', serif;
+  text-align: center;
+  min-width: 100px;
+  padding: 4px 12px;
+  border-radius: 3px;
+  outline: none;
+  cursor: text;
+  transition: background-color 0.2s;
+  background: white;
+}
+
+.page-header-content-editable:hover,
+.page-footer-content-editable:hover {
+  background-color: #f9fafb;
+}
+
+.page-header-content-editable:focus,
+.page-footer-content-editable:focus {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+/* Legacy support */
+.page-break-marker,
+.page-break-separator,
+.page-break-visual,
 .page-break {
   display: block;
   width: 100%;
@@ -766,7 +1078,7 @@ body {
 
 /* Print Styles */
 @page {
-  size: letter;
+  size: var(--page-width) var(--page-height);
   margin: 0;
 }
 
@@ -780,54 +1092,79 @@ body {
   .document-header {
     display: none !important;
   }
-  
+
   /* Reset body and container */
   body {
     background: white;
     margin: 0;
     padding: 0;
   }
-  
+
   .document-editor-container {
     background: white;
     margin: 0;
     padding: 0;
   }
-  
+
   .document-editor-body {
     display: block;
     width: 100%;
   }
-  
+
   .document-main-column {
     width: 100%;
     max-width: none;
   }
-  
+
   .document-editor-wrapper {
     padding: 0;
     margin: 0;
   }
 
-  .page-break {
-    height: 0 !important;
-    break-after: page;
-  }
-  
-  /* Page styling */
+  /* Ensure pages print exactly as shown */
   .document-page {
+    width: var(--page-width);
+    height: var(--page-height);
+    margin: 0;
+    padding: 0;
     box-shadow: none;
     border-radius: 0;
-    width: 100%;
-    max-width: none;
+    page-break-after: always;
+    position: relative;
   }
-  
+
+  /* Keep page structure */
+  .document-page-header,
+  .document-page-footer {
+    display: flex !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Page break markers */
+  .page-break-marker,
+  .page-break {
+    page-break-before: always;
+    height: 0 !important;
+    margin: 0;
+    border: none;
+  }
+
+  .page-break-marker::after {
+    display: none;
+  }
+
+  /* Prevent content from breaking across pages where we have markers */
+  .document-page-content-area {
+    page-break-inside: avoid;
+  }
+
   /* Content styling */
   .document-content-editable {
     width: 100%;
     min-height: auto;
   }
-  
+
   /* Ensure proper text rendering */
   * {
     -webkit-print-color-adjust: exact;
