@@ -1152,6 +1152,7 @@ body {
   box-shadow: none;
   border-radius: 0;
   padding-top: 0;
+  font-size: 14px;
 }
 
 .ai-sidebar-open {
@@ -1185,6 +1186,7 @@ body {
   gap: 8px;
   font-weight: 600;
   color: #1e293b;
+  font-size: 14px;
 }
 
 .ai-sidebar-controls {
@@ -1252,7 +1254,7 @@ body {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   padding: 4px 6px;
   cursor: pointer;
@@ -1335,6 +1337,7 @@ body {
   white-space: pre-wrap;
   word-wrap: break-word;
   color: #0b1224;
+  font-size: 14px;
 }
 
 .ai-message-user .ai-message-text {
@@ -1360,6 +1363,7 @@ body {
   color: #64748b;
   font-style: italic;
   padding: 12px 16px;
+  font-size: 14px;
 }
 
 .ai-loading-dots {
@@ -1393,6 +1397,7 @@ body {
   gap: 6px;
   color: #888;
   opacity: 0.8;
+  font-size: 14px;
 }
 
 .ai-streaming-cursor {
@@ -1428,7 +1433,7 @@ body {
   background: transparent;
   border: none;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 14px;
   color: #475569;
   cursor: pointer;
   display: flex;
@@ -1460,7 +1465,7 @@ body {
 }
 
 .ai-quick-prompts-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   color: #64748b;
   margin-bottom: 8px;
@@ -1479,7 +1484,7 @@ body {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: #475569;
   text-align: left;
   cursor: pointer;
@@ -1528,7 +1533,7 @@ body {
   border-radius: 16px;
   background: #fff;
   border: 1px solid #e2e8f0;
-  font-size: 13px;
+  font-size: 14px;
   color: #0f172a;
 }
 
@@ -1600,7 +1605,7 @@ body {
 }
 
 .ai-context-panel-note {
-  font-size: 12px;
+  font-size: 14px;
   color: #64748b;
   line-height: 1.4;
 }
@@ -1658,7 +1663,7 @@ body {
   border-radius: 0;
   background: transparent;
   color: #0f172a;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.5;
   resize: none;
   outline: none;
@@ -2219,7 +2224,7 @@ body {
   gap: 4px;
   padding: 4px 10px;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
