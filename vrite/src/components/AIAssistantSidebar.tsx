@@ -8,12 +8,15 @@ import {
   Plus,
   Copy,
   Check,
-  Pencil
+  Pencil,
+  Paperclip,
+  AtSign
 } from 'lucide-react';
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { compressImageToBase64 } from './nodes/ImageNode';
 
 interface Message {
   id: string;
@@ -75,7 +78,7 @@ interface AIAssistantSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   getSimplifiedDocument: () => SimplifiedDocument;
-  onApplyLexicalChanges?: (changes: LexicalChange[]) => void;
+  onApplyLexicalChanges?: (changes: LexicalChange[], contextImages?: Array<{ filename: string; data: string; width: number; height: number }>) => void;
   // Legacy props for backward compatibility with Delta-based changes
   documentContent?: string;
   onApplyChanges?: (content: string, changes?: any[]) => void;
@@ -83,8 +86,30 @@ interface AIAssistantSidebarProps {
   onAcceptAllChanges?: () => void;
   onRejectAllChanges?: () => void;
   contextSnippets?: ContextSnippet[];
+  selectedContextImages?: Array<{ filename: string; data: string; width: number; height: number }>;
   onRemoveContextSnippet?: (id: string) => void;
   onClearContextSnippets?: () => void;
+}
+
+// Scale image dimensions to reasonable display size while preserving aspect ratio
+function scaleToDisplaySize(width: number, height: number): { width: number; height: number } {
+  const MAX_DISPLAY_WIDTH = 600; // Maximum initial display width
+  const MAX_DISPLAY_HEIGHT = 600; // Maximum initial display height
+
+  // If image fits within bounds, use actual size
+  if (width <= MAX_DISPLAY_WIDTH && height <= MAX_DISPLAY_HEIGHT) {
+    return { width, height };
+  }
+
+  // Calculate scale factor to fit within bounds while preserving aspect ratio
+  const widthScale = MAX_DISPLAY_WIDTH / width;
+  const heightScale = MAX_DISPLAY_HEIGHT / height;
+  const scale = Math.min(widthScale, heightScale);
+
+  return {
+    width: Math.round(width * scale),
+    height: Math.round(height * scale),
+  };
 }
 
 export default function AIAssistantSidebar({
@@ -98,6 +123,7 @@ export default function AIAssistantSidebar({
   onAcceptAllChanges,
   onRejectAllChanges,
   contextSnippets = [],
+  selectedContextImages = [],
   onRemoveContextSnippet,
   onClearContextSnippets
 }: AIAssistantSidebarProps) {
@@ -113,10 +139,27 @@ export default function AIAssistantSidebar({
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  const [linkInputValue, setLinkInputValue] = useState('');
+  const [attachmentNames, setAttachmentNames] = useState<string[]>([]);
+  const [addedLinks, setAddedLinks] = useState<string[]>([]);
+
+  // Context images (with base64 data)
+  interface ContextImage {
+    filename: string;
+    data: string;  // base64
+    width: number;
+    height: number;
+  }
+  const [contextImages, setContextImages] = useState<ContextImage[]>([]);
+
   const hasTriggeredOnboardingRef = useRef(false);
   const onboardingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messageIdCounterRef = useRef(0);
 
   const scrollToBottom = () => {
@@ -240,7 +283,7 @@ export default function AIAssistantSidebar({
 
                 // Apply all buffered changes with diff highlighting
                 if (changes.length > 0 && onApplyLexicalChanges) {
-                  onApplyLexicalChanges(changes);
+                  onApplyLexicalChanges(changes, contextImages);
                 }
 
                 // Use accumulated content (reasoning + tool indicator + summary)
@@ -271,11 +314,36 @@ export default function AIAssistantSidebar({
     } finally {
       reader.releaseLock();
     }
-  }, [sessionToken, isAnonymous, onApplyLexicalChanges]);
+  }, [sessionToken, isAnonymous, onApplyLexicalChanges, contextImages]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    const handleOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (addMenuRef.current && !addMenuRef.current.contains(target)) {
+        setIsAddMenuOpen(false);
+        setIsLinkModalOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsAddMenuOpen(false);
+        setIsLinkModalOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
 
   // Helper function to trigger AI requests (both onboarding and user-initiated)
   const triggerAIRequest = useCallback(async (instruction: string, isOnboarding = false) => {
@@ -357,17 +425,32 @@ export default function AIAssistantSidebar({
         document: simplifiedDocument,
         instruction,
         conversation_history: conversationHistory,
-        context_snippets: contextSnippets.length > 0
-          ? contextSnippets.map((snippet) => snippet.text)
+        context_snippets: (
+          [
+            ...contextSnippets.map((snippet) => snippet.text),
+            ...attachmentNames.map((name) => `Attachment: ${name}`),
+            ...addedLinks.map((link) => `Link: ${link}`)
+          ]
+        ).length > 0
+          ? [
+              ...contextSnippets.map((snippet) => snippet.text),
+              ...attachmentNames.map((name) => `Attachment: ${name}`),
+              ...addedLinks.map((link) => `Link: ${link}`)
+            ]
           : undefined,
+        context_images: [...contextImages, ...selectedContextImages].length > 0 ? [...contextImages, ...selectedContextImages] : undefined,
         stream: true, // Enable streaming by default
       };
+
 
       // Try streaming first, with fallback to non-streaming
       try {
         console.log('[AIAssistant] Attempting streaming request...');
         await handleStreamingResponse(endpoint, requestBody, loadingMessage.id, isOnboarding);
         console.log('[AIAssistant] Streaming completed successfully');
+
+        // Clear context images after successful request
+        setContextImages([]);
       } catch (streamError) {
         console.error('[AIAssistant] Streaming failed, falling back to non-streaming:', streamError);
 
@@ -421,7 +504,7 @@ export default function AIAssistantSidebar({
         // Handle response
         if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
           if (onApplyLexicalChanges) {
-            onApplyLexicalChanges(data.changes);
+            onApplyLexicalChanges(data.changes, contextImages);
           }
         }
 
@@ -436,6 +519,9 @@ export default function AIAssistantSidebar({
               : msg
           )
         );
+
+        // Clear context images after successful non-streaming request
+        setContextImages([]);
       }
     } catch (error) {
       console.error('[AIAssistant] Error:', error);
@@ -453,7 +539,7 @@ export default function AIAssistantSidebar({
     } finally {
       setIsLoading(false);
     }
-  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, handleStreamingResponse]);
+  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, contextImages, attachmentNames, addedLinks, handleStreamingResponse]);
 
   // Automatic AI onboarding for anonymous users
   useEffect(() => {
@@ -506,19 +592,25 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
   }, [isAuthenticated, sessionToken, triggerAIRequest]);
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+    const hasTypedMessage = inputMessage.trim().length > 0;
+    const hasAddedContext = attachmentNames.length > 0 || addedLinks.length > 0 || contextSnippets.length > 0 || contextImages.length > 0;
+    if ((!hasTypedMessage && !hasAddedContext) || isLoading) return;
+
+    const composedMessage = hasTypedMessage ? inputMessage : 'Use the added context to help with this request.';
 
     messageIdCounterRef.current += 1;
     const userMessage: Message = {
       id: `${Date.now()}-${messageIdCounterRef.current}`,
       type: 'user',
-      content: inputMessage,
+      content: composedMessage,
       timestamp: new Date()
     };
 
     setMessages(prev => [...prev, userMessage]);
-    const instruction = inputMessage;
+    const instruction = composedMessage;
     setInputMessage('');
+    // NOTE: Don't clear contextImages here - they're needed in triggerAIRequest
+    // They'll be cleared after the request completes successfully
 
     await triggerAIRequest(instruction, false);
   };
@@ -547,6 +639,77 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
       content: 'Hi! I\'m your AI writing assistant. I can help you format your document, improve your writing, generate content, and more. What would you like to work on?',
       timestamp: new Date()
     }]);
+  };
+
+  const handleAddFilesClick = () => {
+    setIsAddMenuOpen(false);
+    setIsLinkModalOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) {
+      return;
+    }
+
+    // Process each file
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        try {
+          // Compress and get image data (same as manual insertion)
+          const result = await compressImageToBase64(file);
+          const displaySize = scaleToDisplaySize(result.width, result.height);
+
+          setContextImages((prev) => {
+            // Check if already added
+            if (prev.some(img => img.filename === file.name)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                filename: file.name,
+                data: result.src,
+                width: displaySize.width,
+                height: displaySize.height,
+              }
+            ];
+          });
+        } catch (err) {
+          console.error('[AIAssistant] Failed to process image:', file.name, err);
+        }
+      } else {
+        // Non-image files (PDFs, CSVs) - keep existing behavior
+        setAttachmentNames((prev) =>
+          prev.includes(file.name) ? prev : [...prev, file.name]
+        );
+      }
+    }
+
+    event.target.value = '';
+  };
+
+  const handleAddLink = () => {
+    const raw = linkInputValue.trim();
+    if (!raw) {
+      return;
+    }
+
+    const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+
+    setAddedLinks((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]));
+    setLinkInputValue('');
+    setIsLinkModalOpen(false);
+    setIsAddMenuOpen(false);
+  };
+
+  const removeAttachmentName = (name: string) => {
+    setAttachmentNames((prev) => prev.filter((item) => item !== name));
+  };
+
+  const removeAddedLink = (link: string) => {
+    setAddedLinks((prev) => prev.filter((item) => item !== link));
   };
 
   return (
@@ -584,12 +747,17 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                 <div className="ai-message-content">
                   {message.isLoading ? (
                     <div className="ai-message-loading">
-                      <div className="ai-loading-dots">
-                        <div></div>
-                        <div></div>
-                        <div></div>
-                      </div>
-                      <span>Thinking...</span>
+                      <span className="ai-thinking-text" aria-label="Thinking">
+                        {'Thinking'.split('').map((letter, index) => (
+                          <span
+                            key={`${letter}-${index}`}
+                            className="ai-thinking-letter"
+                            style={{ animationDelay: `${index * 0.08}s` }}
+                          >
+                            {letter}
+                          </span>
+                        ))}
+                      </span>
                     </div>
                   ) : message.isStreaming ? (
                     <div className="ai-message-streaming">
@@ -600,7 +768,13 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                     </div>
                   ) : (
                     <>
-                      <div className="ai-message-text">
+                      <div
+                        className={
+                          message.type === 'user'
+                            ? 'ai-message-text ml-5 !rounded-2xl !border !border-transparent !bg-slate-200 !px-3.5 !py-2.5 !text-slate-800'
+                            : 'ai-message-text'
+                        }
+                      >
                         <FormattedMessageContent content={message.content} />
                       </div>
                       {message.type === 'assistant' && !message.isLoading && (
@@ -671,6 +845,76 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                   </div>
                 </div>
               )}
+              {selectedContextImages.length > 0 && (
+                <div className="ai-input-context">
+                  <div className="ai-context-chip-list">
+                    {selectedContextImages.map((img, idx) => (
+                      <div key={`selected-${idx}`} className="ai-context-chip ai-context-chip-selected ai-image-chip">
+                        <img src={img.data} alt={img.filename} className="ai-context-image-preview" />
+                        <span>Selected image</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {attachmentNames.length > 0 && (
+                <div className="ai-input-context">
+                  <div className="ai-context-chip-list">
+                    {attachmentNames.map((name) => (
+                      <div key={name} className="ai-context-chip ai-context-chip-selected ai-attachment-chip">
+                        <span>{name}</span>
+                        <button
+                          type="button"
+                          className="ai-context-chip-remove"
+                          onClick={() => removeAttachmentName(name)}
+                          aria-label="Remove attachment"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {addedLinks.length > 0 && (
+                <div className="ai-input-context">
+                  <div className="ai-context-chip-list">
+                    {addedLinks.map((link) => (
+                      <div key={link} className="ai-context-chip ai-context-chip-selected ai-link-chip">
+                        <span>{link}</span>
+                        <button
+                          type="button"
+                          className="ai-context-chip-remove"
+                          onClick={() => removeAddedLink(link)}
+                          aria-label="Remove link"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {contextImages.length > 0 && (
+                <div className="ai-input-context">
+                  <div className="ai-context-chip-list">
+                    {contextImages.map((img) => (
+                      <div key={img.filename} className="ai-context-chip ai-context-chip-selected ai-image-chip">
+                        <img src={img.data} alt={img.filename} className="ai-context-image-preview" />
+                        <span>{img.filename}</span>
+                        <button
+                          type="button"
+                          className="ai-context-chip-remove"
+                          onClick={() => setContextImages(prev => prev.filter(i => i.filename !== img.filename))}
+                          aria-label="Remove image"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <textarea
                 ref={inputRef}
                 value={inputMessage}
@@ -681,9 +925,88 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                 rows={2}
                 disabled={isLoading}
               />
+              <div className="ai-add-menu-anchor" ref={addMenuRef}>
+                <button
+                  type="button"
+                  className={`ai-add-btn ${isAddMenuOpen ? 'ai-add-btn-open' : ''}`}
+                  aria-label="Add attachments or links"
+                  onClick={() => {
+                    setIsAddMenuOpen((prev) => !prev);
+                    setIsLinkModalOpen(false);
+                  }}
+                >
+                  <Plus size={18} />
+                </button>
+
+                {isAddMenuOpen && !isLinkModalOpen && (
+                  <div className="ai-add-menu">
+                    <button type="button" className="ai-add-menu-item" onClick={handleAddFilesClick}>
+                      <Paperclip size={18} />
+                      <span>Add images, PDFs or CSVs</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ai-add-menu-item"
+                      onClick={() => setIsLinkModalOpen(true)}
+                    >
+                      <AtSign size={18} />
+                      <span>Add links</span>
+                    </button>
+                  </div>
+                )}
+
+                {isAddMenuOpen && isLinkModalOpen && (
+                  <div className="ai-link-modal">
+                    <input
+                      type="url"
+                      className="ai-link-input"
+                      placeholder="Paste a link"
+                      value={linkInputValue}
+                      onChange={(e) => setLinkInputValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddLink();
+                        }
+                      }}
+                    />
+                    <div className="ai-link-modal-actions">
+                      <button
+                        type="button"
+                        className="ai-link-modal-btn"
+                        onClick={() => {
+                          setIsLinkModalOpen(false);
+                          setLinkInputValue('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="ai-link-modal-btn ai-link-modal-btn-primary"
+                        onClick={handleAddLink}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.pdf,.csv"
+                multiple
+                className="ai-hidden-file-input"
+                onChange={handleFilesSelected}
+                hidden
+                tabIndex={-1}
+              />
+
               <button
                 onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || isLoading}
+                disabled={(inputMessage.trim().length === 0 && attachmentNames.length === 0 && addedLinks.length === 0 && contextSnippets.length === 0) || isLoading}
                 className="ai-send-btn"
                 title="Send message"
               >
