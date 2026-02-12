@@ -22,6 +22,8 @@ import {
   ListType,
 } from '@lexical/list';
 import { $createLinkNode } from '@lexical/link';
+import { INSERT_IMAGE_COMMAND } from './ImagePlugin';
+import { compressImageToBase64 } from '../nodes/ImageNode';
 
 /**
  * ClipboardPlugin - Handles paste events to preserve formatting
@@ -36,6 +38,26 @@ export default function ClipboardPlugin() {
       (event: ClipboardEvent) => {
         const clipboardData = event.clipboardData;
         if (!clipboardData) return false;
+
+        // Check for image data in clipboard (e.g., screenshot paste)
+        const items = clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.type.startsWith('image/')) {
+            event.preventDefault();
+            const file = item.getAsFile();
+            if (file) {
+              compressImageToBase64(file)
+                .then(({ src, width, height }) => {
+                  editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, width, height });
+                })
+                .catch((err) => {
+                  console.error('Failed to paste image:', err);
+                });
+            }
+            return true;
+          }
+        }
 
         // Try to get HTML content first (preserves formatting)
         const htmlContent = clipboardData.getData('text/html');

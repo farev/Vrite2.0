@@ -21,6 +21,7 @@ import { applyChangesWithDiff, type LexicalChange, createNodesFromSegments } fro
 
 interface DiffPluginProps {
   changes: LexicalChange[] | null;
+  contextImages?: Array<{ filename: string; data: string; width: number; height: number }>;
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
   onAnyAccepted?: () => void;
@@ -28,6 +29,7 @@ interface DiffPluginProps {
 
 export default function DiffPlugin({
   changes,
+  contextImages = [],
   onDiffComplete,
   onAllResolved,
   onAnyAccepted,
@@ -84,8 +86,28 @@ export default function DiffPlugin({
             }
             didAccept = true;
           } else {
-            // For additions/replacements, check if it's an equation
-            if (nodeData.equationData) {
+            // For additions/replacements, check if it's an image
+            if (nodeData.imageData) {
+              // Import ImageNode
+              const { $createImageNode } = require('@/components/nodes/ImageNode');
+
+              // Create an ImageNode
+              const imageNode = $createImageNode({
+                src: nodeData.imageData.src,
+                altText: nodeData.imageData.altText,
+                width: typeof nodeData.imageData.width === 'number' ? nodeData.imageData.width : (nodeData.imageData.width === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.width))),
+                height: typeof nodeData.imageData.height === 'number' ? nodeData.imageData.height : (nodeData.imageData.height === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.height))),
+                alignment: nodeData.imageData.alignment as 'left' | 'center' | 'right',
+                caption: nodeData.imageData.caption || '',
+                showCaption: nodeData.imageData.showCaption || false,
+              });
+
+              // Replace the parent paragraph with the image
+              if (parent) {
+                parent.replace(imageNode);
+              }
+              didAccept = true;
+            } else if (nodeData.equationData) {
               // Create an inline EquationNode (all equations are inline now)
               const equationNode = $createEquationNode(
                 nodeData.equationData.equation,
@@ -185,9 +207,10 @@ export default function DiffPlugin({
 
       console.log('Applying Lexical changes:', changes);
       console.log('Block key map:', blockKeyMap);
+      console.log('Context images:', contextImages);
 
       // Apply changes with diff highlighting
-      applyChangesWithDiff(changes, blockKeyMap);
+      applyChangesWithDiff(changes, blockKeyMap, contextImages);
 
       console.log('Applied Lexical changes with inline diffs');
 

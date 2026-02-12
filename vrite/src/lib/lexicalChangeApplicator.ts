@@ -18,6 +18,7 @@ import { $createListItemNode, $createListNode, type ListItemNode } from '@lexica
 import { $createTableNode, $createTableRowNode, $createTableCellNode } from '@lexical/table';
 import { $createDiffNode } from '@/components/nodes/DiffNode';
 import { $createEquationNode, $isEquationNode } from '@/components/nodes/EquationNode';
+import { $createImageNode, $isImageNode } from '@/components/nodes/ImageNode';
 import type { SimplifiedBlock, Segment, BlockKeyMap } from './lexicalSerializer';
 
 // ============== Change Types ==============
@@ -54,13 +55,57 @@ export type LexicalChange =
 // ============== Change Application ==============
 
 /**
+ * Build a mapping of image properties to their src for preserving image data during moves.
+ */
+function buildImageSrcMap(root: LexicalNode): Map<string, string> {
+  const imageSrcMap = new Map<string, string>();
+
+  function traverse(node: LexicalNode) {
+    if ($isImageNode(node)) {
+      // Create a key from image properties (excluding src)
+      const key = JSON.stringify({
+        altText: node.getAltText(),
+        width: node.getWidth(),
+        height: node.getHeight(),
+        alignment: node.getAlignment(),
+        caption: node.getCaption(),
+        showCaption: node.getShowCaption(),
+      });
+      imageSrcMap.set(key, node.getSrc());
+    }
+
+    if ('getChildren' in node && typeof node.getChildren === 'function') {
+      const children = node.getChildren() as LexicalNode[];
+      children.forEach(child => traverse(child));
+    }
+  }
+
+  traverse(root);
+  return imageSrcMap;
+}
+
+// Global image src map for use across change operations
+let globalImageSrcMap: Map<string, string> = new Map();
+let globalContextImageMap: Map<string, string> = new Map();
+
+/**
  * Apply changes from the AI agent to the Lexical editor with diff highlighting.
  */
 export function applyChangesWithDiff(
   changes: LexicalChange[],
-  blockKeyMap: BlockKeyMap
+  blockKeyMap: BlockKeyMap,
+  contextImages: Array<{ filename: string; data: string; width: number; height: number }> = []
 ): void {
   const root = $getRoot();
+
+  // Build image src mapping before applying changes
+  globalImageSrcMap = buildImageSrcMap(root);
+
+  // Build context image mapping (filename -> base64 data)
+  globalContextImageMap = new Map();
+  for (const img of contextImages) {
+    globalContextImageMap.set(img.filename, img.data);
+  }
 
   // Pre-process to group consecutive list item insertions
   const processedChanges = preprocessListInsertions(changes);
@@ -92,6 +137,10 @@ export function applyChangesWithDiff(
       console.error('Error applying change:', change, error);
     }
   }
+
+  // Clear the maps after applying changes
+  globalImageSrcMap.clear();
+  globalContextImageMap.clear();
 }
 
 // Internal type for grouped list insertions
@@ -181,6 +230,14 @@ function applyReplaceBlock(change: ReplaceBlockChange, blockKeyMap: BlockKeyMap)
   if (!existingNode) {
     console.warn(`Node not found for key: ${nodeKey}`);
     return;
+  }
+
+  // Special handling for images: preserve original src if AI sent placeholder
+  if (change.newBlock.type === 'image' && change.newBlock.imageData && change.newBlock.imageData.src === '[image]') {
+    if ($isImageNode(existingNode)) {
+      // Preserve the original image's src
+      change.newBlock.imageData.src = existingNode.getSrc();
+    }
   }
 
   // Get original text for diff display
@@ -542,6 +599,85 @@ function createBlockNodeWithDiff(
       }
 
       return tableNode;
+    case 'image':
+      if (!block.imageData) {
+        throw new Error('Image block missing imageData');
+      }
+
+      // Resolve actual image src if placeholder is used or if it's a filename reference
+      let imageSrc = block.imageData.src;
+
+      // First check if it's a filename reference to a context image
+      if (imageSrc !== '[image]' && !imageSrc.startsWith('data:')) {
+        // Likely a filename reference
+        const contextSrc = globalContextImageMap.get(imageSrc);
+        if (contextSrc) {
+          imageSrc = contextSrc;
+        } else {
+          console.warn('[ChangeApplicator] Could not find context image for filename:', imageSrc);
+        }
+      }
+
+      // If still placeholder, look up from existing document images OR context images
+      if (imageSrc === '[image]') {
+        // Try existing document images first
+        const key = JSON.stringify({
+          altText: block.imageData.altText,
+          width: block.imageData.width,
+          height: block.imageData.height,
+          alignment: block.imageData.alignment,
+          caption: block.imageData.caption,
+          showCaption: block.imageData.showCaption,
+        });
+        const actualSrc = globalImageSrcMap.get(key);
+        if (actualSrc) {
+          imageSrc = actualSrc;
+        } else if (globalContextImageMap.size === 1) {
+          // Fallback: If there's exactly one context image and no match found,
+          // assume the AI meant to use that image
+          imageSrc = Array.from(globalContextImageMap.values())[0];
+          console.log('Using the only available context image as fallback');
+        } else if (globalContextImageMap.size > 1) {
+          console.warn('Multiple context images available but AI did not specify which one. Cannot auto-select.');
+          console.warn('Available images:', Array.from(globalContextImageMap.keys()));
+        } else {
+          console.warn('Could not find original image src for:', block.imageData);
+        }
+      }
+
+      // Create a paragraph to wrap the image diff (images can't be inline)
+      node = $createParagraphNode();
+
+      // Apply alignment if specified
+      if (block.align && $isElementNode(node)) {
+        (node as ElementNode).setFormat(block.align);
+      }
+
+      // Create diff node with image preview
+      const imageData = {
+        src: imageSrc,
+        altText: block.imageData.altText,
+        width: block.imageData.width,
+        height: block.imageData.height,
+        alignment: block.imageData.alignment,
+        caption: block.imageData.caption || '',
+        showCaption: block.imageData.showCaption || false,
+      };
+
+      const diffNode = $createDiffNode(
+        'addition',
+        `Image: ${block.imageData.altText || 'Untitled'}`,
+        originalText || undefined,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        imageData
+      );
+
+      (node as { append?: (child: LexicalNode) => void }).append?.(diffNode);
+      return node;
     case 'paragraph':
     default:
       node = $createParagraphNode();
