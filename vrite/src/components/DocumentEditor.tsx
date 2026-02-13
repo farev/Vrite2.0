@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties }
 import {
   $getRoot,
   $getSelection,
+  $setSelection,
   $createParagraphNode,
   $createTextNode,
   FORMAT_TEXT_COMMAND,
@@ -55,10 +56,10 @@ import { SpellCheckPlugin } from './plugins/SpellCheckPlugin';
 import TableActionMenuPlugin from './plugins/TableActionMenuPlugin';
 import TableNavigationPlugin from './plugins/TableNavigationPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
-import { EquationNode } from './nodes/EquationNode';
+import { EquationNode, $createEquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
 import { PageBreakNode } from './nodes/PageBreakNode';
-import { ImageNode, $isImageNode } from './nodes/ImageNode';
+import { ImageNode, $isImageNode, $createImageNode } from './nodes/ImageNode';
 import ImagePlugin, { INSERT_IMAGE_COMMAND, type InsertImagePayload } from './plugins/ImagePlugin';
 import ImageInsertModal from './ImageInsertModal';
 import {
@@ -1246,15 +1247,51 @@ export default function DocumentEditor({
             const diffType = node.getDiffType();
             const text = node.getText();
             const nodeData = node.exportJSON();
+            const parent = node.getParent();
 
-            if (diffType === 'addition') {
-              const textNode = $createTextNode(text);
-              // Apply formatting from the diff node
-              if (nodeData.isBold) textNode.toggleFormat('bold');
-              if (nodeData.isItalic) textNode.toggleFormat('italic');
-              node.replace(textNode);
-            } else {
+            if (diffType === 'deletion') {
+              // For deletions, accepting means removing the content entirely
               node.remove();
+              // Remove empty parent paragraph if it only contained the deletion
+              if (parent && parent.getTextContent().trim() === '') {
+                parent.remove();
+              }
+            } else {
+              // For additions/replacements, check if it's an image
+              if (nodeData.imageData) {
+                // Create an ImageNode
+                const imageNode = $createImageNode({
+                  src: nodeData.imageData.src,
+                  altText: nodeData.imageData.altText,
+                  width: typeof nodeData.imageData.width === 'number' ? nodeData.imageData.width : (nodeData.imageData.width === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.width))),
+                  height: typeof nodeData.imageData.height === 'number' ? nodeData.imageData.height : (nodeData.imageData.height === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.height))),
+                  alignment: nodeData.imageData.alignment as 'left' | 'center' | 'right',
+                  caption: nodeData.imageData.caption || '',
+                  showCaption: nodeData.imageData.showCaption || false,
+                });
+
+                // Replace the parent paragraph with the image
+                if (parent) {
+                  parent.replace(imageNode);
+                }
+              } else if (nodeData.equationData) {
+                // Create an inline EquationNode (all equations are inline now)
+                const equationNode = $createEquationNode(
+                  nodeData.equationData.equation,
+                  true  // Always inline
+                );
+
+                // Replace the DiffNode with the inline EquationNode
+                node.replace(equationNode);
+              } else {
+                // Regular text replacement
+                const textNode = $createTextNode(text);
+                if (nodeData.isBold) textNode.toggleFormat('bold');
+                if (nodeData.isItalic) textNode.toggleFormat('italic');
+
+                // Replace the DiffNode with the new TextNode
+                node.replace(textNode);
+              }
             }
           }
         });
@@ -1424,24 +1461,53 @@ export default function DocumentEditor({
     setContextSnippets([]);
   }, []);
 
+  const handleClearEditorSelection = useCallback(() => {
+    if (editorRef) {
+      editorRef.update(() => {
+        $setSelection(null);
+      });
+    }
+
+    // Also clear DOM selection
+    if (typeof window !== 'undefined') {
+      const domSelection = window.getSelection();
+      domSelection?.removeAllRanges();
+    }
+  }, [editorRef]);
+
+  const handleRemoveSelectedImage = useCallback(() => {
+    setSelectedContextImages([]);
+  }, []);
+
   // Automatically sync selected text and images to AI context
   useEffect(() => {
     const normalized = selectionInfo.text.trim();
 
     if (selectionInfo.image) {
-      // Image is selected - add to context images
-      setSelectedContextImages([selectionInfo.image]);
+      // Use functional form of setState to check if image is already in context
+      setSelectedContextImages((prev) => {
+        const isAlreadyInContext = prev.length > 0 &&
+          prev[0].filename === selectionInfo.image!.filename;
+
+        if (isAlreadyInContext) {
+          // Already in context, don't update
+          return prev;
+        }
+
+        // New image - add to context (stays until manually removed or message sent)
+        return [selectionInfo.image!];
+      });
       setContextSnippets([]);
     } else if (normalized.length > 0) {
       // Text is selected - add to context snippets
       setContextSnippets([{ id: 'current-selection', text: normalized }]);
-      setSelectedContextImages([]);
+      // Don't clear selectedContextImages when text is selected - let them coexist
     } else {
-      // Clear context when nothing is selected
+      // Clear text context when nothing is selected
+      // Keep selectedContextImages - they persist until manually removed
       setContextSnippets([]);
-      setSelectedContextImages([]);
     }
-  }, [selectionInfo]);
+  }, [selectionInfo, editorRef]);
 
   const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
@@ -1550,7 +1616,9 @@ export default function DocumentEditor({
           contextSnippets={contextSnippets}
           selectedContextImages={selectedContextImages}
           onRemoveContextSnippet={handleRemoveContextSnippet}
+          onRemoveSelectedImage={handleRemoveSelectedImage}
           onClearContextSnippets={handleClearContextSnippets}
+          onClearEditorSelection={handleClearEditorSelection}
           isDiffModeActive={isDiffModeActive}
           onAcceptAllChanges={handleAcceptAllChanges}
           onRejectAllChanges={handleRejectAllChanges}

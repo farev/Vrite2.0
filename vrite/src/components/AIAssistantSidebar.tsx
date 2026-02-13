@@ -25,6 +25,7 @@ interface Message {
   timestamp: Date;
   isLoading?: boolean;
   isStreaming?: boolean;
+  images?: Array<{ filename: string; data: string; width: number; height: number }>;
 }
 
 // Helper component to format message content with special styling for tool usage
@@ -88,7 +89,9 @@ interface AIAssistantSidebarProps {
   contextSnippets?: ContextSnippet[];
   selectedContextImages?: Array<{ filename: string; data: string; width: number; height: number }>;
   onRemoveContextSnippet?: (id: string) => void;
+  onRemoveSelectedImage?: () => void;
   onClearContextSnippets?: () => void;
+  onClearEditorSelection?: () => void;
 }
 
 // Scale image dimensions to reasonable display size while preserving aspect ratio
@@ -125,7 +128,9 @@ export default function AIAssistantSidebar({
   contextSnippets = [],
   selectedContextImages = [],
   onRemoveContextSnippet,
-  onClearContextSnippets
+  onRemoveSelectedImage,
+  onClearContextSnippets,
+  onClearEditorSelection
 }: AIAssistantSidebarProps) {
   const { isAuthenticated, isAnonymous, sessionToken, showSignupModal } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
@@ -283,7 +288,7 @@ export default function AIAssistantSidebar({
 
                 // Apply all buffered changes with diff highlighting
                 if (changes.length > 0 && onApplyLexicalChanges) {
-                  onApplyLexicalChanges(changes, contextImages);
+                  onApplyLexicalChanges(changes, [...contextImages, ...selectedContextImages]);
                 }
 
                 // Use accumulated content (reasoning + tool indicator + summary)
@@ -314,7 +319,7 @@ export default function AIAssistantSidebar({
     } finally {
       reader.releaseLock();
     }
-  }, [sessionToken, isAnonymous, onApplyLexicalChanges, contextImages]);
+  }, [sessionToken, isAnonymous, onApplyLexicalChanges, contextImages, selectedContextImages]);
 
   useEffect(() => {
     scrollToBottom();
@@ -504,7 +509,7 @@ export default function AIAssistantSidebar({
         // Handle response
         if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
           if (onApplyLexicalChanges) {
-            onApplyLexicalChanges(data.changes, contextImages);
+            onApplyLexicalChanges(data.changes, [...contextImages, ...selectedContextImages]);
           }
         }
 
@@ -539,7 +544,7 @@ export default function AIAssistantSidebar({
     } finally {
       setIsLoading(false);
     }
-  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, contextImages, attachmentNames, addedLinks, handleStreamingResponse]);
+  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, contextImages, selectedContextImages, attachmentNames, addedLinks, handleStreamingResponse]);
 
   // Automatic AI onboarding for anonymous users
   useEffect(() => {
@@ -593,22 +598,29 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
   const handleSendMessage = async () => {
     const hasTypedMessage = inputMessage.trim().length > 0;
-    const hasAddedContext = attachmentNames.length > 0 || addedLinks.length > 0 || contextSnippets.length > 0 || contextImages.length > 0;
+    const hasAddedContext = attachmentNames.length > 0 || addedLinks.length > 0 || contextSnippets.length > 0 || contextImages.length > 0 || selectedContextImages.length > 0;
     if ((!hasTypedMessage && !hasAddedContext) || isLoading) return;
 
     const composedMessage = hasTypedMessage ? inputMessage : 'Use the added context to help with this request.';
 
     messageIdCounterRef.current += 1;
+    // Combine both manually attached images and selected images
+    const allImages = [...contextImages, ...selectedContextImages];
     const userMessage: Message = {
       id: `${Date.now()}-${messageIdCounterRef.current}`,
       type: 'user',
       content: composedMessage,
-      timestamp: new Date()
+      timestamp: new Date(),
+      images: allImages.length > 0 ? allImages : undefined
     };
 
     setMessages(prev => [...prev, userMessage]);
     const instruction = composedMessage;
     setInputMessage('');
+
+    // Clear selected images after adding to message (like text context snippets)
+    onRemoveSelectedImage?.();
+
     // NOTE: Don't clear contextImages here - they're needed in triggerAIRequest
     // They'll be cleared after the request completes successfully
 
@@ -771,10 +783,22 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                       <div
                         className={
                           message.type === 'user'
-                            ? 'ai-message-text ml-5 !rounded-2xl !border !border-transparent !bg-slate-200 !px-3.5 !py-2.5 !text-slate-800'
+                            ? 'ai-message-text ml-5 !rounded-2xl !border !border-transparent !bg-slate-200 !px-3.5 !py-2.5 !text-slate-800 relative'
                             : 'ai-message-text'
                         }
                       >
+                        {message.type === 'user' && message.images && message.images.length > 0 && (
+                          <div className="ai-message-image-preview">
+                            {message.images.map((img, idx) => (
+                              <img
+                                key={idx}
+                                src={img.data}
+                                alt={img.filename}
+                                className="ai-message-image-thumbnail"
+                              />
+                            ))}
+                          </div>
+                        )}
                         <FormattedMessageContent content={message.content} />
                       </div>
                       {message.type === 'assistant' && !message.isLoading && (
@@ -852,6 +876,14 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                       <div key={`selected-${idx}`} className="ai-context-chip ai-context-chip-selected ai-image-chip">
                         <img src={img.data} alt={img.filename} className="ai-context-image-preview" />
                         <span>Selected image</span>
+                        <button
+                          type="button"
+                          className="ai-context-chip-remove"
+                          onClick={() => onRemoveSelectedImage?.()}
+                          aria-label="Remove selected image"
+                        >
+                          <X size={14} />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -920,6 +952,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
+                onFocus={() => onClearEditorSelection?.()}
                 placeholder="Ask me anything about your document..."
                 className="ai-input"
                 rows={2}

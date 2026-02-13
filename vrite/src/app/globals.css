@@ -1768,6 +1768,23 @@ body {
   color: #0b1224;
 }
 
+.ai-message-image-preview {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.ai-message-image-thumbnail {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
 .ai-message-loading {
   display: flex;
   align-items: center;
