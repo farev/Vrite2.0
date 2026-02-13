@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useState, useRef, useEffect, type JSX } from 'react';
+import React, { type JSX } from 'react';
 import type {
   EditorConfig,
+  LexicalEditor,
   LexicalNode,
   NodeKey,
   SerializedLexicalNode,
   Spread,
 } from 'lexical';
 import { DecoratorNode } from 'lexical';
+import { HeaderFooterRichEditor } from '../HeaderFooterRichEditor';
 
 export type SerializedPageBreakNode = Spread<
   {
@@ -30,10 +32,13 @@ function PageBreakComponent({
   pageGap,
   currentPage,
   nextPage,
-  footerContent,
-  headerContent,
+  footerEditorState,
+  headerEditorState,
+  showPageNumbers,
   onFooterEdit,
   onHeaderEdit,
+  onEditorFocus,
+  onEditorBlur,
 }: {
   height: number;
   whiteSpace: number;
@@ -42,37 +47,16 @@ function PageBreakComponent({
   pageGap: number;
   currentPage: number;
   nextPage: number;
-  footerContent: string;
-  headerContent: string;
-  onFooterEdit: (e: React.FocusEvent<HTMLSpanElement>) => void;
-  onHeaderEdit: (e: React.FocusEvent<HTMLSpanElement>) => void;
+  footerEditorState: string;
+  headerEditorState: string;
+  showPageNumbers: boolean;
+  onFooterEdit: (stateJSON: string) => void;
+  onHeaderEdit: (stateJSON: string) => void;
+  onEditorFocus?: (editor: LexicalEditor) => void;
+  onEditorBlur?: () => void;
 }) {
-  const [editingFooter, setEditingFooter] = useState(false);
-  const [editingHeader, setEditingHeader] = useState(false);
-  const footerRef = useRef<HTMLSpanElement>(null);
-  const headerRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (editingFooter && footerRef.current) {
-      footerRef.current.focus();
-      const range = document.createRange();
-      range.selectNodeContents(footerRef.current);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    }
-  }, [editingFooter]);
-
-  useEffect(() => {
-    if (editingHeader && headerRef.current) {
-      headerRef.current.focus();
-      const range = document.createRange();
-      range.selectNodeContents(headerRef.current);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    }
-  }, [editingHeader]);
+  const footerPlaceholder = showPageNumbers ? `Page ${currentPage}` : 'Double-click to edit footer';
+  const headerPlaceholder = 'Double-click to edit header';
 
   return (
     <div
@@ -90,36 +74,17 @@ function PageBreakComponent({
 
       {/* Footer - end of current page (page N) */}
       <div
-        className={`page-break-footer ${editingFooter ? 'editing' : ''}`}
+        className="page-break-footer"
         style={{ height: `${footerHeight}px` }}
-        onDoubleClick={() => setEditingFooter(true)}
       >
-        {editingFooter ? (
-          <span
-            ref={footerRef}
-            className="page-footer-content editing"
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={(e) => {
-              setEditingFooter(false);
-              onFooterEdit(e);
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                (e.target as HTMLElement).blur();
-              }
-            }}
-          >
-            {footerContent}
-          </span>
-        ) : (
-          <span className="page-footer-display">
-            {footerContent || 'Double-click to edit footer'}
-          </span>
-        )}
+        <HeaderFooterRichEditor
+          initialState={footerEditorState || null}
+          placeholder={footerPlaceholder}
+          label="Footer"
+          onStateChange={onFooterEdit}
+          onEditorFocus={onEditorFocus}
+          onEditorBlur={onEditorBlur}
+        />
       </div>
 
       {/* Gray gap - visual page separation (24px) */}
@@ -130,36 +95,17 @@ function PageBreakComponent({
 
       {/* Header - start of next page (page N+1) */}
       <div
-        className={`page-break-header ${editingHeader ? 'editing' : ''}`}
+        className="page-break-header"
         style={{ height: `${headerHeight}px` }}
-        onDoubleClick={() => setEditingHeader(true)}
       >
-        {editingHeader ? (
-          <span
-            ref={headerRef}
-            className="page-header-content editing"
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={(e) => {
-              setEditingHeader(false);
-              onHeaderEdit(e);
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                (e.target as HTMLElement).blur();
-              }
-            }}
-          >
-            {headerContent}
-          </span>
-        ) : (
-          <span className="page-header-display">
-            {headerContent || 'Double-click to edit header'}
-          </span>
-        )}
+        <HeaderFooterRichEditor
+          initialState={headerEditorState || null}
+          placeholder={headerPlaceholder}
+          label="Header"
+          onStateChange={onHeaderEdit}
+          onEditorFocus={onEditorFocus}
+          onEditorBlur={onEditorBlur}
+        />
       </div>
     </div>
   );
@@ -224,7 +170,7 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
   exportJSON(): SerializedPageBreakNode {
     return {
       type: 'page-break',
-      version: 3, // Bumped version for editable headers/footers
+      version: 4, // Bumped version for rich text headers/footers
       height: this.__height,
       pageNumber: this.__pageNumber,
       footerText: this.__footerText,
@@ -281,48 +227,51 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
   }
 
   decorate(): JSX.Element {
-    // Page break structure - provides visual separation between pages
-    // Contains footer of current page and header of next page
-    // Structure:
-    // - White space (remaining space on current page)
-    // - Footer (editable, for page N)
-    // - Gray gap (24px visual separator)
-    // - Header (editable, for page N+1)
-
-    const pageGap = 24; // Visual gap between pages
-    const footerHeight = 96; // Matches margin height (1 inch = 72pt = 96px)
-    const headerHeight = 96; // Matches margin height (1 inch = 72pt = 96px)
+    const pageGap = 24;
+    const footerHeight = 96;
+    const headerHeight = 96;
 
     const currentPage = this.__pageNumber;
     const nextPage = this.__pageNumber + 1;
 
-    // Calculate white space: total height - footer - gap - header
     const whiteSpace = Math.max(0, this.__height - footerHeight - pageGap - headerHeight);
 
     const nodeKey = this.getKey();
 
-    const handleFooterEdit = (e: React.FocusEvent<HTMLSpanElement>) => {
-      const newText = e.currentTarget.textContent || '';
+    const handleFooterEdit = (stateJSON: string) => {
       const event = new CustomEvent('pagebreak-footer-edit', {
-        detail: { nodeKey, text: newText },
+        detail: { nodeKey, text: stateJSON },
         bubbles: true,
       });
-      e.currentTarget.dispatchEvent(event);
+      // Dispatch on the nearest DOM node
+      const el = document.querySelector(`[data-page-from="${currentPage}"]`);
+      el?.dispatchEvent(event);
     };
 
-    const handleHeaderEdit = (e: React.FocusEvent<HTMLSpanElement>) => {
-      const newText = e.currentTarget.textContent || '';
+    const handleHeaderEdit = (stateJSON: string) => {
       const event = new CustomEvent('pagebreak-header-edit', {
-        detail: { nodeKey, text: newText },
+        detail: { nodeKey, text: stateJSON },
         bubbles: true,
       });
-      e.currentTarget.dispatchEvent(event);
+      const el = document.querySelector(`[data-page-from="${currentPage}"]`);
+      el?.dispatchEvent(event);
     };
 
-    // Footer: use custom text or show page number
-    const footerContent = this.__footerText || (this.__showPageNumbers ? `Page ${currentPage}` : '');
-    // Header: use text from first page header (passed via __headerText), or show placeholder
-    const headerContent = this.__headerText || 'Click to edit header';
+    // Handle editor focus/blur for toolbar context switching
+    const handleEditorFocus = (editor: LexicalEditor) => {
+      const event = new CustomEvent('hf-editor-focus', {
+        detail: { editor },
+        bubbles: true,
+      });
+      document.dispatchEvent(event);
+    };
+
+    const handleEditorBlur = () => {
+      const event = new CustomEvent('hf-editor-blur', {
+        bubbles: true,
+      });
+      document.dispatchEvent(event);
+    };
 
     return (
       <PageBreakComponent
@@ -333,10 +282,13 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
         pageGap={pageGap}
         currentPage={currentPage}
         nextPage={nextPage}
-        footerContent={footerContent}
-        headerContent={headerContent}
+        footerEditorState={this.__footerText}
+        headerEditorState={this.__headerText}
+        showPageNumbers={this.__showPageNumbers}
         onFooterEdit={handleFooterEdit}
         onHeaderEdit={handleHeaderEdit}
+        onEditorFocus={handleEditorFocus}
+        onEditorBlur={handleEditorBlur}
       />
     );
   }

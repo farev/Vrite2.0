@@ -680,51 +680,33 @@ body {
   color: #6b7280;
 }
 
-/* Header/Footer Editor Styles */
+/* Header/Footer Editor Styles (Google Docs style) */
 .document-header-editor {
   height: 96px; /* Matches margin height (1 inch) */
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 0 16px;
-  padding-top: 48px; /* 0.5 inch from top edge */
-  border-bottom: none; /* No border by default */
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 72pt;
   cursor: default;
   font-size: 10pt;
   font-family: 'Times New Roman', serif;
   color: #6b7280;
   order: 0; /* Place at top */
-}
-
-.document-header-editor.editing {
-  border-bottom: 1px solid #c5d1de;
+  position: relative;
 }
 
 .document-footer-editor {
   height: 96px; /* Matches margin height (1 inch) */
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 0 16px;
-  padding-top: 48px; /* 0.5 inch from top of footer area */
-  border-top: none; /* No border by default */
-  border-bottom: none;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 0 72pt;
   cursor: default;
   font-size: 10pt;
   font-family: 'Times New Roman', serif;
   color: #6b7280;
   order: 2; /* Place at bottom */
-}
-
-.document-footer-editor.editing {
-  border-top: 1px solid #c5d1de;
-}
-
-/* Display text (non-editing state) */
-.header-display-text,
-.footer-display-text {
-  color: #9ca3af;
-  font-style: italic;
+  position: relative;
 }
 
 /* Editable content (editing state) */
@@ -835,13 +817,23 @@ body {
   font-family: 'Times New Roman', serif;
   border-top: none; /* No border by default */
   border-bottom: none;
-  padding: 0 20px;
+  padding: 0;
   padding-top: 48px; /* 0.5 inch from top of footer area */
   cursor: default;
 }
 
 .page-break-footer.editing {
-  border-top: 1px solid #c5d1de; /* Show border only when editing */
+  position: relative;
+}
+
+.page-break-footer.editing::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -110px;
+  right: -110px;
+  height: 1px;
+  background: #c5d1de;
 }
 
 /* Header - start of next page */
@@ -857,13 +849,23 @@ body {
   font-family: 'Times New Roman', serif;
   border-top: none; /* No border by default */
   border-bottom: none;
-  padding: 0 20px;
+  padding: 0;
   padding-top: 48px; /* 0.5 inch from top of header area */
   cursor: default;
 }
 
 .page-break-header.editing {
-  border-bottom: 1px solid #c5d1de; /* Show border only when editing */
+  position: relative;
+}
+
+.page-break-header.editing::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: -110px;
+  right: -110px;
+  height: 1px;
+  background: #c5d1de;
 }
 
 /* Display text (non-editing state) */
@@ -2953,6 +2955,146 @@ body {
 .homepage-document-menu:hover {
   background: #f3f4f6;
   color: #374151;
+}
+
+/* ========================================
+   HEADER/FOOTER RICH EDITOR (nested Lexical)
+   Google Docs style: full-width, left-aligned,
+   blue separator line + badge when editing
+   ======================================== */
+
+.hf-rich-editor-wrapper {
+  width: 100%;
+  position: relative;
+  cursor: default;
+}
+
+.hf-editor-area {
+  position: relative;
+}
+
+.hf-rich-editor-wrapper .hf-editor-root {
+  position: relative;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  color: #9ca3af;
+  text-align: left;
+  outline: none;
+}
+
+.hf-rich-editor-wrapper .hf-paragraph {
+  margin: 0;
+}
+
+.hf-rich-editor-wrapper .hf-content-editable {
+  outline: none;
+  min-height: 1.4em;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  color: #9ca3af;
+}
+
+/* When not editing, disable pointer events on editor content */
+.hf-rich-editor-wrapper:not(.hf-editing) .hf-content-editable {
+  pointer-events: none;
+}
+
+/* When editing, allow interaction and darken text */
+.hf-rich-editor-wrapper.hf-editing .hf-content-editable {
+  pointer-events: auto;
+  cursor: text;
+  color: #1f2937;
+}
+
+.hf-rich-editor-wrapper.hf-editing .hf-editor-root {
+  color: #1f2937;
+}
+
+/* Placeholder styling */
+.hf-placeholder {
+  color: #c0c5cc;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Google Docs-style separator line + badge */
+.hf-separator {
+  position: relative;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  /* Break out of parent padding to span full document width */
+  margin-left: -72pt;
+  margin-right: -72pt;
+  padding-left: 72pt;
+}
+
+.hf-separator-line {
+  flex: 1;
+  height: 1px;
+  background: #4285f4;
+}
+
+.hf-badge {
+  font-size: 9px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #4285f4;
+  padding: 1px 6px;
+  border: 1px solid #4285f4;
+  border-radius: 2px;
+  white-space: nowrap;
+  line-height: 1.4;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+/* Body content dimming when editing header/footer */
+.document-page-content.hf-body-dimmed {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* Document header editor - full-width, left-aligned (Google Docs style) */
+.document-header-editor .hf-rich-editor-wrapper {
+  padding-bottom: 4px;
+}
+
+/* Document footer editor - full-width, left-aligned */
+.document-footer-editor .hf-rich-editor-wrapper {
+  padding-top: 8px;
+}
+
+/* Page break header/footer adjustments */
+.page-break-footer .hf-rich-editor-wrapper {
+  padding: 0 72pt;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+}
+
+.page-break-header .hf-rich-editor-wrapper {
+  padding: 0 72pt;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  height: 100%;
+}
+
+/* Editing indicators for page break areas */
+.page-break-footer:has(.hf-editing) {
+  position: relative;
+}
+
+.page-break-header:has(.hf-editing) {
+  position: relative;
 }
 
 /* Menu bar brand button */

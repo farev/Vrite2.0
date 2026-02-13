@@ -27,6 +27,7 @@ import {
   $isListNode,
 } from '@lexical/list';
 import { INSERT_TABLE_COMMAND } from '@lexical/table';
+import type { LexicalEditor } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $createEquationNode } from './nodes/EquationNode';
 import {
@@ -70,6 +71,7 @@ interface FormattingToolbarProps {
   onFormatDocument?: (formatType: string) => void;
   pageSize?: string;
   onPageSizeChange?: (size: string) => void;
+  activeEditor?: LexicalEditor | null;
 }
 
 export default function FormattingToolbar({
@@ -78,9 +80,11 @@ export default function FormattingToolbar({
   onMarginsChange,
   onFormatDocument,
   pageSize = 'letter',
-  onPageSizeChange
+  onPageSizeChange,
+  activeEditor: activeEditorProp,
 }: FormattingToolbarProps) {
-  const [editor] = useLexicalComposerContext();
+  const [mainEditor] = useLexicalComposerContext();
+  const editor = activeEditorProp || mainEditor;
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
   const [isUnderline, setIsUnderline] = useState(false);
@@ -138,88 +142,90 @@ export default function FormattingToolbar({
   ];
 
   const updateToolbar = useCallback(() => {
-    const selection = $getSelection();
-    if ($isRangeSelection(selection)) {
-      setIsBold(selection.hasFormat('bold'));
-      setIsItalic(selection.hasFormat('italic'));
-      setIsUnderline(selection.hasFormat('underline'));
-      setIsStrikethrough(selection.hasFormat('strikethrough'));
-      setIsSubscript(selection.hasFormat('subscript'));
-      setIsSuperscript(selection.hasFormat('superscript'));
+    editor.getEditorState().read(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        setIsBold(selection.hasFormat('bold'));
+        setIsItalic(selection.hasFormat('italic'));
+        setIsUnderline(selection.hasFormat('underline'));
+        setIsStrikethrough(selection.hasFormat('strikethrough'));
+        setIsSubscript(selection.hasFormat('subscript'));
+        setIsSuperscript(selection.hasFormat('superscript'));
 
-      // Get block type and alignment
-      const anchorNode = selection.anchor.getNode();
-      const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
+        // Get block type and alignment
+        const anchorNode = selection.anchor.getNode();
+        const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
 
-      // Check if we're in a list
-      let parent = anchorNode.getParent();
-      let isInBulletList = false;
-      let isInNumberedList = false;
-      while (parent) {
-        if ($isListNode(parent)) {
-          const listType = parent.getListType();
-          isInBulletList = listType === 'bullet';
-          isInNumberedList = listType === 'number';
-          break;
+        // Check if we're in a list
+        let parent = anchorNode.getParent();
+        let isInBulletList = false;
+        let isInNumberedList = false;
+        while (parent) {
+          if ($isListNode(parent)) {
+            const listType = parent.getListType();
+            isInBulletList = listType === 'bullet';
+            isInNumberedList = listType === 'number';
+            break;
+          }
+          parent = parent.getParent();
         }
-        parent = parent.getParent();
-      }
-      setIsBulletList(isInBulletList);
-      setIsNumberedList(isInNumberedList);
+        setIsBulletList(isInBulletList);
+        setIsNumberedList(isInNumberedList);
 
-      if ($isHeadingNode(element)) {
-        setBlockType(element.getTag());
-      } else {
-        setBlockType('paragraph');
-      }
-
-      // Get text alignment from Lexical's native format property
-      if ($isElementNode(element)) {
-        const formatType = element.getFormatType();
-        setTextAlign(formatType || 'left');
-      } else {
-        setTextAlign('left');
-      }
-
-      // Get font family and font size from the selected text node
-      const node = selection.anchor.type === 'text'
-        ? selection.anchor.getNode()
-        : selection.getNodes().find($isTextNode);
-
-      if (node && $isTextNode(node)) {
-        const style = node.getStyle();
-        if (style) {
-          // Parse font-family
-          const fontFamilyMatch = style.match(/font-family:\s*["']?([^;"']+)["']?/);
-          if (fontFamilyMatch) {
-            setFontFamily(fontFamilyMatch[1]);
-          } else {
-            setFontFamily('Times New Roman'); // Default
-          }
-
-          // Parse font-size
-          const fontSizeMatch = style.match(/font-size:\s*([^;]+)/);
-          if (fontSizeMatch) {
-            setFontSize(fontSizeMatch[1].trim());
-          } else {
-            setFontSize('12pt'); // Default
-          }
-
-          // Parse text color
-          const colorMatch = style.match(/color:\s*([^;]+)/);
-          if (colorMatch) {
-            setTextColor(colorMatch[1].trim());
-          } else {
-            setTextColor('#000000'); // Default
-          }
+        if ($isHeadingNode(element)) {
+          setBlockType(element.getTag());
         } else {
-          // No style, use defaults
-          setFontFamily('Times New Roman');
-          setFontSize('12pt');
-          setTextColor('#000000');
+          setBlockType('paragraph');
+        }
+
+        // Get text alignment from Lexical's native format property
+        if ($isElementNode(element)) {
+          const formatType = element.getFormatType();
+          setTextAlign(formatType || 'left');
+        } else {
+          setTextAlign('left');
+        }
+
+        // Get font family and font size from the selected text node
+        const node = selection.anchor.type === 'text'
+          ? selection.anchor.getNode()
+          : selection.getNodes().find($isTextNode);
+
+        if (node && $isTextNode(node)) {
+          const style = node.getStyle();
+          if (style) {
+            // Parse font-family
+            const fontFamilyMatch = style.match(/font-family:\s*["']?([^;"']+)["']?/);
+            if (fontFamilyMatch) {
+              setFontFamily(fontFamilyMatch[1]);
+            } else {
+              setFontFamily('Times New Roman'); // Default
+            }
+
+            // Parse font-size
+            const fontSizeMatch = style.match(/font-size:\s*([^;]+)/);
+            if (fontSizeMatch) {
+              setFontSize(fontSizeMatch[1].trim());
+            } else {
+              setFontSize('12pt'); // Default
+            }
+
+            // Parse text color
+            const colorMatch = style.match(/color:\s*([^;]+)/);
+            if (colorMatch) {
+              setTextColor(colorMatch[1].trim());
+            } else {
+              setTextColor('#000000'); // Default
+            }
+          } else {
+            // No style, use defaults
+            setFontFamily('Times New Roman');
+            setFontSize('12pt');
+            setTextColor('#000000');
+          }
         }
       }
-    }
+    });
   }, [editor]);
 
   useEffect(() => {
@@ -556,7 +562,10 @@ export default function FormattingToolbar({
   const isOverflowing = (itemId: string) => overflowItems.has(itemId);
 
   return (
-    <div className="formatting-toolbar" ref={toolbarRef}>
+    <div className="formatting-toolbar" ref={toolbarRef} onMouseDown={(e) => {
+      // Prevent toolbar clicks from stealing focus from header/footer editors
+      e.preventDefault();
+    }}>
       <div className="formatting-toolbar-main" ref={mainToolbarRef}>
         {/* Undo/Redo - Always visible at the left */}
         <div className="toolbar-section" data-toolbar-item="undo-redo" style={{ marginLeft: '8px' }}>

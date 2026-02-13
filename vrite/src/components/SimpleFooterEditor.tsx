@@ -1,72 +1,47 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
+import type { LexicalEditor } from 'lexical';
+import { HeaderFooterRichEditor } from './HeaderFooterRichEditor';
 
 interface SimpleFooterEditorProps {
   pageCount: number;
   footerEnabled: boolean;
   footerShowPageNumber: boolean;
+  footerEditorState: string | null;
+  onFooterChange?: (stateJSON: string) => void;
   onFooterToggle: () => void;
+  onEditorFocus?: (editor: LexicalEditor) => void;
+  onEditorBlur?: () => void;
+  onEditingChange?: (editing: boolean) => void;
 }
 
 export function SimpleFooterEditor({
   pageCount,
   footerEnabled,
   footerShowPageNumber,
+  footerEditorState,
+  onFooterChange,
   onFooterToggle,
+  onEditorFocus,
+  onEditorBlur,
+  onEditingChange,
 }: SimpleFooterEditorProps) {
-  const [editing, setEditing] = useState(false);
-  const editableRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (editing && editableRef.current) {
-      editableRef.current.focus();
-      const range = document.createRange();
-      range.selectNodeContents(editableRef.current);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    }
-  }, [editing]);
-
-  const handleDoubleClick = () => {
-    setEditing(true);
-  };
-
-  const handleBlur = () => {
-    setEditing(false);
-  };
-
-  const displayContent = footerShowPageNumber ? `Page ${pageCount}` : '';
+  const defaultPlaceholder = footerShowPageNumber
+    ? `Page ${pageCount}`
+    : 'Double-click to edit footer';
 
   return (
-    <div
-      className={`document-footer-editor ${editing ? 'editing' : ''}`}
-      onDoubleClick={handleDoubleClick}
-    >
-      {editing ? (
-        <span
-          ref={editableRef}
-          className="footer-content-editable"
-          contentEditable
-          suppressContentEditableWarning
-          onBlur={handleBlur}
-          onMouseDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              (e.target as HTMLElement).blur();
-            }
-          }}
-        >
-          {displayContent}
-        </span>
-      ) : (
-        <span className="footer-display-text">
-          {displayContent || 'Double-click to edit footer'}
-        </span>
-      )}
+    <div className="document-footer-editor">
+      <HeaderFooterRichEditor
+        initialState={footerEditorState}
+        placeholder={defaultPlaceholder}
+        label="Footer"
+        onStateChange={onFooterChange}
+        onEditorFocus={onEditorFocus}
+        onEditorBlur={onEditorBlur}
+        onEditingChange={onEditingChange}
+      />
     </div>
   );
 }

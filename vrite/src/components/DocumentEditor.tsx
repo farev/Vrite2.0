@@ -444,10 +444,13 @@ export default function DocumentEditor({
   const [pageCount, setPageCount] = useState(1);
   const [headerFooterSettings, setHeaderFooterSettings] = useState({
     headerEnabled: false,
-    headerContent: '',
+    headerEditorState: null as string | null,
     footerEnabled: true,
     footerShowPageNumber: true,
+    footerEditorState: null as string | null,
   });
+  const [activeHFEditor, setActiveHFEditor] = useState<LexicalEditor | null>(null);
+  const [isEditingHF, setIsEditingHF] = useState(false);
   const [editorRef, setEditorRef] = useState<LexicalEditor | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
@@ -1381,6 +1384,26 @@ export default function DocumentEditor({
     }
   }, [selectionInfo]);
 
+  // Listen for header/footer editor focus/blur events from PageBreakNode rich editors
+  useEffect(() => {
+    const handleHFEditorFocus = (e: Event) => {
+      const customEvent = e as CustomEvent<{ editor: LexicalEditor }>;
+      setActiveHFEditor(customEvent.detail.editor);
+    };
+
+    const handleHFEditorBlur = () => {
+      setActiveHFEditor(null);
+    };
+
+    document.addEventListener('hf-editor-focus', handleHFEditorFocus);
+    document.addEventListener('hf-editor-blur', handleHFEditorBlur);
+
+    return () => {
+      document.removeEventListener('hf-editor-focus', handleHFEditorFocus);
+      document.removeEventListener('hf-editor-blur', handleHFEditorBlur);
+    };
+  }, []);
+
   const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
   const lexicalComposerKey = useMemo(
@@ -1409,6 +1432,7 @@ export default function DocumentEditor({
                 onFormatDocument={handleFormatDocument}
                 pageSize={pageSize}
                 onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
+                activeEditor={activeHFEditor}
               />
               
               <div
@@ -1425,9 +1449,9 @@ export default function DocumentEditor({
                     <SimpleHeaderEditor
                       documentTitle={documentTitle}
                       headerEnabled={headerFooterSettings.headerEnabled}
-                      headerContent={headerFooterSettings.headerContent}
-                      onHeaderChange={(content) =>
-                        setHeaderFooterSettings({ ...headerFooterSettings, headerContent: content })
+                      headerEditorState={headerFooterSettings.headerEditorState}
+                      onHeaderChange={(stateJSON) =>
+                        setHeaderFooterSettings({ ...headerFooterSettings, headerEditorState: stateJSON })
                       }
                       onHeaderToggle={() =>
                         setHeaderFooterSettings({
@@ -1435,10 +1459,13 @@ export default function DocumentEditor({
                           headerEnabled: !headerFooterSettings.headerEnabled,
                         })
                       }
+                      onEditorFocus={(editor) => setActiveHFEditor(editor)}
+                      onEditorBlur={() => setActiveHFEditor(null)}
+                      onEditingChange={setIsEditingHF}
                     />
 
                     {/* Main content area */}
-                    <div className="document-page-content" style={editorSurfaceStyle}>
+                    <div className={`document-page-content${isEditingHF ? ' hf-body-dimmed' : ''}`} style={editorSurfaceStyle}>
                       <div className="document-editor-surface">
                         <RichTextPlugin
                           contentEditable={
@@ -1460,12 +1487,19 @@ export default function DocumentEditor({
                       pageCount={pageCount}
                       footerEnabled={headerFooterSettings.footerEnabled}
                       footerShowPageNumber={headerFooterSettings.footerShowPageNumber}
+                      footerEditorState={headerFooterSettings.footerEditorState}
+                      onFooterChange={(stateJSON) =>
+                        setHeaderFooterSettings({ ...headerFooterSettings, footerEditorState: stateJSON })
+                      }
                       onFooterToggle={() =>
                         setHeaderFooterSettings({
                           ...headerFooterSettings,
                           footerEnabled: !headerFooterSettings.footerEnabled,
                         })
                       }
+                      onEditorFocus={(editor) => setActiveHFEditor(editor)}
+                      onEditorBlur={() => setActiveHFEditor(null)}
+                      onEditingChange={setIsEditingHF}
                     />
                   </div>
 
@@ -1489,7 +1523,7 @@ export default function DocumentEditor({
                     pageGap={PAGE_GAP}
                     footerHeight={PAGE_FOOTER_HEIGHT_PX}
                     onPageCountChange={setPageCount}
-                    headerContent={headerFooterSettings.headerContent}
+                    headerContent={headerFooterSettings.headerEditorState || ''}
                   />
 
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}
