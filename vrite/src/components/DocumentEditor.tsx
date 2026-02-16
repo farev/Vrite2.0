@@ -34,7 +34,7 @@ import { $convertToMarkdownString, $convertFromMarkdownString, TRANSFORMERS } fr
 import { ListItemNode, ListNode } from '@lexical/list';
 import { LinkNode } from '@lexical/link';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
-import { TableNode, TableCellNode, TableRowNode } from '@lexical/table';
+import { TableNode, TableCellNode, TableRowNode, INSERT_TABLE_COMMAND } from '@lexical/table';
 import { CodeNode, CodeHighlightNode } from '@lexical/code';
 import { mergeRegister } from '@lexical/utils';
 import {
@@ -420,6 +420,8 @@ interface DocumentEditorProps {
   onDocumentIdChange?: (id: string) => void;
   isAuthenticated: boolean;
   onInsertImageReady?: (handler: () => void) => void;
+  onInsertTableReady?: (handler: (rows: number, columns: number) => void) => void;
+  onInsertEquationReady?: (handler: () => void) => void;
 }
 
 // Track previous title to detect changes
@@ -438,6 +440,8 @@ export default function DocumentEditor({
   onDocumentIdChange,
   isAuthenticated,
   onInsertImageReady,
+  onInsertTableReady,
+  onInsertEquationReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
   const supabase = useMemo(() => createClient(), []);
@@ -917,6 +921,33 @@ export default function DocumentEditor({
       });
     }
   }, [onInsertImageReady]);
+
+  // Expose insert table callback to parent
+  useEffect(() => {
+    if (onInsertTableReady && editorRef) {
+      onInsertTableReady((rows: number, columns: number) => {
+        editorRef.dispatchCommand(INSERT_TABLE_COMMAND, {
+          rows: rows.toString(),
+          columns: columns.toString(),
+        });
+      });
+    }
+  }, [onInsertTableReady, editorRef]);
+
+  // Expose insert equation callback to parent
+  useEffect(() => {
+    if (onInsertEquationReady && editorRef) {
+      onInsertEquationReady(() => {
+        editorRef.update(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            const equationNode = $createEquationNode('', true);
+            selection.insertNodes([equationNode]);
+          }
+        });
+      });
+    }
+  }, [onInsertEquationReady, editorRef]);
 
   // Reset the loaded flag when document ID changes
   useEffect(() => {
