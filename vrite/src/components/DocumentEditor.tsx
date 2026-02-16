@@ -1241,6 +1241,13 @@ export default function DocumentEditor({
     });
   }, [triggerAutoTitleIfEligible]);
 
+  // Re-enable diff mode if DiffNodes reappear (e.g., after undo)
+  const handleDiffNodesDetected = useCallback(() => {
+    if (!isDiffModeActive) {
+      setIsDiffModeActive(true);
+    }
+  }, [isDiffModeActive]);
+
   const handleAllDiffsResolved = useCallback((finalContent: string) => {
     // Called when all diff nodes have been accepted/rejected
     // The editor state is already correct - diffs were applied directly to Lexical state
@@ -1364,12 +1371,17 @@ export default function DocumentEditor({
           if ($isDiffNode(node)) {
             const diffType = node.getDiffType();
             const originalText = node.getOriginalText();
-            
+            const parent = node.getParent();
+
             if (diffType === 'addition') {
               if (originalText) {
                 node.replace($createTextNode(originalText));
               } else {
                 node.remove();
+                // Remove empty parent (e.g. ListItemNode) if needed
+                if (parent && parent.getTextContent().trim() === '') {
+                  parent.remove();
+                }
               }
             } else {
               if (originalText) {
@@ -1628,6 +1640,7 @@ export default function DocumentEditor({
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
                     onAnyAccepted={handleDiffAccepted}
+                    onDiffNodesDetected={handleDiffNodesDetected}
                   />
                   <SpellCheckPlugin />
                   <SelectionContextPlugin onSelectionChange={setSelectionInfo} />
