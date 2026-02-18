@@ -9,6 +9,7 @@ import {
   FileText,
   ChevronDown,
   Image as ImageIcon,
+  Table,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
@@ -26,6 +27,8 @@ interface MenuBarProps {
   isAuthenticated: boolean;
   isTemporaryDocument: boolean;
   onInsertImage?: () => void;
+  onInsertTable?: (rows: number, columns: number) => void;
+  onInsertEquation?: () => void;
 }
 
 export default function MenuBar({
@@ -40,12 +43,15 @@ export default function MenuBar({
   isAuthenticated,
   isTemporaryDocument,
   onInsertImage,
+  onInsertTable,
+  onInsertEquation,
 }: MenuBarProps) {
-  type DropdownKey = 'file' | 'export' | 'insert';
+  type DropdownKey = 'file' | 'export' | 'insert' | 'table';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(documentTitle);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const [hoveredCell, setHoveredCell] = useState<{ row: number; col: number } | null>(null);
 
   const toggleDropdown = (key: DropdownKey) => {
     setOpenDropdown((prev) => (prev === key ? null : key));
@@ -214,7 +220,7 @@ export default function MenuBar({
           >
             Insert <ChevronDown size={14} />
           </button>
-          {openDropdown === 'insert' && (
+          {(openDropdown === 'insert' || openDropdown === 'table') && (
             <div className="menu-dropdown">
               {onInsertImage && (
                 <button className="menu-dropdown-item" onClick={() => {
@@ -223,6 +229,59 @@ export default function MenuBar({
                 }}>
                   <ImageIcon size={16} />
                   Image
+                </button>
+              )}
+              {onInsertTable && (
+                <button
+                  className="menu-dropdown-item"
+                  onClick={() => toggleDropdown('table')}
+                  onMouseEnter={() => toggleDropdown('table')}
+                >
+                  <Table size={16} />
+                  Table
+                  <ChevronDown size={14} style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} />
+                </button>
+              )}
+              {openDropdown === 'table' && onInsertTable && (
+                <div className="menu-dropdown-submenu table-grid-submenu">
+                  <div className="table-grid-header">Insert Table</div>
+                  <div className="table-grid-selector">
+                    {Array.from({ length: 8 }, (_, row) => (
+                      <div key={row} className="table-grid-row">
+                        {Array.from({ length: 10 }, (_, col) => (
+                          <div
+                            key={col}
+                            className={`table-grid-cell ${
+                              hoveredCell && row <= hoveredCell.row && col <= hoveredCell.col
+                                ? 'table-grid-cell-hover'
+                                : ''
+                            }`}
+                            onMouseEnter={() => setHoveredCell({ row, col })}
+                            onClick={() => {
+                              onInsertTable(row + 1, col + 1);
+                              setOpenDropdown(null);
+                              setHoveredCell(null);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="table-grid-label">
+                    {hoveredCell
+                      ? `${hoveredCell.row + 1} × ${hoveredCell.col + 1} Table`
+                      : '1 × 1 Table'
+                    }
+                  </div>
+                </div>
+              )}
+              {onInsertEquation && (
+                <button className="menu-dropdown-item" onClick={() => {
+                  onInsertEquation();
+                  setOpenDropdown(null);
+                }}>
+                  <span style={{ fontFamily: 'serif', fontWeight: 'bold', fontSize: '16px', marginRight: '8px' }}>∑</span>
+                  Equation
                 </button>
               )}
             </div>

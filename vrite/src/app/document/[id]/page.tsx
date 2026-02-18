@@ -21,6 +21,8 @@ export default function DocumentPage() {
   const [isExporting, setIsExporting] = useState(false);
   const saveCallbackRef = useRef<(() => void) | null>(null);
   const insertImageCallbackRef = useRef<(() => void) | null>(null);
+  const insertTableCallbackRef = useRef<((rows: number, columns: number) => void) | null>(null);
+  const insertEquationCallbackRef = useRef<(() => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const router = useRouter();
@@ -65,6 +67,14 @@ export default function DocumentPage() {
 
   const handleInsertImageReady = useCallback((callback: () => void) => {
     insertImageCallbackRef.current = callback;
+  }, []);
+
+  const handleInsertTableReady = useCallback((callback: (rows: number, columns: number) => void) => {
+    insertTableCallbackRef.current = callback;
+  }, []);
+
+  const handleInsertEquationReady = useCallback((callback: () => void) => {
+    insertEquationCallbackRef.current = callback;
   }, []);
 
   useEffect(() => {
@@ -387,6 +397,16 @@ export default function DocumentPage() {
             insertImageCallbackRef.current();
           }
         }}
+        onInsertTable={(rows, columns) => {
+          if (insertTableCallbackRef.current) {
+            insertTableCallbackRef.current(rows, columns);
+          }
+        }}
+        onInsertEquation={() => {
+          if (insertEquationCallbackRef.current) {
+            insertEquationCallbackRef.current();
+          }
+        }}
       />
       <DocumentEditor
         documentTitle={documentTitle}
@@ -394,6 +414,8 @@ export default function DocumentPage() {
         onLastSavedChange={setLastSaved}
         onSaveCallbackReady={handleSaveCallbackReady}
         onInsertImageReady={handleInsertImageReady}
+        onInsertTableReady={handleInsertTableReady}
+        onInsertEquationReady={handleInsertEquationReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
         isAuthenticated={isAuthenticated}

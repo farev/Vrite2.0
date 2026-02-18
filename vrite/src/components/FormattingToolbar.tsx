@@ -26,10 +26,8 @@ import {
   REMOVE_LIST_COMMAND,
   $isListNode,
 } from '@lexical/list';
-import { INSERT_TABLE_COMMAND } from '@lexical/table';
 import type { LexicalEditor } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $createEquationNode } from './nodes/EquationNode';
 import {
   Bold,
   Italic,
@@ -56,7 +54,6 @@ import {
   MoreVertical,
   List,
   ListOrdered,
-  Table,
 } from 'lucide-react';
 
 interface FormattingToolbarProps {
@@ -258,21 +255,34 @@ export default function FormattingToolbar({
     const toolbar = toolbarRef.current;
     if (!mainToolbar || !toolbar) return;
 
+    const getOuterWidth = (element: HTMLElement) => {
+      const computedStyle = window.getComputedStyle(element);
+      const marginLeft = parseFloat(computedStyle.marginLeft) || 0;
+      const marginRight = parseFloat(computedStyle.marginRight) || 0;
+      return element.offsetWidth + marginLeft + marginRight;
+    };
+
     const calculateOverflow = () => {
-      // Get the actual container width from the parent toolbar
-      const containerWidth = toolbar.offsetWidth;
+      const containerWidth = mainToolbar.offsetWidth;
+      if (containerWidth <= 0) {
+        return;
+      }
+
+      const toolbarStyle = window.getComputedStyle(mainToolbar);
+      const gap = parseFloat(toolbarStyle.columnGap || toolbarStyle.gap || '0') || 0;
       const children = Array.from(mainToolbar.children) as HTMLElement[];
 
-      // Reserve space for the more button (40px) plus gaps and padding
-      const moreButtonWidth = 50;
-      const totalPadding = 32; // Left and right padding
-      const availableWidth = containerWidth - moreButtonWidth - totalPadding - 8;
+      const moreMenuItem = children.find(
+        (child) => child.getAttribute('data-toolbar-item') === 'more-menu'
+      );
+      const reservedMoreWidth = moreMenuItem ? getOuterWidth(moreMenuItem) + gap : 0;
+      const availableWidth = Math.max(0, containerWidth - reservedMoreWidth);
 
       let usedWidth = 0;
       const newOverflowItems = new Set<string>();
 
       // Build array of items with their actual widths
-      const items: { id: string; width: number; alwaysVisible: boolean }[] = [];
+      const items: { id: string; width: number }[] = [];
 
       children.forEach((child) => {
         const itemId = child.getAttribute('data-toolbar-item');
@@ -285,7 +295,7 @@ export default function FormattingToolbar({
         const currentDisplay = (child as HTMLElement).style.display;
         (child as HTMLElement).style.display = '';
 
-        const childWidth = child.offsetWidth + 4; // Add gap
+        const childWidth = getOuterWidth(child) + gap;
 
         // Restore display
         (child as HTMLElement).style.display = currentDisplay;
@@ -299,7 +309,7 @@ export default function FormattingToolbar({
         if (alwaysVisible) {
           usedWidth += childWidth;
         } else {
-          items.push({ id: itemId, width: childWidth, alwaysVisible: false });
+          items.push({ id: itemId, width: childWidth });
         }
       });
 
@@ -329,6 +339,7 @@ export default function FormattingToolbar({
     });
 
     resizeObserver.observe(toolbar);
+    resizeObserver.observe(mainToolbar);
 
     return () => {
       clearTimeout(timeoutId);
@@ -374,39 +385,6 @@ export default function FormattingToolbar({
     setOpenDropdown(null);
   };
 
-  const insertTable = (rows: number, columns: number) => {
-    editor.update(() => {
-      editor.dispatchCommand(INSERT_TABLE_COMMAND, {
-        rows: rows.toString(),
-        columns: columns.toString(),
-      });
-
-      // Add a paragraph after the table for easier navigation
-      setTimeout(() => {
-        editor.update(() => {
-          const selection = $getSelection();
-          if ($isRangeSelection(selection)) {
-            const anchor = selection.anchor.getNode();
-            let node: ElementNode | TextNode | null = anchor;
-
-            // Find the table node
-            while (node && node.getType() !== 'table') {
-              node = node.getParent();
-            }
-
-            if (node && node.getType() === 'table') {
-              const nextSibling = node.getNextSibling();
-              if (!nextSibling) {
-                const newParagraph = $createParagraphNode();
-                node.insertAfter(newParagraph);
-              }
-            }
-          }
-        });
-      }, 10);
-    });
-    setOpenDropdown(null);
-  };
 
   const applyFontSize = (size: string) => {
     editor.update(() => {
@@ -528,16 +506,6 @@ export default function FormattingToolbar({
     });
   };
 
-  const insertEquation = () => {
-    editor.update(() => {
-      const selection = $getSelection();
-      if ($isRangeSelection(selection)) {
-        // Insert an empty equation which will open in edit mode automatically
-        const equationNode = $createEquationNode('', true);
-        selection.insertNodes([equationNode]);
-      }
-    });
-  };
 
   const handleMarginChange = (side: 'top' | 'right' | 'bottom' | 'left', value: number) => {
     const newMargins = { ...documentMargins, [side]: value };
@@ -742,61 +710,6 @@ export default function FormattingToolbar({
                 <ListOrdered size={18} style={{ marginRight: '8px' }} />
                 Numbered List
               </button>
-            </div>
-          )}
-        </div>
-
-        {/* Table Insertion */}
-        <div
-          className="toolbar-dropdown"
-          data-toolbar-item="table"
-          style={{ display: isOverflowing('table') ? 'none' : 'inline-block' }}
-        >
-          <button
-            className="toolbar-dropdown-button toolbar-icon-button"
-            onClick={() => toggleDropdown('table')}
-            title="Insert Table"
-          >
-            <Table size={18} />
-            <ChevronDown size={14} />
-          </button>
-          {openDropdown === 'table' && (
-            <div className="toolbar-dropdown-menu table-grid-dropdown">
-              <div className="table-grid-header">Insert Table</div>
-              <div className="table-grid-selector">
-                {Array.from({ length: 8 }, (_, row) => (
-                  <div key={row} className="table-grid-row">
-                    {Array.from({ length: 10 }, (_, col) => (
-                      <div
-                        key={col}
-                        className="table-grid-cell"
-                        onMouseEnter={(e) => {
-                          // Highlight cells up to this one
-                          const gridCells = e.currentTarget.parentElement?.parentElement?.querySelectorAll('.table-grid-cell');
-                          gridCells?.forEach((cell, idx) => {
-                            const cellRow = Math.floor(idx / 10);
-                            const cellCol = idx % 10;
-                            if (cellRow <= row && cellCol <= col) {
-                              cell.classList.add('table-grid-cell-hover');
-                            } else {
-                              cell.classList.remove('table-grid-cell-hover');
-                            }
-                          });
-                          // Update label
-                          const label = document.getElementById('table-grid-label');
-                          if (label) {
-                            label.textContent = `${row + 1} × ${col + 1} Table`;
-                          }
-                        }}
-                        onClick={() => insertTable(row + 1, col + 1)}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
-              <div className="table-grid-label" id="table-grid-label">
-                1 × 1 Table
-              </div>
             </div>
           )}
         </div>
@@ -1428,18 +1341,6 @@ export default function FormattingToolbar({
                     ))}
                   </div>
                 )}
-              </div>
-
-              <div className="toolbar-divider" />
-
-              <div className="toolbar-section">
-                <button
-                  className="toolbar-button"
-                  onClick={insertEquation}
-                  title="Insert Equation"
-                >
-                  <span style={{ fontFamily: 'serif', fontWeight: 'bold' }}>∑</span>
-                </button>
               </div>
             </div>
           </div>
