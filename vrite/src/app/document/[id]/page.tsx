@@ -20,6 +20,7 @@ export default function DocumentPage() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const saveCallbackRef = useRef<(() => void) | null>(null);
+  const insertImageCallbackRef = useRef<(() => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const router = useRouter();
@@ -60,6 +61,10 @@ export default function DocumentPage() {
   // Define all callbacks at the top level (before any conditional returns)
   const handleSaveCallbackReady = useCallback((callback: () => void) => {
     saveCallbackRef.current = callback;
+  }, []);
+
+  const handleInsertImageReady = useCallback((callback: () => void) => {
+    insertImageCallbackRef.current = callback;
   }, []);
 
   useEffect(() => {
@@ -377,12 +382,18 @@ export default function DocumentPage() {
         lastSaved={lastSaved}
         isAuthenticated={isAuthenticated}
         isTemporaryDocument={isTempDoc}
+        onInsertImage={() => {
+          if (insertImageCallbackRef.current) {
+            insertImageCallbackRef.current();
+          }
+        }}
       />
       <DocumentEditor
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}
         onLastSavedChange={setLastSaved}
         onSaveCallbackReady={handleSaveCallbackReady}
+        onInsertImageReady={handleInsertImageReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
         isAuthenticated={isAuthenticated}

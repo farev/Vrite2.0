@@ -7,7 +7,8 @@ import {
   Download,
   Printer,
   FileText,
-  ChevronDown
+  ChevronDown,
+  Image as ImageIcon,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
@@ -24,6 +25,7 @@ interface MenuBarProps {
   lastSaved: number | null;
   isAuthenticated: boolean;
   isTemporaryDocument: boolean;
+  onInsertImage?: () => void;
 }
 
 export default function MenuBar({
@@ -37,8 +39,9 @@ export default function MenuBar({
   lastSaved,
   isAuthenticated,
   isTemporaryDocument,
+  onInsertImage,
 }: MenuBarProps) {
-  type DropdownKey = 'file' | 'export';
+  type DropdownKey = 'file' | 'export' | 'insert';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(documentTitle);
@@ -203,11 +206,29 @@ export default function MenuBar({
         <div className="menu-item">
           <button className="menu-button">Edit</button>
         </div>
-        
+
         <div className="menu-item">
-          <button className="menu-button">Insert</button>
+          <button
+            className="menu-button"
+            onClick={() => toggleDropdown('insert')}
+          >
+            Insert <ChevronDown size={14} />
+          </button>
+          {openDropdown === 'insert' && (
+            <div className="menu-dropdown">
+              {onInsertImage && (
+                <button className="menu-dropdown-item" onClick={() => {
+                  onInsertImage();
+                  setOpenDropdown(null);
+                }}>
+                  <ImageIcon size={16} />
+                  Image
+                </button>
+              )}
+            </div>
+          )}
         </div>
-        
+
         <div className="menu-item">
           <button className="menu-button">Format</button>
         </div>

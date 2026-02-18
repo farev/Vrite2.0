@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties }
 import {
   $getRoot,
   $getSelection,
+  $setSelection,
   $createParagraphNode,
   $createTextNode,
   FORMAT_TEXT_COMMAND,
@@ -13,6 +14,7 @@ import {
   type LexicalEditor,
   type LexicalNode,
   $isRangeSelection,
+  $isNodeSelection,
   SELECTION_CHANGE_COMMAND,
   COMMAND_PRIORITY_LOW,
 } from 'lexical';
@@ -54,9 +56,12 @@ import { SpellCheckPlugin } from './plugins/SpellCheckPlugin';
 import TableActionMenuPlugin from './plugins/TableActionMenuPlugin';
 import TableNavigationPlugin from './plugins/TableNavigationPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
-import { EquationNode } from './nodes/EquationNode';
+import { EquationNode, $createEquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
 import { PageBreakNode } from './nodes/PageBreakNode';
+import { ImageNode, $isImageNode, $createImageNode } from './nodes/ImageNode';
+import ImagePlugin, { INSERT_IMAGE_COMMAND, type InsertImagePayload } from './plugins/ImagePlugin';
+import ImageInsertModal from './ImageInsertModal';
 import { SimpleHeaderEditor } from './SimpleHeaderEditor';
 import { SimpleFooterEditor } from './SimpleFooterEditor';
 import {
@@ -126,6 +131,7 @@ const createInitialConfig = (savedEditorState?: string) => ({
     EquationNode,
     AutocompleteNode,
     PageBreakNode,
+    ImageNode,
   ],
   editorState: savedEditorState,
 });
@@ -290,6 +296,12 @@ type SelectionRect = {
 type SelectionInfo = {
   text: string;
   rect: SelectionRect | null;
+  image?: {
+    filename: string;
+    data: string;
+    width: number;
+    height: number;
+  } | null;
 };
 
 function SelectionContextPlugin({ onSelectionChange }: { onSelectionChange: (info: SelectionInfo) => void }) {
@@ -299,6 +311,35 @@ function SelectionContextPlugin({ onSelectionChange }: { onSelectionChange: (inf
     const updateSelection = () => {
       editor.getEditorState().read(() => {
         const selection = $getSelection();
+
+        // Check for node selection (e.g., images)
+        if ($isNodeSelection(selection)) {
+          const nodes = selection.getNodes();
+          if (nodes.length === 1 && $isImageNode(nodes[0])) {
+            const imageNode = nodes[0];
+            const imageSrc = imageNode.getSrc();
+            const imageAlt = imageNode.getAltText();
+            const imageWidth = imageNode.getWidth();
+            const imageHeight = imageNode.getHeight();
+
+            // Generate a filename from alt text or use default
+            const filename = imageAlt ? `${imageAlt.replace(/[^a-z0-9]/gi, '_')}.png` : 'selected_image.png';
+
+            onSelectionChange({
+              text: '',
+              rect: null,
+              image: {
+                filename,
+                data: imageSrc,
+                width: typeof imageWidth === 'number' ? imageWidth : parseInt(String(imageWidth)),
+                height: typeof imageHeight === 'number' ? imageHeight : parseInt(String(imageHeight)),
+              }
+            });
+            return;
+          }
+        }
+
+        // Check for range selection (text)
         if ($isRangeSelection(selection) && !selection.isCollapsed()) {
           const text = selection.getTextContent().trim();
           let rect: SelectionRect | null = null;
@@ -314,9 +355,9 @@ function SelectionContextPlugin({ onSelectionChange }: { onSelectionChange: (inf
               };
             }
           }
-          onSelectionChange({ text, rect });
+          onSelectionChange({ text, rect, image: null });
         } else {
-          onSelectionChange({ text: '', rect: null });
+          onSelectionChange({ text: '', rect: null, image: null });
         }
       });
     };
@@ -380,6 +421,7 @@ interface DocumentEditorProps {
   initialDocumentId?: string | null;
   onDocumentIdChange?: (id: string) => void;
   isAuthenticated: boolean;
+  onInsertImageReady?: (handler: () => void) => void;
 }
 
 // Track previous title to detect changes
@@ -397,6 +439,7 @@ export default function DocumentEditor({
   initialDocumentId,
   onDocumentIdChange,
   isAuthenticated,
+  onInsertImageReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
   const supabase = useMemo(() => createClient(), []);
@@ -441,6 +484,7 @@ export default function DocumentEditor({
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   const [suggestedContent, setSuggestedContent] = useState<string | null>(null);
   const [pendingChanges, setPendingChanges] = useState<LexicalChange[] | null>(null);
+  const pendingContextImagesRef = useRef<Array<{ filename: string; data: string; width: number; height: number }>>([]);
   const [pageCount, setPageCount] = useState(1);
   const [headerFooterSettings, setHeaderFooterSettings] = useState({
     headerEnabled: false,
@@ -455,9 +499,11 @@ export default function DocumentEditor({
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
+  const [selectedContextImages, setSelectedContextImages] = useState<Array<{ filename: string; data: string; width: number; height: number }>>([]);
   const [isDocumentAtTop, setIsDocumentAtTop] = useState(true);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const isDocumentEmpty = documentContent.trim().length === 0;
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
@@ -875,6 +921,15 @@ export default function DocumentEditor({
     }
   }, [handleManualSave, onSaveCallbackReady]);
 
+  // Expose insert image callback to parent
+  useEffect(() => {
+    if (onInsertImageReady) {
+      onInsertImageReady(() => {
+        setIsImageModalOpen(true);
+      });
+    }
+  }, [onInsertImageReady]);
+
   // Reset the loaded flag when document ID changes
   useEffect(() => {
     hasLoadedDocumentRef.current = false;
@@ -1099,6 +1154,16 @@ export default function DocumentEditor({
     setIsAISidebarOpen(true);
   }, []);
 
+  // Handle image insertion
+  const handleInsertImage = useCallback(
+    (payload: InsertImagePayload) => {
+      if (editorRef) {
+        editorRef.dispatchCommand(INSERT_IMAGE_COMMAND, payload);
+      }
+    },
+    [editorRef]
+  );
+
   // Get simplified document for AI sidebar (Lexical JSON format)
   const getSimplifiedDocument = useCallback((): SimplifiedDocument => {
     if (!editorRef) {
@@ -1116,8 +1181,8 @@ export default function DocumentEditor({
   }, [editorRef]);
 
   // Handle Lexical-based changes from AI (V2 API)
-  const handleApplyLexicalChanges = useCallback((changes: LexicalChange[]) => {
-    console.log('Applying Lexical changes:', changes);
+  const handleApplyLexicalChanges = useCallback((changes: LexicalChange[], contextImages?: Array<{ filename: string; data: string; width: number; height: number }>) => {
+    pendingContextImagesRef.current = contextImages || [];
     setPendingChanges(changes);
     setIsDiffModeActive(true);
   }, []);
@@ -1167,6 +1232,7 @@ export default function DocumentEditor({
     setOriginalContent(null);
     setSuggestedContent(null);
     setPendingChanges(null);
+    pendingContextImagesRef.current = [];
     // Document content is already correct in the editor - no need to set it
   }, []);
 
@@ -1193,15 +1259,51 @@ export default function DocumentEditor({
             const diffType = node.getDiffType();
             const text = node.getText();
             const nodeData = node.exportJSON();
+            const parent = node.getParent();
 
-            if (diffType === 'addition') {
-              const textNode = $createTextNode(text);
-              // Apply formatting from the diff node
-              if (nodeData.isBold) textNode.toggleFormat('bold');
-              if (nodeData.isItalic) textNode.toggleFormat('italic');
-              node.replace(textNode);
-            } else {
+            if (diffType === 'deletion') {
+              // For deletions, accepting means removing the content entirely
               node.remove();
+              // Remove empty parent paragraph if it only contained the deletion
+              if (parent && parent.getTextContent().trim() === '') {
+                parent.remove();
+              }
+            } else {
+              // For additions/replacements, check if it's an image
+              if (nodeData.imageData) {
+                // Create an ImageNode
+                const imageNode = $createImageNode({
+                  src: nodeData.imageData.src,
+                  altText: nodeData.imageData.altText,
+                  width: typeof nodeData.imageData.width === 'number' ? nodeData.imageData.width : (nodeData.imageData.width === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.width))),
+                  height: typeof nodeData.imageData.height === 'number' ? nodeData.imageData.height : (nodeData.imageData.height === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.height))),
+                  alignment: nodeData.imageData.alignment as 'left' | 'center' | 'right',
+                  caption: nodeData.imageData.caption || '',
+                  showCaption: nodeData.imageData.showCaption || false,
+                });
+
+                // Replace the parent paragraph with the image
+                if (parent) {
+                  parent.replace(imageNode);
+                }
+              } else if (nodeData.equationData) {
+                // Create an inline EquationNode (all equations are inline now)
+                const equationNode = $createEquationNode(
+                  nodeData.equationData.equation,
+                  true  // Always inline
+                );
+
+                // Replace the DiffNode with the inline EquationNode
+                node.replace(equationNode);
+              } else {
+                // Regular text replacement
+                const textNode = $createTextNode(text);
+                if (nodeData.isBold) textNode.toggleFormat('bold');
+                if (nodeData.isItalic) textNode.toggleFormat('italic');
+
+                // Replace the DiffNode with the new TextNode
+                node.replace(textNode);
+              }
             }
           }
         });
@@ -1371,18 +1473,53 @@ export default function DocumentEditor({
     setContextSnippets([]);
   }, []);
 
-  // Automatically sync selected text to AI context
+  const handleClearEditorSelection = useCallback(() => {
+    if (editorRef) {
+      editorRef.update(() => {
+        $setSelection(null);
+      });
+    }
+
+    // Also clear DOM selection
+    if (typeof window !== 'undefined') {
+      const domSelection = window.getSelection();
+      domSelection?.removeAllRanges();
+    }
+  }, [editorRef]);
+
+  const handleRemoveSelectedImage = useCallback(() => {
+    setSelectedContextImages([]);
+  }, []);
+
+  // Automatically sync selected text and images to AI context
   useEffect(() => {
     const normalized = selectionInfo.text.trim();
 
-    if (normalized.length > 0) {
-      // Replace context with current selection
+    if (selectionInfo.image) {
+      // Use functional form of setState to check if image is already in context
+      setSelectedContextImages((prev) => {
+        const isAlreadyInContext = prev.length > 0 &&
+          prev[0].filename === selectionInfo.image!.filename;
+
+        if (isAlreadyInContext) {
+          // Already in context, don't update
+          return prev;
+        }
+
+        // New image - add to context (stays until manually removed or message sent)
+        return [selectionInfo.image!];
+      });
+      setContextSnippets([]);
+    } else if (normalized.length > 0) {
+      // Text is selected - add to context snippets
       setContextSnippets([{ id: 'current-selection', text: normalized }]);
+      // Don't clear selectedContextImages when text is selected - let them coexist
     } else {
-      // Clear context when nothing is selected
+      // Clear text context when nothing is selected
+      // Keep selectedContextImages - they persist until manually removed
       setContextSnippets([]);
     }
-  }, [selectionInfo]);
+  }, [selectionInfo, editorRef]);
 
   // Listen for header/footer editor focus/blur events from PageBreakNode rich editors
   useEffect(() => {
@@ -1514,6 +1651,7 @@ export default function DocumentEditor({
                   <TabIndentationPlugin />
                   <KeyboardShortcutPlugin onCommandK={handleCommandK} />
                   <ClipboardPlugin />
+                  <ImagePlugin />
                   <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
                   <AutocompletePlugin enabled={false} />
                   <PaginationPlugin
@@ -1529,6 +1667,7 @@ export default function DocumentEditor({
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}
                   <DiffPlugin
                     changes={pendingChanges}
+                    contextImages={pendingContextImagesRef.current}
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
                     onAnyAccepted={handleDiffAccepted}
@@ -1549,8 +1688,11 @@ export default function DocumentEditor({
           onApplyChanges={handleApplyChanges}
           documentContent={documentContent}
           contextSnippets={contextSnippets}
+          selectedContextImages={selectedContextImages}
           onRemoveContextSnippet={handleRemoveContextSnippet}
+          onRemoveSelectedImage={handleRemoveSelectedImage}
           onClearContextSnippets={handleClearContextSnippets}
+          onClearEditorSelection={handleClearEditorSelection}
           isDiffModeActive={isDiffModeActive}
           onAcceptAllChanges={handleAcceptAllChanges}
           onRejectAllChanges={handleRejectAllChanges}
@@ -1565,6 +1707,12 @@ export default function DocumentEditor({
         onAccept={handleAcceptChanges}
         onReject={handleRejectChanges}
         title="Review AI Changes"
+      />
+
+      <ImageInsertModal
+        isOpen={isImageModalOpen}
+        onClose={() => setIsImageModalOpen(false)}
+        onInsert={handleInsertImage}
       />
     </div>
   );

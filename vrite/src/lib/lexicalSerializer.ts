@@ -10,6 +10,8 @@ import type { ListItemNode, ListNode } from '@lexical/list';
 import type { TableNode, TableRowNode, TableCellNode } from '@lexical/table';
 import type { EquationNode } from '@/components/nodes/EquationNode';
 import { $isEquationNode } from '@/components/nodes/EquationNode';
+import type { ImageNode } from '@/components/nodes/ImageNode';
+import { $isImageNode } from '@/components/nodes/ImageNode';
 
 // ============== Types ==============
 
@@ -42,9 +44,19 @@ export interface TableBlockData {
   rows: TableRow[];
 }
 
+export interface ImageBlockData {
+  src: string;
+  altText: string;
+  width: number | string;
+  height: number | string;
+  alignment: string;
+  caption: string;
+  showCaption: boolean;
+}
+
 export interface SimplifiedBlock {
   id: string;
-  type: 'paragraph' | 'heading' | 'list-item' | 'equation' | 'table';
+  type: 'paragraph' | 'heading' | 'list-item' | 'equation' | 'table' | 'image';
   tag?: 'h1' | 'h2' | 'h3';
   listType?: 'bullet' | 'number';
   indent?: number;
@@ -52,6 +64,7 @@ export interface SimplifiedBlock {
   segments: Segment[];
   equationData?: EquationBlockData;  // For equation blocks
   tableData?: TableBlockData;  // For table blocks
+  imageData?: ImageBlockData;  // For image blocks
 }
 
 export interface SimplifiedDocument {
@@ -132,6 +145,22 @@ export function serializeLexicalToSimplified(root: LexicalNode): SimplifiedDocum
         });
       }
       // Inline equations are handled in extractSegments()
+    } else if (type === 'image') {
+      const imageNode = node as ImageNode;
+      blocks.push({
+        id: `block-${blockIndex++}`,
+        type: 'image',
+        segments: [],
+        imageData: {
+          src: '[image]', // Don't send base64 to AI - too large
+          altText: imageNode.getAltText(),
+          width: imageNode.getWidth(),
+          height: imageNode.getHeight(),
+          alignment: imageNode.getAlignment(),
+          caption: imageNode.getCaption(),
+          showCaption: imageNode.getShowCaption(),
+        },
+      });
     } else if (type === 'list') {
       const listNode = node as ListNode;
       const listType = listNode.getListType() === 'bullet' ? 'bullet' : 'number';
@@ -298,10 +327,26 @@ export function buildBlockKeyMap(root: LexicalNode): BlockKeyMap {
   const map: BlockKeyMap = {};
   let blockIndex = 0;
 
-  const processNode = (node: LexicalNode) => {
+  const processNode = (node: LexicalNode, parentListType?: 'bullet' | 'number') => {
     const type = node.getType();
 
-    if (type === 'paragraph' || type === 'heading' || type === 'equation' || type === 'table') {
+    if (type === 'paragraph') {
+      // Match serialization logic: only add if there's content (or it's the only block)
+      const segments = extractSegments(node);
+      if (segments.length > 0 || blockIndex === 0) {
+        map[`block-${blockIndex++}`] = node.getKey();
+      }
+    } else if (type === 'heading') {
+      map[`block-${blockIndex++}`] = node.getKey();
+    } else if (type === 'equation') {
+      const equationNode = node as EquationNode;
+      // Match serialization logic: only block equations, not inline
+      if (!equationNode.isInline()) {
+        map[`block-${blockIndex++}`] = node.getKey();
+      }
+    } else if (type === 'image') {
+      map[`block-${blockIndex++}`] = node.getKey();
+    } else if (type === 'table') {
       map[`block-${blockIndex++}`] = node.getKey();
     } else if (type === 'listitem') {
       map[`block-${blockIndex++}`] = node.getKey();
@@ -309,7 +354,7 @@ export function buildBlockKeyMap(root: LexicalNode): BlockKeyMap {
       // Process list children
       if ('getChildren' in node && typeof node.getChildren === 'function') {
         const children = node.getChildren() as LexicalNode[];
-        children.forEach(child => processNode(child));
+        children.forEach(child => processNode(child, type === 'list' ? (node as ListNode).getListType() === 'bullet' ? 'bullet' : 'number' : parentListType));
       }
     } else if ('getChildren' in node && typeof node.getChildren === 'function') {
       // Process children of root or other containers

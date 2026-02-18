@@ -24,6 +24,15 @@ export type SerializedDiffNode = Spread<
     headingLevel?: number;
     alignmentChange?: { from: string; to: string }; // Track alignment changes
     equationData?: { equation: string; inline: boolean }; // For equation diffs
+    imageData?: {
+      src: string;
+      altText: string;
+      width: number | string;
+      height: number | string;
+      alignment: string;
+      caption: string;
+      showCaption: boolean;
+    }; // For image diffs
   },
   SerializedLexicalNode
 >;
@@ -40,6 +49,7 @@ function DiffComponent({
   headingLevel,
   alignmentChange,
   equationData,
+  imageData,
 }: {
   text: string;
   diffType: DiffType;
@@ -52,6 +62,15 @@ function DiffComponent({
   headingLevel?: number;
   alignmentChange?: { from: string; to: string };
   equationData?: { equation: string; inline: boolean };
+  imageData?: {
+    src: string;
+    altText: string;
+    width: number | string;
+    height: number | string;
+    alignment: string;
+    caption: string;
+    showCaption: boolean;
+  };
 }) {
   const [katex, setKatex] = useState<typeof import('katex').default | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -108,6 +127,59 @@ function DiffComponent({
       setRenderError(err instanceof Error ? err.message : 'Invalid equation');
     }
   }, [katex, equationData]);
+
+  // Render image diff
+  if (imageData) {
+    const maxPreviewWidth = 200;
+    const maxPreviewHeight = 150;
+
+    return (
+      <span className={classes} style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+        <span className="diff-inline-body" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+          {isReplacement && originalText && (
+            <span className="diff-inline-original">{originalText}</span>
+          )}
+          <span className="diff-inline-text">
+            <img
+              src={imageData.src}
+              alt={imageData.altText}
+              style={{
+                maxWidth: `${maxPreviewWidth}px`,
+                maxHeight: `${maxPreviewHeight}px`,
+                objectFit: 'contain',
+                border: '1px solid #e5e7eb',
+                borderRadius: '4px',
+              }}
+            />
+          </span>
+        </span>
+        <span className="diff-inline-actions">
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onReject(nodeKey);
+            }}
+            className="diff-inline-btn diff-inline-reject"
+            title={rejectTitle}
+          >
+            <X size={12} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onAccept(nodeKey);
+            }}
+            className="diff-inline-btn diff-inline-accept"
+            title={acceptTitle}
+          >
+            <Check size={12} />
+          </button>
+        </span>
+      </span>
+    );
+  }
 
   // Render equation diff
   if (equationData) {
@@ -206,6 +278,15 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
   __headingLevel?: number;
   __alignmentChange?: { from: string; to: string };
   __equationData?: { equation: string; inline: boolean };
+  __imageData?: {
+    src: string;
+    altText: string;
+    width: number | string;
+    height: number | string;
+    alignment: string;
+    caption: string;
+    showCaption: boolean;
+  };
 
   // Static callbacks for accept/reject - will be set by the plugin
   static __onAccept: ((nodeKey: NodeKey) => void) | null = null;
@@ -225,6 +306,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
       node.__headingLevel,
       node.__alignmentChange,
       node.__equationData,
+      node.__imageData,
       node.__key
     );
   }
@@ -246,6 +328,15 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
     headingLevel?: number,
     alignmentChange?: { from: string; to: string },
     equationData?: { equation: string; inline: boolean },
+    imageData?: {
+      src: string;
+      altText: string;
+      width: number | string;
+      height: number | string;
+      alignment: string;
+      caption: string;
+      showCaption: boolean;
+    },
     key?: NodeKey
   ) {
     super(key);
@@ -257,6 +348,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
     this.__headingLevel = headingLevel;
     this.__alignmentChange = alignmentChange;
     this.__equationData = equationData;
+    this.__imageData = imageData;
   }
 
   createDOM(config: EditorConfig): HTMLElement {
@@ -277,7 +369,8 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
       serializedNode.isItalic,
       serializedNode.headingLevel,
       serializedNode.alignmentChange,
-      serializedNode.equationData
+      serializedNode.equationData,
+      serializedNode.imageData
     );
   }
 
@@ -293,6 +386,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
       headingLevel: this.__headingLevel,
       alignmentChange: this.__alignmentChange,
       equationData: this.__equationData,
+      imageData: this.__imageData,
     };
   }
 
@@ -325,6 +419,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
         headingLevel={this.__headingLevel}
         alignmentChange={this.__alignmentChange}
         equationData={this.__equationData}
+        imageData={this.__imageData}
         onAccept={DiffNode.__onAccept || (() => {})}
         onReject={DiffNode.__onReject || (() => {})}
       />
@@ -344,9 +439,18 @@ export function $createDiffNode(
   isItalic?: boolean,
   headingLevel?: number,
   alignmentChange?: { from: string; to: string },
-  equationData?: { equation: string; inline: boolean }
+  equationData?: { equation: string; inline: boolean },
+  imageData?: {
+    src: string;
+    altText: string;
+    width: number | string;
+    height: number | string;
+    alignment: string;
+    caption: string;
+    showCaption: boolean;
+  }
 ): DiffNode {
-  return new DiffNode(diffType, text, originalText, isBold, isItalic, headingLevel, alignmentChange, equationData);
+  return new DiffNode(diffType, text, originalText, isBold, isItalic, headingLevel, alignmentChange, equationData, imageData);
 }
 
 export function $isDiffNode(node: LexicalNode | null | undefined): node is DiffNode {

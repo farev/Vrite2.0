@@ -194,6 +194,73 @@ CRITICAL TABLE RULES:
 - Use format: 1 (bold) for header rows
 - Tables support both text and equation segments in cells
 
+## Image Operations
+
+Images are blocks with type: "image" and use the SAME operations as other blocks (insert_block, replace_block, delete_block).
+Images already in the document appear with metadata (src="[image]", altText, width, height, alignment, caption).
+Images attached by the user are listed as "Available images from user" with their filenames.
+
+### Inserting Images
+Use insert_block with type: "image":
+{
+  "operation": "insert_block",
+  "afterBlockId": "block-2",
+  "newBlock": {
+    "id": "new-img-1",
+    "type": "image",
+    "segments": [],  // MUST be empty for images
+    "imageData": {
+      "src": "chart.png",  // Reference by filename from available images
+      "altText": "Sales chart showing Q4 growth",
+      "width": 600,
+      "height": 400,
+      "alignment": "center",
+      "caption": "Figure 1: Quarterly Sales",
+      "showCaption": true
+    }
+  }
+}
+
+### Modifying Images
+Use replace_block to change image properties:
+{
+  "operation": "replace_block",
+  "blockId": "block-5",  // Existing image block ID
+  "newBlock": {
+    "id": "block-5",  // SAME ID
+    "type": "image",
+    "segments": [],  // MUST be empty for images
+    "imageData": {
+      "src": "[image]",     // Keep existing image
+      "altText": "Updated alt text",
+      "width": 400,
+      "height": 300,
+      "alignment": "center",
+      "caption": "Updated caption",
+      "showCaption": true
+    }
+  }
+}
+
+### Moving Images
+Delete from old position, then insert at new position:
+1. Use delete_block to remove from current position
+2. Use insert_block to add at new position
+
+### Deleting Images
+Use delete_block operation:
+{
+  "operation": "delete_block",
+  "blockId": "block-5"
+}
+
+CRITICAL IMAGE RULES:
+- Image blocks MUST have segments: [] (empty array)
+- Reference context images by filename in imageData.src
+- When modifying existing images, keep src: "[image]" (placeholder)
+- Use replace_block to change any property (alignment, size, caption, etc.)
+- Images use the SAME operations as other blocks - NO special image operations
+
 FORMATTING STANDARDS:
 ${FORMATTING_STANDARDS}`;
 
@@ -239,7 +306,7 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
                 description: 'The new block content (for replace_block and insert_block)',
                 properties: {
                   id: { type: 'string', description: 'Unique ID for the block' },
-                  type: { type: 'string', enum: ['paragraph', 'heading', 'list-item', 'table'] },
+                  type: { type: 'string', enum: ['paragraph', 'heading', 'list-item', 'table', 'image'] },
                   tag: { type: 'string', enum: ['h1', 'h2', 'h3'], description: 'Heading level (for headings only)' },
                   listType: { type: 'string', enum: ['bullet', 'number'], description: 'List type (for list-items only)' },
                   align: { type: 'string', enum: ['left', 'center', 'right', 'justify', 'start', 'end'], description: 'Text alignment (optional, defaults to left). Use "center" for standalone equations.' },
@@ -321,6 +388,20 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
                       },
                     },
                     required: ['rows'],
+                  },
+                  imageData: {
+                    type: 'object',
+                    description: 'Image data (required for image blocks, omit for other types)',
+                    properties: {
+                      src: { type: 'string', description: 'Reference to context image by filename, or base64 data' },
+                      altText: { type: 'string', description: 'Alt text for the image' },
+                      width: { type: 'number', description: 'Width in pixels' },
+                      height: { type: 'number', description: 'Height in pixels' },
+                      alignment: { type: 'string', enum: ['left', 'center', 'right'], description: 'Image alignment (optional, defaults to left)' },
+                      caption: { type: 'string', description: 'Optional caption text' },
+                      showCaption: { type: 'boolean', description: 'Whether to show the caption' },
+                    },
+                    required: ['src', 'altText', 'width', 'height'],
                   },
                 },
                 required: ['id', 'type', 'segments'],
@@ -411,6 +492,12 @@ interface CommandRequest {
   instruction: string;
   conversation_history?: Array<{ role: string; content: string }>;
   context_snippets?: string[];
+  context_images?: Array<{
+    filename: string;
+    data: string;  // base64
+    width: number;
+    height: number;
+  }>;
   stream?: boolean;
 }
 
@@ -818,7 +905,7 @@ Deno.serve(async (req) => {
     // Parse request body
     console.log('[ai-command] Parsing request body...');
     const requestData: CommandRequest = await req.json();
-    const { document, instruction, conversation_history, context_snippets, stream = false } = requestData;
+    const { document, instruction, conversation_history, context_snippets, context_images, stream = false } = requestData;
 
     console.log('[ai-command] Request data received:');
     console.log('  - Document blocks:', document?.blocks?.length || 0);
@@ -877,6 +964,39 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Build context images text
+    // IMPORTANT: context_images contains ONLY newly attached images (with base64)
+    // Images already in the document have metadata only (src="[image]")
+    let contextImagesText = '';
+    if (context_images && context_images.length > 0) {
+      contextImagesText = `Available images from user:\n${
+        context_images.map((img, idx) =>
+          `${idx + 1}. ${img.filename} (${img.width}×${img.height}px)`
+        ).join('\n')
+      }
+
+IMPORTANT: When inserting these images using insert_block, set the src field to the EXACT filename (e.g., "src": "${context_images[0].filename}"), NOT "[image]".
+Example:
+{
+  "operation": "insert_block",
+  "newBlock": {
+    "type": "image",
+    "imageData": {
+      "src": "${context_images[0].filename}",  // USE THE FILENAME HERE
+      "altText": "Description",
+      "width": ${context_images[0].width},
+      "height": ${context_images[0].height},
+      "alignment": "center"
+    }
+  }
+}
+
+NOTE: Only use replace_block to replace an existing image if the user explicitly asks to replace it. Otherwise, use insert_block to add new images and leave existing images in the document unchanged.
+
+`;
+      console.log('[ai-command] Added', context_images.length, 'context images');
+    }
+
     // Check if document is blank or nearly blank
     const isBlank = document.blocks.length === 0 || (
       document.blocks.length === 1 &&
@@ -891,7 +1011,7 @@ Deno.serve(async (req) => {
 
     messages.push({
       role: 'user',
-      content: `${contextText}Document (Lexical JSON):
+      content: `${contextText}${contextImagesText}Document (Lexical JSON):
 ${docJson}${blankNote}
 
 User instruction: ${instruction}
