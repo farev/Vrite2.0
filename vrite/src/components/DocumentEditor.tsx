@@ -782,6 +782,24 @@ export default function DocumentEditor({
     return () => cancelAnimationFrame(frame);
   }, [documentTitle, documentContent, isDocumentEmpty, isContentPastQuarterPage, isTitleUnnamed, triggerAutoTitleIfEligible]);
 
+  // Fast local heading-extraction: if the first non-empty line is an H1, use it as the title
+  // immediately without waiting for the AI edge function or the 25% page-fill threshold.
+  useEffect(() => {
+    if (isDocumentEmpty || !isTitleUnnamed(documentTitle)) return;
+    if (autoTitleTriggeredRef.current || autoTitleInFlightRef.current) return;
+
+    const firstLine = documentContent.split('\n').find((l) => l.trim().length > 0) ?? '';
+    if (firstLine.startsWith('# ')) {
+      const headingTitle = firstLine.slice(2).trim();
+      if (headingTitle && !isTitleUnnamed(headingTitle)) {
+        console.log('[Editor] Auto-title from H1 heading:', headingTitle);
+        const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
+        onTitleChange(headingTitle);
+        markAutoTitleTriggered(docIdentity);
+      }
+    }
+  }, [documentContent, documentTitle, isDocumentEmpty, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, documentId, initialDocumentId]);
+
   // Manual save function with debouncing and deduplication
   const handleManualSave = useCallback(async (isManualTrigger = true) => {
     // Prevent concurrent saves using global lock
