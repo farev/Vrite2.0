@@ -93,7 +93,7 @@ export class GoogleDriveClient {
         throw new Error('Folder ID is null in create response');
       }
       this.vwriteFolderId = folderId;
-      console.log('[GoogleDrive] Created vwrite folder:', this.vwriteFolderId);
+      console.log('[GoogleDrive] Created VibeWrite folder:', this.vwriteFolderId);
 
       return folderId;
     } catch (error) {
