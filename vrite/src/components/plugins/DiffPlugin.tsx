@@ -25,6 +25,7 @@ interface DiffPluginProps {
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
   onAnyAccepted?: () => void;
+  onDiffNodesDetected?: () => void;
 }
 
 export default function DiffPlugin({
@@ -33,6 +34,7 @@ export default function DiffPlugin({
   onDiffComplete,
   onAllResolved,
   onAnyAccepted,
+  onDiffNodesDetected,
 }: DiffPluginProps) {
   const [editor] = useLexicalComposerContext();
 
@@ -219,6 +221,35 @@ export default function DiffPlugin({
       }
     });
   }, [editor, changes, onDiffComplete]);
+
+  // Detect DiffNodes reappearing (e.g., after undo) and re-enable diff mode
+  useEffect(() => {
+    return editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(() => {
+        const root = $getRoot();
+        let hasDiffNodes = false;
+
+        const scan = (node: LexicalNode) => {
+          if (hasDiffNodes) return;
+          if ($isDiffNode(node)) {
+            hasDiffNodes = true;
+            return;
+          }
+          if ('getChildren' in node && typeof node.getChildren === 'function') {
+            for (const child of (node.getChildren() as LexicalNode[])) {
+              scan(child);
+              if (hasDiffNodes) return;
+            }
+          }
+        };
+        scan(root);
+
+        if (hasDiffNodes && onDiffNodesDetected) {
+          onDiffNodesDetected();
+        }
+      });
+    });
+  }, [editor, onDiffNodesDetected]);
 
   return null;
 }
