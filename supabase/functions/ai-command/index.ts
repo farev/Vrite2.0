@@ -959,7 +959,7 @@ Deno.serve(async (req) => {
       const cleanedSnippets = context_snippets.filter(s => s.trim());
       if (cleanedSnippets.length > 0) {
         const formattedSnippets = cleanedSnippets.map(s => `- ${s}`).join('\n');
-        contextText = `Priority context from the user:\n${formattedSnippets}\n\n`;
+        contextText = `Selected text from the user (this is the text the user has highlighted in the document — focus your edits on this section unless the instruction clearly applies to the whole document):\n${formattedSnippets}\n\n`;
         console.log('[ai-command] Added', cleanedSnippets.length, 'context snippets');
       }
     }

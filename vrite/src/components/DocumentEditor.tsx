@@ -55,6 +55,7 @@ import PaginationPlugin from './plugins/PaginationPlugin';
 import { SpellCheckPlugin } from './plugins/SpellCheckPlugin';
 import TableActionMenuPlugin from './plugins/TableActionMenuPlugin';
 import TableNavigationPlugin from './plugins/TableNavigationPlugin';
+import InactiveSelectionPlugin from './plugins/InactiveSelectionPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode, $createEquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
@@ -494,6 +495,7 @@ export default function DocumentEditor({
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
   const [selectedContextImages, setSelectedContextImages] = useState<Array<{ filename: string; data: string; width: number; height: number }>>([]);
   const [isDocumentAtTop, setIsDocumentAtTop] = useState(true);
+  const [isChatFocused, setIsChatFocused] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
@@ -1510,6 +1512,10 @@ export default function DocumentEditor({
     setSelectedContextImages([]);
   }, []);
 
+  const handleChatFocusChange = useCallback((isFocused: boolean) => {
+    setIsChatFocused(isFocused);
+  }, []);
+
   // Automatically sync selected text and images to AI context
   useEffect(() => {
     const normalized = selectionInfo.text.trim();
@@ -1609,6 +1615,7 @@ export default function DocumentEditor({
                   <TabIndentationPlugin />
                   <KeyboardShortcutPlugin onCommandK={handleCommandK} />
                   <ClipboardPlugin />
+                  <InactiveSelectionPlugin isChatFocused={isChatFocused} />
                   <ImagePlugin />
                   <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
                   <AutocompletePlugin enabled={false} />
@@ -1650,6 +1657,7 @@ export default function DocumentEditor({
           onRemoveSelectedImage={handleRemoveSelectedImage}
           onClearContextSnippets={handleClearContextSnippets}
           onClearEditorSelection={handleClearEditorSelection}
+          onChatFocusChange={handleChatFocusChange}
           isDiffModeActive={isDiffModeActive}
           onAcceptAllChanges={handleAcceptAllChanges}
           onRejectAllChanges={handleRejectAllChanges}
