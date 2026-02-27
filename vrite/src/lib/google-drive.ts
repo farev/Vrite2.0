@@ -22,7 +22,7 @@ export class GoogleDriveClient {
   private baseUrl = 'https://www.googleapis.com/drive/v3';
   private uploadUrl = 'https://www.googleapis.com/upload/drive/v3';
   private vwriteFolderId: string | null = null;
-  private readonly FOLDER_NAME = 'vwrite';
+  private readonly FOLDER_NAME = 'VibeWrite';
 
   constructor(accessToken: string) {
     this.accessToken = accessToken;
@@ -93,7 +93,7 @@ export class GoogleDriveClient {
         throw new Error('Folder ID is null in create response');
       }
       this.vwriteFolderId = folderId;
-      console.log('[GoogleDrive] Created vwrite folder:', this.vwriteFolderId);
+      console.log('[GoogleDrive] Created VibeWrite folder:', this.vwriteFolderId);
 
       return folderId;
     } catch (error) {

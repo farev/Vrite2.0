@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export type SignupModalTrigger =
@@ -45,90 +45,59 @@ export function AuthProvider({ children }: AuthProviderProps) {
     trigger: null,
   });
 
-  const supabase = createClient();
+  // Stable client reference — avoids creating a new instance on every render
+  const supabase = useMemo(() => createClient(), []);
 
-  const checkAuth = async () => {
+  const hideSignupModal = () => {
+    setSignupModalState({
+      isOpen: false,
+      trigger: null,
+    });
+  };
+
+  const createAnonymousSession = async () => {
+    console.log('[AuthContext] No session found, creating anonymous session...');
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
 
-      if (session) {
-        // Treat any non-anonymous session as authenticated
-        const anonymous = !!session.user.is_anonymous;
-        const authenticated = !anonymous;
-
-        setIsAuthenticated(authenticated);
-        setIsAnonymous(anonymous);
-        setSessionToken(session.access_token);
-        setUserId(session.user.id);
-
-        console.log('[AuthContext] Session found:', {
-          authenticated,
-          anonymous,
-          userId: session.user.id,
-        });
+      if (anonError) {
+        console.error('[AuthContext] Failed to create anonymous session:', anonError);
+        console.warn('[AuthContext] Troubleshooting steps:');
+        console.warn('[AuthContext]   1. Verify anonymous sign-ins are enabled in Supabase Dashboard');
+        console.warn('[AuthContext]   2. Wait 1-2 minutes for settings to propagate');
+        console.warn('[AuthContext]   3. Check Supabase logs for database errors');
+        console.warn('[AuthContext]   4. Verify RLS policies allow anonymous users');
+        setIsAuthenticated(false);
+        setIsAnonymous(false);
+        setSessionToken(null);
+        setUserId(null);
+        setIsLoading(false);
+      } else if (anonData.session) {
+        console.log('[AuthContext] Anonymous session created:', anonData.session.user.id);
+        // onAuthStateChange will fire and set state — no need to set here
       } else {
-        // No session - create anonymous session
-        console.log('[AuthContext] No session found, creating anonymous session...');
-
-        try {
-          const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
-
-          if (anonError) {
-            console.error('[AuthContext] Failed to create anonymous session:', anonError);
-            console.error('[AuthContext] Error details:', {
-              message: anonError.message,
-              status: anonError.status,
-              code: (anonError as any).code,
-            });
-            console.warn('[AuthContext] Falling back to localStorage-only mode');
-            console.warn('[AuthContext] Troubleshooting steps:');
-            console.warn('[AuthContext]   1. Verify anonymous sign-ins are enabled in Supabase Dashboard');
-            console.warn('[AuthContext]   2. Wait 1-2 minutes for settings to propagate');
-            console.warn('[AuthContext]   3. Check Supabase logs for database errors');
-            console.warn('[AuthContext]   4. Verify RLS policies allow anonymous users');
-
-            // Fall back to no session (localStorage-only mode)
-            setIsAuthenticated(false);
-            setIsAnonymous(false);
-            setSessionToken(null);
-            setUserId(null);
-          } else if (anonData.session) {
-            console.log('[AuthContext] Anonymous session created:', anonData.session.user.id);
-            setIsAuthenticated(false);
-            setIsAnonymous(true);
-            setSessionToken(anonData.session.access_token);
-            setUserId(anonData.session.user.id);
-          } else {
-            console.error('[AuthContext] No session data returned from anonymous sign-in');
-            setIsAuthenticated(false);
-            setIsAnonymous(false);
-            setSessionToken(null);
-            setUserId(null);
-          }
-        } catch (error) {
-          console.error('[AuthContext] Exception during anonymous sign-in:', error);
-          console.warn('[AuthContext] App will work in localStorage-only mode');
-          setIsAuthenticated(false);
-          setIsAnonymous(false);
-          setSessionToken(null);
-          setUserId(null);
-        }
+        console.error('[AuthContext] No session data returned from anonymous sign-in');
+        setIsAuthenticated(false);
+        setIsAnonymous(false);
+        setSessionToken(null);
+        setUserId(null);
+        setIsLoading(false);
       }
     } catch (error) {
-      console.error('[AuthContext] Error checking auth:', error);
+      console.error('[AuthContext] Exception during anonymous sign-in:', error);
       setIsAuthenticated(false);
       setIsAnonymous(false);
       setSessionToken(null);
       setUserId(null);
-    } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    checkAuth();
-
-    // Listen for auth changes
+    // onAuthStateChange is the sole source of truth for session state.
+    // It fires INITIAL_SESSION on mount with the current session read from cookies,
+    // avoiding the race condition where getSession() + signInAnonymously() would
+    // overwrite a valid OAuth session whose access token has just been refreshed.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
@@ -143,25 +112,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setSessionToken(session.access_token);
         setUserId(session.user.id);
 
-        // Close signup modal when user signs in with OAuth
         if (authenticated) {
           hideSignupModal();
         }
+
+        setIsLoading(false);
       } else {
         setIsAuthenticated(false);
         setIsAnonymous(false);
         setSessionToken(null);
         setUserId(null);
-      }
 
-      setIsLoading(false);
+        // Only create an anonymous session when we know for certain there is no
+        // existing session (INITIAL_SESSION with null = first-ever visit, or
+        // SIGNED_OUT = user explicitly signed out).
+        if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
+          createAnonymousSession();
+        } else {
+          setIsLoading(false);
+        }
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [supabase]);
 
   const showSignupModal = (trigger: SignupModalTrigger) => {
-    // Don't show modal if already authenticated
     if (isAuthenticated) {
       return;
     }
@@ -172,15 +148,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     });
   };
 
-  const hideSignupModal = () => {
-    setSignupModalState({
-      isOpen: false,
-      trigger: null,
-    });
-  };
-
   const refreshAuth = async () => {
-    await checkAuth();
+    // Re-fetch the current user from the server to ensure the session is fresh
+    await supabase.auth.getUser();
   };
 
   const value: AuthContextType = {

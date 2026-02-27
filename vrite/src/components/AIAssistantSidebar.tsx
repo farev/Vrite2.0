@@ -75,6 +75,21 @@ export interface ContextSnippet {
   text: string;
 }
 
+interface ContextImage {
+  filename: string;
+  data: string;
+  width: number;
+  height: number;
+}
+
+interface RenderedInputContext {
+  contextSnippets: ContextSnippet[];
+  selectedContextImages: ContextImage[];
+  attachmentNames: string[];
+  addedLinks: string[];
+  contextImages: ContextImage[];
+}
+
 interface AIAssistantSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
@@ -92,6 +107,7 @@ interface AIAssistantSidebarProps {
   onRemoveSelectedImage?: () => void;
   onClearContextSnippets?: () => void;
   onClearEditorSelection?: () => void;
+  onChatFocusChange?: (isFocused: boolean) => void;
 }
 
 // Scale image dimensions to reasonable display size while preserving aspect ratio
@@ -115,6 +131,8 @@ function scaleToDisplaySize(width: number, height: number): { width: number; hei
   };
 }
 
+const INPUT_CONTEXT_COLLAPSE_DURATION_MS = 240;
+
 export default function AIAssistantSidebar({
   isOpen,
   onToggle,
@@ -130,7 +148,8 @@ export default function AIAssistantSidebar({
   onRemoveContextSnippet,
   onRemoveSelectedImage,
   onClearContextSnippets,
-  onClearEditorSelection
+  onClearEditorSelection,
+  onChatFocusChange
 }: AIAssistantSidebarProps) {
   const { isAuthenticated, isAnonymous, sessionToken, showSignupModal } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
@@ -149,18 +168,18 @@ export default function AIAssistantSidebar({
   const [linkInputValue, setLinkInputValue] = useState('');
   const [attachmentNames, setAttachmentNames] = useState<string[]>([]);
   const [addedLinks, setAddedLinks] = useState<string[]>([]);
-
-  // Context images (with base64 data)
-  interface ContextImage {
-    filename: string;
-    data: string;  // base64
-    width: number;
-    height: number;
-  }
   const [contextImages, setContextImages] = useState<ContextImage[]>([]);
+  const [renderedInputContext, setRenderedInputContext] = useState<RenderedInputContext>({
+    contextSnippets,
+    selectedContextImages,
+    attachmentNames,
+    addedLinks,
+    contextImages,
+  });
 
   const hasTriggeredOnboardingRef = useRef(false);
   const onboardingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const inputContextCollapseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -724,6 +743,70 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
     setAddedLinks((prev) => prev.filter((item) => item !== link));
   };
 
+  const hasAnyInputContext =
+    contextSnippets.length > 0 ||
+    selectedContextImages.length > 0 ||
+    attachmentNames.length > 0 ||
+    addedLinks.length > 0 ||
+    contextImages.length > 0;
+
+  useEffect(() => {
+    if (hasAnyInputContext) {
+      if (inputContextCollapseTimerRef.current) {
+        clearTimeout(inputContextCollapseTimerRef.current);
+        inputContextCollapseTimerRef.current = null;
+      }
+      setRenderedInputContext({
+        contextSnippets,
+        selectedContextImages,
+        attachmentNames,
+        addedLinks,
+        contextImages,
+      });
+      return;
+    }
+
+    if (inputContextCollapseTimerRef.current) {
+      return;
+    }
+
+    inputContextCollapseTimerRef.current = setTimeout(() => {
+      setRenderedInputContext({
+        contextSnippets: [],
+        selectedContextImages: [],
+        attachmentNames: [],
+        addedLinks: [],
+        contextImages: [],
+      });
+      inputContextCollapseTimerRef.current = null;
+    }, INPUT_CONTEXT_COLLAPSE_DURATION_MS);
+  }, [
+    hasAnyInputContext,
+    contextSnippets,
+    selectedContextImages,
+    attachmentNames,
+    addedLinks,
+    contextImages,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (inputContextCollapseTimerRef.current) {
+        clearTimeout(inputContextCollapseTimerRef.current);
+      }
+    };
+  }, []);
+
+  const inputContextForRender = hasAnyInputContext
+    ? { contextSnippets, selectedContextImages, attachmentNames, addedLinks, contextImages }
+    : renderedInputContext;
+  const hasRenderedInputContext =
+    inputContextForRender.contextSnippets.length > 0 ||
+    inputContextForRender.selectedContextImages.length > 0 ||
+    inputContextForRender.attachmentNames.length > 0 ||
+    inputContextForRender.addedLinks.length > 0 ||
+    inputContextForRender.contextImages.length > 0;
+
   return (
     <div className="ai-sidebar-shell">
       <div className={`ai-sidebar ${isOpen ? 'ai-sidebar-open' : 'ai-sidebar-closed'}`}>
@@ -780,25 +863,25 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                     </div>
                   ) : (
                     <>
+                      {message.type === 'user' && message.images && message.images.length > 0 && (
+                        <div className="ai-message-image-preview">
+                          {message.images.map((img, idx) => (
+                            <img
+                              key={idx}
+                              src={img.data}
+                              alt={img.filename}
+                              className="ai-message-image-thumbnail"
+                            />
+                          ))}
+                        </div>
+                      )}
                       <div
                         className={
                           message.type === 'user'
-                            ? 'ai-message-text ml-5 !rounded-2xl !border !border-transparent !bg-slate-200 !px-3.5 !py-2.5 !text-slate-800 relative'
+                            ? 'ai-message-text !ml-auto !w-fit !max-w-[82%] !rounded-2xl !border !border-transparent !bg-slate-200 !px-3 !py-2 !text-slate-800'
                             : 'ai-message-text'
                         }
                       >
-                        {message.type === 'user' && message.images && message.images.length > 0 && (
-                          <div className="ai-message-image-preview">
-                            {message.images.map((img, idx) => (
-                              <img
-                                key={idx}
-                                src={img.data}
-                                alt={img.filename}
-                                className="ai-message-image-thumbnail"
-                              />
-                            ))}
-                          </div>
-                        )}
                         <FormattedMessageContent content={message.content} />
                       </div>
                       {message.type === 'assistant' && !message.isLoading && (
@@ -850,109 +933,135 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
           {/* Input */}
           <div className="ai-input-container">
             <div className="ai-input-shell">
-              {contextSnippets.length > 0 && (
-                <div className="ai-input-context">
-                  <div className="ai-context-chip-list">
-                    {contextSnippets.map((snippet) => (
-                      <div key={snippet.id} className="ai-context-chip ai-context-chip-selected">
-                        <span>{snippet.text}</span>
-                        <button
-                          type="button"
-                          className="ai-context-chip-remove"
-                          onClick={() => onRemoveContextSnippet?.(snippet.id)}
-                          aria-label="Clear selection"
-                        >
-                          <X size={14} />
-                        </button>
+              <div className={`ai-input-context-collapse ${hasAnyInputContext ? 'ai-input-context-collapse-open' : ''}`}>
+                <div className="ai-input-context-collapse-inner">
+                  {hasRenderedInputContext && (
+                    <div className="ai-input-context">
+                      <div className="ai-context-chip-list">
+                        {inputContextForRender.contextSnippets.map((snippet) => (
+                          <div
+                            key={snippet.id}
+                            className="ai-context-chip ai-context-chip-selected ai-context-chip-overlay-remove !inline-flex !w-fit !self-start !justify-start !gap-0 !rounded-full !px-2.5 !py-1.5"
+                            style={{ maxWidth: 'clamp(180px, 45%, 280px)' }}
+                          >
+                            <span
+                              title={snippet.text}
+                              className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap !leading-4"
+                            >
+                              {snippet.text}
+                            </span>
+                            <button
+                              type="button"
+                              className="ai-context-chip-remove"
+                              onClick={() => onRemoveContextSnippet?.(snippet.id)}
+                              aria-label="Clear selection"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        {inputContextForRender.selectedContextImages.map((img, idx) => (
+                          <div
+                            key={`selected-${idx}`}
+                            className="ai-context-chip ai-context-chip-selected ai-context-chip-overlay-remove ai-image-chip !inline-flex !w-fit !self-start !justify-start !gap-1.5 !rounded-full !pl-1.5 !pr-2.5 !py-1.5"
+                            style={{ maxWidth: 'clamp(180px, 45%, 280px)' }}
+                          >
+                            <img src={img.data} alt={img.filename} className="ai-context-image-preview" />
+                            <span
+                              title={img.filename}
+                              className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap !leading-4"
+                            >
+                              {img.filename || 'Selected image'}
+                            </span>
+                            <button
+                              type="button"
+                              className="ai-context-chip-remove"
+                              onClick={() => onRemoveSelectedImage?.()}
+                              aria-label="Remove selected image"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        {inputContextForRender.attachmentNames.map((name) => (
+                          <div
+                            key={name}
+                            className="ai-context-chip ai-context-chip-selected ai-context-chip-overlay-remove ai-attachment-chip !inline-flex !w-fit !self-start !justify-start !gap-0 !rounded-full !px-2.5 !py-1.5"
+                            style={{ maxWidth: 'clamp(180px, 45%, 280px)' }}
+                          >
+                            <span
+                              title={name}
+                              className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap !leading-4"
+                            >
+                              {name}
+                            </span>
+                            <button
+                              type="button"
+                              className="ai-context-chip-remove"
+                              onClick={() => removeAttachmentName(name)}
+                              aria-label="Remove attachment"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        {inputContextForRender.addedLinks.map((link) => (
+                          <div
+                            key={link}
+                            className="ai-context-chip ai-context-chip-selected ai-context-chip-overlay-remove ai-link-chip !inline-flex !w-fit !self-start !justify-start !gap-0 !rounded-full !px-2.5 !py-1.5"
+                            style={{ maxWidth: 'clamp(180px, 45%, 280px)' }}
+                          >
+                            <span
+                              title={link}
+                              className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap !leading-4"
+                            >
+                              {link}
+                            </span>
+                            <button
+                              type="button"
+                              className="ai-context-chip-remove"
+                              onClick={() => removeAddedLink(link)}
+                              aria-label="Remove link"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        {inputContextForRender.contextImages.map((img) => (
+                          <div
+                            key={img.filename}
+                            className="ai-context-chip ai-context-chip-selected ai-context-chip-overlay-remove ai-image-chip !inline-flex !w-fit !self-start !justify-start !gap-1.5 !rounded-full !pl-1.5 !pr-2.5 !py-1.5"
+                            style={{ maxWidth: 'clamp(180px, 45%, 280px)' }}
+                          >
+                            <img src={img.data} alt={img.filename} className="ai-context-image-preview" />
+                            <span
+                              title={img.filename}
+                              className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap !leading-4"
+                            >
+                              {img.filename}
+                            </span>
+                            <button
+                              type="button"
+                              className="ai-context-chip-remove"
+                              onClick={() => setContextImages(prev => prev.filter(i => i.filename !== img.filename))}
+                              aria-label="Remove image"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
                 </div>
-              )}
-              {selectedContextImages.length > 0 && (
-                <div className="ai-input-context">
-                  <div className="ai-context-chip-list">
-                    {selectedContextImages.map((img, idx) => (
-                      <div key={`selected-${idx}`} className="ai-context-chip ai-context-chip-selected ai-image-chip">
-                        <img src={img.data} alt={img.filename} className="ai-context-image-preview" />
-                        <span>Selected image</span>
-                        <button
-                          type="button"
-                          className="ai-context-chip-remove"
-                          onClick={() => onRemoveSelectedImage?.()}
-                          aria-label="Remove selected image"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {attachmentNames.length > 0 && (
-                <div className="ai-input-context">
-                  <div className="ai-context-chip-list">
-                    {attachmentNames.map((name) => (
-                      <div key={name} className="ai-context-chip ai-context-chip-selected ai-attachment-chip">
-                        <span>{name}</span>
-                        <button
-                          type="button"
-                          className="ai-context-chip-remove"
-                          onClick={() => removeAttachmentName(name)}
-                          aria-label="Remove attachment"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {addedLinks.length > 0 && (
-                <div className="ai-input-context">
-                  <div className="ai-context-chip-list">
-                    {addedLinks.map((link) => (
-                      <div key={link} className="ai-context-chip ai-context-chip-selected ai-link-chip">
-                        <span>{link}</span>
-                        <button
-                          type="button"
-                          className="ai-context-chip-remove"
-                          onClick={() => removeAddedLink(link)}
-                          aria-label="Remove link"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {contextImages.length > 0 && (
-                <div className="ai-input-context">
-                  <div className="ai-context-chip-list">
-                    {contextImages.map((img) => (
-                      <div key={img.filename} className="ai-context-chip ai-context-chip-selected ai-image-chip">
-                        <img src={img.data} alt={img.filename} className="ai-context-image-preview" />
-                        <span>{img.filename}</span>
-                        <button
-                          type="button"
-                          className="ai-context-chip-remove"
-                          onClick={() => setContextImages(prev => prev.filter(i => i.filename !== img.filename))}
-                          aria-label="Remove image"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              </div>
               <textarea
                 ref={inputRef}
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                onFocus={() => onClearEditorSelection?.()}
+                onFocus={() => onChatFocusChange?.(true)}
+                onBlur={() => onChatFocusChange?.(false)}
                 placeholder="Ask me anything about your document..."
                 className="ai-input"
                 rows={2}
