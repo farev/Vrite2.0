@@ -27,9 +27,7 @@ export function SimpleFooterEditor({
   onEditorBlur,
   onEditingChange,
 }: SimpleFooterEditorProps) {
-  const defaultPlaceholder = footerShowPageNumber
-    ? `Page ${pageCount}`
-    : 'Double-click to edit footer';
+  const defaultPlaceholder = '';
 
   return (
     <div className="document-footer-editor">

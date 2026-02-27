@@ -493,8 +493,8 @@ export default function DocumentEditor({
   const [headerFooterSettings, setHeaderFooterSettings] = useState({
     headerEnabled: false,
     headerEditorState: null as string | null,
-    footerEnabled: true,
-    footerShowPageNumber: true,
+    footerEnabled: false,
+    footerShowPageNumber: false,
     footerEditorState: null as string | null,
   });
   const [activeHFEditor, setActiveHFEditor] = useState<LexicalEditor | null>(null);
@@ -1612,7 +1612,7 @@ export default function DocumentEditor({
                 style={editorWrapperStyle}
                 data-page-size={pageSize}
               >
-                  <div className="document-page">
+                  <div className="document-page" style={{ minHeight: `${pageStackHeight}px` }}>
                     {/* Header - for page 1 */}
                     <SimpleHeaderEditor
                       documentTitle={documentTitle}

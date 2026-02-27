@@ -693,8 +693,9 @@ body {
   height: 96px; /* Matches margin height (1 inch) */
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: flex-start;
   padding: 0 72pt;
+  padding-top: 48px; /* 0.5 inch from top of page — matches page-break headers */
   cursor: default;
   font-size: 10pt;
   font-family: 'Times New Roman', serif;
@@ -707,8 +708,9 @@ body {
   height: 96px; /* Matches margin height (1 inch) */
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: flex-end;
   padding: 0 72pt;
+  padding-bottom: 48px; /* 0.5 inch from bottom of page — matches page-break footers */
   cursor: default;
   font-size: 10pt;
   font-family: 'Times New Roman', serif;
@@ -784,6 +786,11 @@ body {
   box-sizing: border-box;
 }
 
+/* Remove top margin from first content element so text starts flush with header boundary */
+.document-content-editable > *:first-child {
+  margin-top: 0;
+}
+
 /* Page break container - holds the full page break structure */
 .page-break-container {
   display: flex;
@@ -826,8 +833,9 @@ body {
   border-top: none; /* No border by default */
   border-bottom: none;
   padding: 0;
-  padding-top: 48px; /* 0.5 inch from top of footer area */
+  padding-bottom: 48px; /* 0.5 inch from bottom of page */
   cursor: default;
+  overflow: visible;
 }
 
 .page-break-footer.editing {
@@ -860,6 +868,7 @@ body {
   padding: 0;
   padding-top: 48px; /* 0.5 inch from top of header area */
   cursor: default;
+  overflow: visible;
 }
 
 .page-break-header.editing {
@@ -3588,7 +3597,7 @@ body {
 
 .hf-rich-editor-wrapper .hf-editor-root {
   position: relative;
-  font-size: 10pt;
+  font-size: 12pt;
   font-family: 'Times New Roman', serif;
   color: #9ca3af;
   text-align: left;
@@ -3602,7 +3611,7 @@ body {
 .hf-rich-editor-wrapper .hf-content-editable {
   outline: none;
   min-height: 1.4em;
-  font-size: 10pt;
+  font-size: 12pt;
   font-family: 'Times New Roman', serif;
   color: #9ca3af;
 }
@@ -3626,7 +3635,7 @@ body {
 /* Placeholder styling */
 .hf-placeholder {
   color: #c0c5cc;
-  font-size: 10pt;
+  font-size: 12pt;
   font-family: 'Times New Roman', serif;
   pointer-events: none;
   position: absolute;
@@ -3639,22 +3648,27 @@ body {
 .hf-separator {
   position: relative;
   margin-top: 6px;
+  height: 18px;
   display: flex;
   align-items: center;
-  gap: 0;
-  /* Break out of parent padding to span full document width */
-  margin-left: -72pt;
-  margin-right: -72pt;
-  padding-left: 72pt;
 }
 
 .hf-separator-line {
-  flex: 1;
+  position: absolute;
+  left: -72pt;
+  right: -72pt;
+  top: 50%;
   height: 1px;
   background: #4285f4;
 }
 
 .hf-badge {
+  position: absolute;
+  left: calc(-72pt + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  background: white;
   font-size: 9px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: #4285f4;
@@ -3663,8 +3677,6 @@ body {
   border-radius: 2px;
   white-space: nowrap;
   line-height: 1.4;
-  margin-right: 8px;
-  flex-shrink: 0;
 }
 
 /* Body content dimming when editing header/footer */
@@ -3676,7 +3688,7 @@ body {
 
 /* Document header editor - full-width, left-aligned (Google Docs style) */
 .document-header-editor .hf-rich-editor-wrapper {
-  padding-bottom: 4px;
+  padding-bottom: 0;
 }
 
 /* Document footer editor - full-width, left-aligned */
@@ -3685,20 +3697,25 @@ body {
 }
 
 /* Page break header/footer adjustments */
+/* No horizontal padding — content editable already provides 72pt left/right */
 .page-break-footer .hf-rich-editor-wrapper {
-  padding: 0 72pt;
+  padding: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  width: 100%;
   height: 100%;
+  overflow: visible;
 }
 
 .page-break-header .hf-rich-editor-wrapper {
-  padding: 0 72pt;
+  padding: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  width: 100%;
   height: 100%;
+  overflow: visible;
 }
 
 /* Editing indicators for page break areas */

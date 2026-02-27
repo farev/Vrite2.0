@@ -55,8 +55,8 @@ function PageBreakComponent({
   onEditorFocus?: (editor: LexicalEditor) => void;
   onEditorBlur?: () => void;
 }) {
-  const footerPlaceholder = showPageNumbers ? `Page ${currentPage}` : 'Double-click to edit footer';
-  const headerPlaceholder = 'Double-click to edit header';
+  const footerPlaceholder = '';
+  const headerPlaceholder = '';
 
   return (
     <div

@@ -286,8 +286,8 @@ export function HeaderFooterRichEditor({
             onEditorBlur={handleEditorBlur}
           />
         </LexicalComposer>
-        {!isEditing && !initialState && (
-          <div className="hf-placeholder">{placeholder || 'Double-click to edit'}</div>
+        {!isEditing && !initialState && placeholder && (
+          <div className="hf-placeholder">{placeholder}</div>
         )}
       </div>
 

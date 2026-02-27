@@ -157,8 +157,9 @@ export default function PaginationPlugin({
           // Calculate how much space is left on the current page
           const spaceRemaining = currentPageEnd - lastBlockBottom;
 
-          // Calculate break height: remaining space + bottom margin + footer + gap + header + top margin
-          const breakHeight = spaceRemaining + margins.bottom + footerHeight + pageGap + headerHeight + margins.top;
+          // Calculate break height: remaining space + footer + gap + header
+          // Note: margins are NOT added because footerHeight and headerHeight already represent the margin areas
+          const breakHeight = spaceRemaining + footerHeight + pageGap + headerHeight;
 
           breaks.push({
             key: block.key,
@@ -179,7 +180,8 @@ export default function PaginationPlugin({
 
           // If block doesn't fit in remaining space, break before it
           if (spaceOnCurrentPage < block.height) {
-            const breakHeight = spaceOnCurrentPage + margins.bottom + footerHeight + pageGap + headerHeight + margins.top;
+            // Note: margins are NOT added because footerHeight and headerHeight already represent the margin areas
+            const breakHeight = spaceOnCurrentPage + footerHeight + pageGap + headerHeight;
 
             breaks.push({
               key: block.key,

@@ -29,7 +29,7 @@ export function SimpleHeaderEditor({
     <div className="document-header-editor">
       <HeaderFooterRichEditor
         initialState={headerEditorState}
-        placeholder={documentTitle || 'Double-click to edit header'}
+        placeholder=""
         label="Header"
         onStateChange={onHeaderChange}
         onEditorFocus={onEditorFocus}
