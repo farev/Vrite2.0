@@ -10,7 +10,8 @@ import type {
 } from 'lexical';
 import { DecoratorNode } from 'lexical';
 import { Check, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { computeWordDiff, groupIntoPhraseChunks } from '@/lib/wordDiff';
 
 export type DiffType = 'addition' | 'deletion';
 
@@ -43,6 +44,7 @@ function DiffComponent({
   nodeKey,
   onAccept,
   onReject,
+  onResolveWithText,
   originalText,
   isBold,
   isItalic,
@@ -56,6 +58,7 @@ function DiffComponent({
   nodeKey: NodeKey;
   onAccept: (nodeKey: NodeKey) => void;
   onReject: (nodeKey: NodeKey) => void;
+  onResolveWithText: (nodeKey: NodeKey, text: string) => void;
   originalText?: string;
   isBold?: boolean;
   isItalic?: boolean;
@@ -127,6 +130,48 @@ function DiffComponent({
       setRenderError(err instanceof Error ? err.message : 'Invalid equation');
     }
   }, [katex, equationData]);
+
+  // Phrase chunks for replacement diffs (computed once from stable props)
+  const chunks = useMemo(() => {
+    if (!isReplacement || !originalText) return [];
+    const segments = computeWordDiff(originalText, text);
+    return groupIntoPhraseChunks(segments);
+  }, [isReplacement, originalText, text]);
+
+  // Track which change chunks have been individually resolved
+  const [chunkResolutions, setChunkResolutions] = useState<Record<number, 'accepted' | 'rejected'>>({});
+
+  // Track which phrase chunk the mouse is currently hovering over
+  const [hoveredChunkIdx, setHoveredChunkIdx] = useState<number | null>(null);
+  // Timer ref to delay hiding so the mouse can travel from phrase to buttons
+  const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showChunkButtons = useCallback((i: number) => {
+    if (hoverLeaveTimerRef.current) clearTimeout(hoverLeaveTimerRef.current);
+    setHoveredChunkIdx(i);
+  }, []);
+
+  const scheduleHideButtons = useCallback(() => {
+    hoverLeaveTimerRef.current = setTimeout(() => setHoveredChunkIdx(null), 200);
+  }, []);
+
+  const resolveChunk = useCallback((chunkIdx: number, decision: 'accepted' | 'rejected') => {
+    setChunkResolutions(prev => {
+      const next = { ...prev, [chunkIdx]: decision };
+      const allResolved = chunks.every((chunk, idx) =>
+        chunk.kind === 'equal' || next[idx] !== undefined
+      );
+      if (allResolved) {
+        const resolvedText = chunks.map((chunk, idx) => {
+          if (chunk.kind === 'equal') return chunk.text;
+          return next[idx] === 'accepted' ? chunk.inserted : chunk.deleted;
+        }).join('');
+        // Defer so state update completes before removing the node
+        Promise.resolve().then(() => onResolveWithText(nodeKey, resolvedText));
+      }
+      return next;
+    });
+  }, [chunks, nodeKey, onResolveWithText]);
 
   // Render image diff
   if (imageData) {
@@ -232,13 +277,83 @@ function DiffComponent({
     );
   }
 
-  // Regular text diff
+  // Phrase-level diff for replacements (Grammarly-style grouped changes)
+  if (isReplacement) {
+    return (
+      <span className="diff-word-container">
+        <span className="diff-word-text">
+        {chunks.map((chunk, i) => {
+          if (chunk.kind === 'equal') {
+            return <span key={i} style={textStyle}>{chunk.text}</span>;
+          }
+          const resolution = chunkResolutions[i];
+          if (resolution === 'accepted') {
+            return <span key={i} style={textStyle}>{chunk.inserted}</span>;
+          }
+          if (resolution === 'rejected') {
+            return <span key={i} style={textStyle}>{chunk.deleted}</span>;
+          }
+          // Pending: show delete + insert; hover reveals per-phrase accept/reject buttons
+          return (
+            <span
+              key={i}
+              className="diff-phrase-pending"
+              onMouseEnter={() => showChunkButtons(i)}
+              onMouseLeave={scheduleHideButtons}
+            >
+              {chunk.deleted && <span className="diff-word-delete">{chunk.deleted}</span>}
+              {chunk.inserted && <span className="diff-word-insert" style={textStyle}>{chunk.inserted}</span>}
+              {hoveredChunkIdx === i && (
+                <span
+                  className="diff-phrase-actions"
+                  onMouseEnter={() => showChunkButtons(i)}
+                  onMouseLeave={scheduleHideButtons}
+                >
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); resolveChunk(i, 'rejected'); }}
+                    className="diff-inline-btn diff-inline-reject"
+                    title="Reject this change"
+                  >
+                    <X size={10} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); resolveChunk(i, 'accepted'); }}
+                    className="diff-inline-btn diff-inline-accept"
+                    title="Accept this change"
+                  >
+                    <Check size={10} />
+                  </button>
+                </span>
+              )}
+            </span>
+          );
+        })}
+        </span>
+        {/* Block-level accept/reject — accepts/rejects all remaining changes at once */}
+        <span className="diff-word-actions">
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReject(nodeKey); }}
+            className="diff-block-btn diff-block-reject"
+            title={rejectTitle}
+          >
+            Reject
+          </button>
+          <button
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAccept(nodeKey); }}
+            className="diff-block-btn diff-block-accept"
+            title={acceptTitle}
+          >
+            Accept
+          </button>
+        </span>
+      </span>
+    );
+  }
+
+  // Regular text diff (pure additions and deletions)
   return (
     <span className={classes}>
       <span className="diff-inline-body">
-        {isReplacement && (
-          <span className="diff-inline-original">{originalText}</span>
-        )}
         <span className="diff-inline-text" style={textStyle}>{text}</span>
       </span>
       <span className="diff-inline-actions">
@@ -288,9 +403,10 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
     showCaption: boolean;
   };
 
-  // Static callbacks for accept/reject - will be set by the plugin
+  // Static callbacks for accept/reject/resolve - will be set by the plugin
   static __onAccept: ((nodeKey: NodeKey) => void) | null = null;
   static __onReject: ((nodeKey: NodeKey) => void) | null = null;
+  static __onResolveWithText: ((nodeKey: NodeKey, text: string) => void) | null = null;
 
   static getType(): string {
     return 'diff';
@@ -313,10 +429,12 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
 
   static setCallbacks(
     onAccept: (nodeKey: NodeKey) => void,
-    onReject: (nodeKey: NodeKey) => void
+    onReject: (nodeKey: NodeKey) => void,
+    onResolveWithText?: (nodeKey: NodeKey, text: string) => void
   ) {
     DiffNode.__onAccept = onAccept;
     DiffNode.__onReject = onReject;
+    if (onResolveWithText) DiffNode.__onResolveWithText = onResolveWithText;
   }
 
   constructor(
@@ -422,6 +540,7 @@ export class DiffNode extends DecoratorNode<JSX.Element> {
         imageData={this.__imageData}
         onAccept={DiffNode.__onAccept || (() => {})}
         onReject={DiffNode.__onReject || (() => {})}
+        onResolveWithText={DiffNode.__onResolveWithText || (() => {})}
       />
     );
   }

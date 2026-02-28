@@ -2847,8 +2847,8 @@ body {
 .diff-inline-deletion {
   background-color: transparent;
   text-decoration: line-through;
-  text-decoration-color: #df2a2a;
-  color: #b91c1c;
+  text-decoration-color: #6b7280;
+  color: #4b5563;
 }
 
 .diff-inline-replacement {
@@ -2862,12 +2862,11 @@ body {
 }
 
 .diff-inline-deletion .diff-inline-body {
-  background-color: rgba(239, 68, 68, 0.2);
+  background-color: rgba(107, 114, 128, 0.1);
 }
 
 .diff-inline-replacement .diff-inline-body {
-  background-color: rgba(59, 130, 246, 0.18);
-  border-bottom: 2px solid #2563eb;
+  background-color: rgba(22, 101, 52, 0.1);
 }
 
 .diff-inline-text {
@@ -2877,8 +2876,8 @@ body {
 
 .diff-inline-original {
   text-decoration: line-through;
-  text-decoration-color: #df2a2a;
-  color: #b91c1c;
+  text-decoration-color: #6b7280;
+  color: #4b5563;
   opacity: 0.85;
 }
 
@@ -2915,21 +2914,120 @@ body {
 .diff-inline-accept {
   background: #21974e;
   color: white;
+  border: 1px solid #21974e;
 }
 
 .diff-inline-accept:hover {
   background: #1c8445;
+  border-color: #1c8445;
   transform: scale(1.1);
 }
 
 .diff-inline-reject {
-  background: #df2a2a;
-  color: white;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
 }
 
 .diff-inline-reject:hover {
-  background: #c62222;
+  background: #e5e7eb;
+  border-color: #9ca3af;
   transform: scale(1.1);
+}
+
+/* Block-level text buttons (Accept / Reject) — matches diff-mode-btn font */
+.diff-block-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 5px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid;
+}
+
+.diff-block-accept {
+  background: #21974e;
+  color: white;
+  border-color: #21974e;
+}
+
+.diff-block-accept:hover {
+  background: #1c8445;
+  border-color: #1c8445;
+}
+
+.diff-block-reject {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+.diff-block-reject:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+/* Phrase-level diff spans (Grammarly-style grouped changes) */
+.diff-word-container {
+  display: block;
+}
+
+.diff-word-text {
+  display: inline;
+}
+
+.diff-word-delete {
+  text-decoration: line-through;
+  text-decoration-color: #6b7280;
+  color: #4b5563;
+  background-color: rgba(75, 85, 99, 0.12);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.diff-word-insert {
+  color: #166534;
+  font-weight: 600;
+  background-color: rgba(22, 101, 52, 0.1);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* Pending phrase change wrapper — inline so it doesn't disrupt text flow */
+.diff-phrase-pending {
+  display: inline;
+  position: relative;
+  cursor: default;
+}
+
+/* Mini per-phrase accept/reject buttons — absolutely positioned bottom-right of phrase */
+.diff-phrase-actions {
+  position: absolute;
+  top: calc(100% + 1px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  z-index: 200;
+  white-space: nowrap;
+}
+
+/* Block-level accept/reject buttons — right-aligned below the changed text */
+.diff-word-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.document-editor-container:not(.diff-mode-active) .diff-word-actions {
+  display: none;
 }
 
 /* Diff mode indicator banner */
@@ -2992,13 +3090,13 @@ body {
 }
 
 .diff-mode-reject-all {
-  background: white;
+  background: #f3f4f6;
   color: #374151;
   border-color: #d1d5db;
 }
 
 .diff-mode-reject-all:hover {
-  background: #f9fafb;
+  background: #e5e7eb;
   border-color: #9ca3af;
 }
 

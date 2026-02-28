@@ -187,10 +187,29 @@ export default function DiffPlugin({
     [editor, checkAllResolved]
   );
 
+  // Handle resolving a diff node with a custom (partially-accepted) text
+  const handleResolveWithText = useCallback(
+    (nodeKey: NodeKey, resolvedText: string) => {
+      editor.update(() => {
+        const node = $getNodeByKey(nodeKey);
+        if ($isDiffNode(node)) {
+          const nodeData = node.exportJSON();
+          const textNode = $createTextNode(resolvedText);
+          if (nodeData.isBold) textNode.toggleFormat('bold');
+          if (nodeData.isItalic) textNode.toggleFormat('italic');
+          node.replace(textNode);
+        }
+        checkAllResolved();
+      });
+      onAnyAccepted?.();
+    },
+    [editor, checkAllResolved, onAnyAccepted]
+  );
+
   // Set up callbacks on the DiffNode class
   useEffect(() => {
-    DiffNode.setCallbacks(handleAccept, handleReject);
-  }, [handleAccept, handleReject]);
+    DiffNode.setCallbacks(handleAccept, handleReject, handleResolveWithText);
+  }, [handleAccept, handleReject, handleResolveWithText]);
 
   // Apply changes when received
   useEffect(() => {
