@@ -13,6 +13,7 @@ export interface DocumentData {
   title: string;
   editorState: string; // Lexical editor state as JSON string (required)
   lastModified: number;
+  _drivePermissionsFallback?: boolean; // true when saved to Supabase due to missing Drive scopes
 }
 
 const AUTO_SAVE_INTERVAL = 30000; // 30 seconds in milliseconds
@@ -59,6 +60,19 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
       lastModified: new Date(file.modifiedTime).getTime(),
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isPermissionError =
+      message.includes('403') ||
+      message.includes('PERMISSION_DENIED') ||
+      message.includes('insufficientPermissions') ||
+      message.includes('Insufficient Permission');
+
+    if (isPermissionError) {
+      console.warn('[Storage] Drive permissions missing, falling back to Supabase');
+      const saved = await supabaseStorage.saveDocumentToSupabase(data);
+      return { ...saved, _drivePermissionsFallback: true };
+    }
+
     console.error('[Storage] Save to Google Drive failed:', error);
     throw error;
   }
@@ -257,6 +271,32 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
 }
 
 export { AUTO_SAVE_INTERVAL };
+
+/**
+ * Probe whether the current session has Google Drive access.
+ * Returns true if Drive is accessible (or user has no provider token),
+ * false if permissions are missing (403/PERMISSION_DENIED).
+ */
+export async function checkDrivePermissions(): Promise<boolean> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session?.provider_token) return true; // No Drive expected
+
+  try {
+    const driveClient = new GoogleDriveClient(session.provider_token);
+    await driveClient.listDocuments();
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isPermissionError =
+      message.includes('403') ||
+      message.includes('PERMISSION_DENIED') ||
+      message.includes('insufficientPermissions') ||
+      message.includes('Insufficient Permission');
+    return !isPermissionError;
+  }
+}
 
 /**
  * Check if user is authenticated with a valid session

@@ -72,7 +72,9 @@ import {
   saveTemporaryDocument,
   updateTemporaryDocument,
   loadTemporaryDocument,
+  checkDrivePermissions,
 } from '../lib/storage';
+import DrivePermissionsToast from './DrivePermissionsToast';
 import {
   serializeLexicalToSimplified,
   type SimplifiedDocument,
@@ -499,6 +501,7 @@ export default function DocumentEditor({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [showDrivePermissionsToast, setShowDrivePermissionsToast] = useState(false);
   const isDocumentEmpty = documentContent.trim().length === 0;
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
@@ -722,6 +725,14 @@ export default function DocumentEditor({
     }
   }, [documentId, initialDocumentId]);
   
+  // Probe Drive permissions on document open
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    checkDrivePermissions().then(hasPermissions => {
+      if (!hasPermissions) setShowDrivePermissionsToast(true);
+    });
+  }, [isAuthenticated]);
+
   // Detect title changes
   useEffect(() => {
     if (previousTitle && previousTitle !== documentTitle) {
@@ -894,6 +905,10 @@ export default function DocumentEditor({
       onLastSavedChange(savedDoc.lastModified);
       setHasUnsavedChanges(false); // Clear unsaved changes flag after successful save
 
+      if (savedDoc._drivePermissionsFallback) {
+        setShowDrivePermissionsToast(true);
+      }
+
       // Show signup modal for anonymous users on manual save only (not auto-save)
       if (isAnonymous && isManualTrigger) {
         console.log('[Editor] Anonymous user manual save - showing signup modal');
@@ -908,13 +923,16 @@ export default function DocumentEditor({
       if (errorMessage.includes('Storage quota exceeded')) {
         // Show storage full modal
         showSignupModal('storage-full');
-      } else if (errorMessage.includes('access not available') || errorMessage.includes('provider access token')) {
-        alert(
-          '❌ Cannot Save Document\n\n' +
-          'Your session does not have access to Google Drive/OneDrive.\n\n' +
-          'Please log out and log in again to grant storage permissions.\n\n' +
-          'Make sure the OAuth provider is properly configured in Supabase.'
-        );
+      } else if (
+        errorMessage.includes('403') ||
+        errorMessage.includes('PERMISSION_DENIED') ||
+        errorMessage.includes('insufficientPermissions') ||
+        errorMessage.includes('Insufficient Permission') ||
+        errorMessage.includes('access not available') ||
+        errorMessage.includes('provider access token')
+      ) {
+        // Google Drive permissions not granted — prompt user to re-authenticate
+        showSignupModal('permissions-missing');
       } else {
         alert(`Failed to save document: ${errorMessage}\n\nPlease check your connection and try again.`);
       }
@@ -1710,6 +1728,16 @@ export default function DocumentEditor({
         onClose={() => setIsImageModalOpen(false)}
         onInsert={handleInsertImage}
       />
+
+      {showDrivePermissionsToast && (
+        <DrivePermissionsToast
+          onEnablePermissions={() => {
+            setShowDrivePermissionsToast(false);
+            showSignupModal('permissions-missing');
+          }}
+          onDismiss={() => setShowDrivePermissionsToast(false)}
+        />
+      )}
     </div>
   );
 }
