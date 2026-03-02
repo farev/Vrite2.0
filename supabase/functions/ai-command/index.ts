@@ -635,7 +635,7 @@ async function getSummaryAfterEdit(
             content: `Instruction: "${instruction.slice(0, 300)}"\n\nChanges made:\n${changeDetails}`,
           },
         ],
-        max_completion_tokens: 500,
+        max_completion_tokens: 750,
         reasoning_effort: 'minimal',
       }),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),

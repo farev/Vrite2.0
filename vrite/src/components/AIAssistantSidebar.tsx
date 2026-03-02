@@ -34,7 +34,7 @@ interface Message {
 // Helper component to format message content with special styling for tool usage
 function FormattedMessageContent({ content }: { content: string }) {
   // Split content by tool usage and search indicator patterns
-  const parts = content.split(/(Using \w+[\w_-]* tool\.\.\.|Edited document|Searching the web\.\.\.|Found results)/g);
+  const parts = content.split(/(Using \w+[\w_-]* tool\.\.\.|Edited document|Found results)/g);
 
   return (
     <>
@@ -48,18 +48,9 @@ function FormattedMessageContent({ content }: { content: string }) {
           );
         }
 
-        if (part === 'Searching the web...') {
-          return (
-            <span key={index} className="ai-tool-searching">
-              <Globe size={14} className="ai-searching-spinner" />
-              Searching the web...
-            </span>
-          );
-        }
-
         if (part === 'Found results') {
           return (
-            <span key={index} className="ai-tool-searched">
+            <span key={index} className="ai-tool-usage">
               <Globe size={14} />
               Found results
             </span>
@@ -71,10 +62,12 @@ function FormattedMessageContent({ content }: { content: string }) {
           const toolName = toolMatch[1];
           return (
             <span key={index} className="ai-tool-usage">
-              {toolName === 'edit_document' && (
+              {toolName === 'edit_document' ? (
                 <Pencil size={14} />
-              )}
-              Using <strong>{toolName}</strong> tool...
+              ) : toolName === 'search' ? (
+                <Globe size={14} />
+              ) : null}
+              Using tool <strong>{toolName}</strong>...
             </span>
           );
         }
@@ -288,9 +281,9 @@ export default function AIAssistantSidebar({
                 break;
 
               case 'searching':
-                if (!accumulatedContent.includes('Searching the web...')) {
+                if (!accumulatedContent.includes('Using search tool...')) {
                   const prefix = accumulatedContent ? '\n\n' : '';
-                  accumulatedContent += prefix + 'Searching the web...';
+                  accumulatedContent += prefix + 'Using search tool...';
                   setMessages(prev => prev.map(msg =>
                     msg.id === messageId
                       ? { ...msg, content: accumulatedContent, isStreaming: true, isLoading: false }
@@ -300,7 +293,7 @@ export default function AIAssistantSidebar({
                 break;
 
               case 'search_complete':
-                accumulatedContent = accumulatedContent.replace('Searching the web...', 'Found results\n\n');
+                accumulatedContent = accumulatedContent.replace('Using search tool...', 'Found results\n\n');
                 setMessages(prev => prev.map(msg =>
                   msg.id === messageId
                     ? { ...msg, content: accumulatedContent, isStreaming: true, isLoading: false }
@@ -353,7 +346,7 @@ export default function AIAssistantSidebar({
                 const finalizedContent = accumulatedContent.replace(
                   /Using edit_document tool\.\.\./g,
                   'Edited document'
-                );
+                ).replace(/Searching the web\.\.\./g, 'Using search tool...');
 
                 // Apply all buffered changes with diff highlighting
                 if (changes.length > 0 && onApplyLexicalChanges) {
@@ -396,6 +389,7 @@ export default function AIAssistantSidebar({
         console.log('[AIAssistant] Stream ended without complete event, finalizing manually');
         const finalizedContent = accumulatedContent
           .replace(/Using edit_document tool\.\.\./g, 'Edited document')
+          .replace(/Searching the web\.\.\./g, 'Using search tool...')
           .trim() || 'Response received.';
         if (changes.length > 0 && onApplyLexicalChanges) {
           onApplyLexicalChanges(changes, [...contextImages, ...selectedContextImages]);
@@ -935,7 +929,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                     <div className="ai-message-streaming">
                       <div className="ai-message-text">
                         <FormattedMessageContent content={message.content} />
-                        <span className="ai-streaming-cursor">▊</span>
+                        <span className="ai-streaming-cursor">▍</span>
                       </div>
                     </div>
                   ) : (

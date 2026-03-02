@@ -1910,33 +1910,6 @@ body {
   font-size: 14px;
 }
 
-.ai-tool-searching {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  color: #3b82f6;
-  opacity: 0.9;
-}
-
-.ai-searching-spinner {
-  animation: ai-search-spin 1s linear infinite;
-}
-
-@keyframes ai-search-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.ai-tool-searched {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  color: #10b981;
-  opacity: 0.9;
-}
-
 .ai-message-sources {
   display: flex;
   flex-direction: column;
