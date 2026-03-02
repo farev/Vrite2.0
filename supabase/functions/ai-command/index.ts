@@ -1,6 +1,6 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { verifyAuth, checkRateLimit } from '../_shared/auth.ts';
-import { getOpenAIClient, createChatCompletion, createChatCompletionStream, type ChatMessage, type Tool, type ChatCompletionChunk } from '../_shared/openai.ts';
+import { getOpenAIClient, createChatCompletion, createChatCompletionStream, createResponseStream, type ChatMessage, type Tool, type ChatCompletionChunk, type ResponseTool, type ResponseInput } from '../_shared/openai.ts';
 
 // ============== Formatting Standards ==============
 
@@ -442,6 +442,24 @@ Format bitmask: 0=normal, 1=bold, 2=italic, 3=bold+italic, 4=underline`,
   },
 };
 
+// ============== Responses API Tools ==============
+
+const WEB_SEARCH_TOOL: ResponseTool = { type: 'web_search_preview' };
+
+// Responses API uses top-level name/description/parameters (not nested under .function)
+const EDIT_DOCUMENT_TOOL_RESPONSES: ResponseTool = {
+  type: 'function',
+  name: 'edit_document',
+  description: EDIT_DOCUMENT_TOOL.function.description,
+  parameters: EDIT_DOCUMENT_TOOL.function.parameters as Record<string, unknown>,
+};
+
+const WEB_SEARCH_SECTION = `
+
+WEB SEARCH CAPABILITY:
+Use web_search_preview when the instruction requires current facts, statistics, citations, recent events, or specific URLs. Do NOT search for tasks that only involve formatting, rewriting existing content, or structural changes.
+After searching, insert the researched content into the document using edit_document with proper inline citations [1], [2]. Include a Sources section with URLs at the end of inserted content.`;
+
 interface TextSegment {
   text: string;
   format: number;
@@ -508,19 +526,153 @@ interface CommandResponse {
   summary: string;
 }
 
-// ============== Streaming Helper Functions ==============
+// ============== Streaming Helper Functions (Responses API) ==============
 
-async function processOpenAIStream(
+function extractSources(responseOutput: any[]): Array<{ title: string; url: string }> {
+  const sources: Array<{ title: string; url: string }> = [];
+  for (const item of responseOutput || []) {
+    if (item.type === 'message') {
+      for (const content of item.content || []) {
+        if (content.type === 'output_text' && content.annotations) {
+          for (const annotation of content.annotations || []) {
+            if (annotation.type === 'url_citation' && annotation.url) {
+              sources.push({
+                title: annotation.title || annotation.url,
+                url: annotation.url,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+  // Deduplicate by URL
+  const seen = new Set<string>();
+  return sources.filter(s => {
+    if (seen.has(s.url)) return false;
+    seen.add(s.url);
+    return true;
+  });
+}
+
+async function getSummaryAfterResponsesAPI(
+  instruction: string,
+  changes: any[],
+  openaiConfig: any
+): Promise<string> {
+  if (changes.length === 0) return '';
+  try {
+    const summaryMessages: ChatMessage[] = [
+      {
+        role: 'system',
+        content: 'Briefly summarize the document edits that were performed. Return JSON with field "summary". Keep it to 1-2 sentences.',
+      },
+      {
+        role: 'user',
+        content: `Instruction: "${instruction.slice(0, 300)}". Applied ${changes.length} document change(s). Provide a brief summary.`,
+      },
+    ];
+
+    const summaryStream = await createChatCompletionStream(openaiConfig, {
+      model: 'gpt-5-mini',
+      messages: summaryMessages,
+      max_completion_tokens: 200,
+      reasoning_effort: 'minimal',
+      response_format: { type: 'json_object' },
+    });
+
+    const summaryReader = summaryStream.getReader();
+    const summaryDecoder = new TextDecoder();
+    let summaryBuffer = '';
+    let summaryContent = '';
+
+    while (true) {
+      const { done, value } = await summaryReader.read();
+      if (done) break;
+      summaryBuffer += summaryDecoder.decode(value, { stream: true });
+      const lines = summaryBuffer.split('\n');
+      summaryBuffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim() || !line.startsWith('data: ')) continue;
+        if (line.includes('[DONE]')) continue;
+        try {
+          const chunk: ChatCompletionChunk = JSON.parse(line.slice(6));
+          summaryContent += chunk.choices?.[0]?.delta?.content || '';
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    const result = JSON.parse(summaryContent || '{}');
+    return result.summary || 'Changes applied.';
+  } catch (e) {
+    console.error('[ai-command] Summary error:', e);
+    return 'Changes applied.';
+  }
+}
+
+async function getSummaryAfterEdit(
+  instruction: string,
+  changes: any[],
+  openaiConfig: any
+): Promise<string> {
+  if (changes.length === 0) return '';
+  console.log('[ai-command] Generating edit summary for', changes.length, 'changes...');
+  try {
+    const changeDetails = changes.slice(0, 5).map((c, i) =>
+      `${i + 1}. [${c.type}] ${JSON.stringify(c).slice(0, 200)}`
+    ).join('\n');
+
+    const result = await Promise.race([
+      createChatCompletion(openaiConfig, {
+        model: 'gpt-5-nano',
+        messages: [
+          {
+            role: 'system',
+            content: 'In one sentence, describe what you changed in the document. Use first person past tense (e.g. "I added...", "I updated...") and be specific about the actual content.',
+          },
+          {
+            role: 'user',
+            content: `Instruction: "${instruction.slice(0, 300)}"\n\nChanges made:\n${changeDetails}`,
+          },
+        ],
+        max_completion_tokens: 500,
+        reasoning_effort: 'minimal',
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    ]);
+    if (!result) {
+      console.warn('[ai-command] Summary timed out, using fallback');
+      return '';
+    }
+    const summary = (result as any).choices?.[0]?.message?.content?.trim() || '';
+    console.log('[ai-command] Summary generated:', summary);
+    return summary;
+  } catch (e) {
+    console.error('[ai-command] Summary error:', e);
+    return '';
+  }
+}
+
+async function processResponsesStream(
   openaiStream: ReadableStream<Uint8Array>,
   writer: WritableStreamDefaultWriter,
-  messages: ChatMessage[],
+  instruction: string,
   openaiConfig: any
 ) {
   const reader = openaiStream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let accumulatedToolCalls: any[] = [];
-  let toolCallsMap = new Map<number, any>();
+  let pendingEventType = '';
+
+  // State tracking
+  let functionArgs = '';
+  let functionName = '';
+  let changes: any[] = [];
+  let hasEmittedChanges = false;
+  let responseCompleted = false;
+  let searchingEmitted = false;
+
+  const encode = (data: any) => new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 
   try {
     while (true) {
@@ -532,175 +684,99 @@ async function processOpenAIStream(
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (!line.trim() || !line.startsWith('data: ')) continue;
-        if (line.includes('[DONE]')) continue;
+        const trimmed = line.trim();
 
+        if (trimmed.startsWith('event: ')) {
+          pendingEventType = trimmed.slice(7).trim();
+          continue;
+        }
+
+        if (!trimmed.startsWith('data: ')) continue;
+        if (trimmed.includes('[DONE]')) {
+          pendingEventType = '';
+          continue;
+        }
+
+        let data: any;
         try {
-          const jsonStr = line.slice(6);
-          const chunk: ChatCompletionChunk = JSON.parse(jsonStr);
-          const delta = chunk.choices[0]?.delta;
+          data = JSON.parse(trimmed.slice(6));
+        } catch (e) {
+          pendingEventType = '';
+          continue;
+        }
 
-          // Handle content tokens
-          if (delta?.content) {
-            const event = {
-              type: 'token',
-              content: delta.content,
-            };
-            await writer.write(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+        const eventType = pendingEventType || data.type || '';
+        pendingEventType = '';
+
+        console.log('[ai-command] Responses API event:', eventType);
+
+        if (eventType === 'response.output_text.delta') {
+          const delta = data.delta || '';
+          if (delta) {
+            await writer.write(encode({ type: 'token', content: delta }));
           }
-
-          // Accumulate tool calls
-          if (delta?.tool_calls) {
-            for (const toolCallDelta of delta.tool_calls) {
-              const index = toolCallDelta.index;
-
-              if (!toolCallsMap.has(index)) {
-                toolCallsMap.set(index, {
-                  id: toolCallDelta.id || '',
-                  type: toolCallDelta.type || 'function',
-                  function: {
-                    name: toolCallDelta.function?.name || '',
-                    arguments: toolCallDelta.function?.arguments || '',
-                  },
-                });
-              } else {
-                const existing = toolCallsMap.get(index);
-                if (toolCallDelta.id) existing.id = toolCallDelta.id;
-                if (toolCallDelta.type) existing.type = toolCallDelta.type;
-                if (toolCallDelta.function?.name) {
-                  existing.function.name = toolCallDelta.function.name;
-                }
-                if (toolCallDelta.function?.arguments) {
-                  existing.function.arguments += toolCallDelta.function.arguments;
-                }
-              }
+        } else if (
+          eventType === 'response.web_search_call.in_progress' ||
+          eventType === 'response.web_search_call.searching'
+        ) {
+          if (!searchingEmitted) {
+            searchingEmitted = true;
+            const query = data.query || data.search_query || '';
+            await writer.write(encode({ type: 'searching', query }));
+          }
+        } else if (eventType === 'response.web_search_call.completed') {
+          await writer.write(encode({ type: 'search_complete' }));
+        } else if (eventType === 'response.output_item.added') {
+          if (data.item?.type === 'function_call') {
+            functionName = data.item.name || '';
+            functionArgs = '';
+            console.log('[ai-command] Function call starting:', functionName);
+          }
+        } else if (eventType === 'response.function_call_arguments.delta') {
+          functionArgs += (data.delta || '');
+        } else if (eventType === 'response.function_call_arguments.done') {
+          const finalArgs = data.arguments || functionArgs;
+          if (functionName === 'edit_document') {
+            try {
+              const parsed = JSON.parse(finalArgs);
+              changes = parsed.changes || [];
+              console.log('[ai-command] Extracted', changes.length, 'changes from Responses API');
+            } catch (e) {
+              console.error('[ai-command] Failed to parse function args:', e);
             }
           }
-
-          // Check for finish
-          if (chunk.choices[0]?.finish_reason) {
-            console.log('[ai-command] Stream finished with reason:', chunk.choices[0].finish_reason);
+          if (changes.length > 0 && !hasEmittedChanges) {
+            hasEmittedChanges = true;
+            await writer.write(encode({ type: 'changes', changes }));
           }
-        } catch (parseError) {
-          console.error('[ai-command] Error parsing SSE line:', parseError);
-        }
-      }
-    }
-
-    // Convert tool calls map to array
-    accumulatedToolCalls = Array.from(toolCallsMap.values());
-
-    // Extract changes from tool calls
-    const changes: any[] = [];
-    for (const toolCall of accumulatedToolCalls) {
-      try {
-        const args = JSON.parse(toolCall.function.arguments);
-        if (toolCall.function.name === 'edit_document') {
-          changes.push(...(args.changes || []));
-        }
-      } catch (error) {
-        console.error('[ai-command] Error parsing tool call arguments:', error);
-      }
-    }
-
-    // Emit changes
-    if (changes.length > 0) {
-      const event = {
-        type: 'changes',
-        changes,
-      };
-      await writer.write(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
-      console.log('[ai-command] Emitted', changes.length, 'changes');
-    }
-
-    // Get summary only (reasoning was already provided upfront)
-    if (accumulatedToolCalls.length > 0) {
-      console.log('[ai-command] Getting summary with streaming...');
-
-      // Build messages for summary request
-      const summaryMessages = [...messages];
-      summaryMessages.push({
-        role: 'assistant',
-        content: '',
-        tool_calls: accumulatedToolCalls,
-      });
-
-      for (const toolCall of accumulatedToolCalls) {
-        summaryMessages.push({
-          role: 'tool',
-          content: 'Applied successfully',
-          tool_call_id: toolCall.id,
-        });
-      }
-
-      summaryMessages.push({
-        role: 'user',
-        content: 'Now provide a brief summary of what was done in JSON format with field: summary',
-      });
-
-      // Stream the summary response
-      const summaryStream = await createChatCompletionStream(openaiConfig, {
-        model: 'gpt-5-mini',
-        messages: summaryMessages,
-        max_completion_tokens: 300,
-        reasoning_effort: 'minimal',
-        response_format: { type: 'json_object' },
-      });
-
-      const summaryReader = summaryStream.getReader();
-      const summaryDecoder = new TextDecoder();
-      let summaryBuffer = '';
-      let summaryContent = '';
-
-      while (true) {
-        const { done, value } = await summaryReader.read();
-        if (done) break;
-
-        summaryBuffer += summaryDecoder.decode(value, { stream: true });
-        const lines = summaryBuffer.split('\n');
-        summaryBuffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
-          if (line.includes('[DONE]')) continue;
-
-          try {
-            const jsonStr = line.slice(6);
-            const chunk: ChatCompletionChunk = JSON.parse(jsonStr);
-            const delta = chunk.choices[0]?.delta;
-
-            if (delta?.content) {
-              summaryContent += delta.content;
-              // Don't emit summary tokens as they're JSON - we'll send the parsed summary instead
-            }
-          } catch (parseError) {
-            console.error('[ai-command] Error parsing summary SSE:', parseError);
+        } else if (eventType === 'response.completed' || eventType === 'response.done') {
+          responseCompleted = true;
+          const responseOutput = data.response?.output || [];
+          const sources = extractSources(responseOutput);
+          if (changes.length > 0) {
+            const summary = await getSummaryAfterEdit(instruction, changes, openaiConfig);
+            const finalSummary = summary || `Applied ${changes.length} change${changes.length !== 1 ? 's' : ''} to the document.`;
+            await writer.write(encode({ type: 'summary', summary: finalSummary, sources }));
           }
+          await writer.write(encode({ type: 'complete', sources }));
         }
-      }
-
-      // Parse the accumulated JSON response
-      try {
-        const result = JSON.parse(summaryContent || '{}');
-        const summary = result.summary || 'Changes applied.';
-
-        await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'summary', summary })}\n\n`));
-      } catch (parseError) {
-        console.error('[ai-command] Error parsing summary JSON:', parseError);
-        await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'summary', summary: 'Changes applied.' })}\n\n`));
       }
     }
 
-    // Emit complete
-    await writer.write(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'complete' })}\n\n`));
-    console.log('[ai-command] Stream processing complete');
+    // Handle stream ending without response.completed
+    if (!responseCompleted) {
+      console.log('[ai-command] Stream ended without response.completed, completing manually');
+      if (changes.length > 0) {
+        const summary = await getSummaryAfterEdit(instruction, changes, openaiConfig);
+        const finalSummary = summary || `Applied ${changes.length} change${changes.length !== 1 ? 's' : ''} to the document.`;
+        await writer.write(encode({ type: 'summary', summary: finalSummary, sources: [] }));
+      }
+      await writer.write(encode({ type: 'complete', sources: [] }));
+    }
   } catch (error) {
-    console.error('[ai-command] Error in stream processing:', error);
-    const errorEvent = {
-      type: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-    await writer.write(new TextEncoder().encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
+    console.error('[ai-command] Error in Responses API stream processing:', error);
+    const errorEvent = { type: 'error', error: error instanceof Error ? error.message : 'Unknown error' };
+    await writer.write(encode(errorEvent));
   } finally {
     try {
       await writer.close();
@@ -712,26 +788,33 @@ async function processOpenAIStream(
 
 async function handleStreamingRequest(
   messages: ChatMessage[],
+  instruction: string,
   openaiConfig: any
 ): Promise<Response> {
-  console.log('[ai-command] Handling streaming request');
+  console.log('[ai-command] Handling streaming request (Responses API with web search)');
 
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
 
+  // Convert ChatMessage[] to ResponseInput[] (structurally compatible)
+  const input: ResponseInput[] = messages
+    .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system')
+    .map(msg => ({
+      role: msg.role as 'user' | 'assistant' | 'system',
+      content: msg.content,
+    }));
+
   // Start stream processing in background
   (async () => {
     try {
-      const openaiStream = await createChatCompletionStream(openaiConfig, {
+      const openaiStream = await createResponseStream(openaiConfig, {
         model: 'gpt-5-mini',
-        messages,
-        tools: [EDIT_DOCUMENT_TOOL],
-        tool_choice: 'auto',
-        max_completion_tokens: 128000,
-        reasoning_effort: 'low',
+        input,
+        tools: [WEB_SEARCH_TOOL, EDIT_DOCUMENT_TOOL_RESPONSES],
+        max_output_tokens: 128000,
       });
 
-      await processOpenAIStream(openaiStream, writer, messages, openaiConfig);
+      await processResponsesStream(openaiStream, writer, instruction, openaiConfig);
     } catch (error) {
       console.error('[ai-command] Error in streaming handler:', error);
       const errorEvent = {
@@ -933,10 +1016,10 @@ Deno.serve(async (req) => {
     // Build messages array
     const messages: ChatMessage[] = [];
 
-    // Add system message
+    // Add system message (includes web search guidance)
     messages.push({
       role: 'system',
-      content: EDITOR_SYSTEM_PROMPT_V2,
+      content: EDITOR_SYSTEM_PROMPT_V2 + WEB_SEARCH_SECTION,
     });
     console.log('[ai-command] Added system message');
 
@@ -1023,7 +1106,7 @@ Use the edit_document tool to make changes, then provide reasoning and summary.`
     // Branch based on streaming mode
     if (stream) {
       console.log('[ai-command] Using streaming mode');
-      return await handleStreamingRequest(messages, openaiConfig);
+      return await handleStreamingRequest(messages, instruction, openaiConfig);
     } else {
       console.log('[ai-command] Using non-streaming mode');
       const response = await handleNonStreamingRequest(messages, openaiConfig);
