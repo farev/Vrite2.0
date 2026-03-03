@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   $getSelection,
   $isRangeSelection,
@@ -38,8 +40,6 @@ import {
   Undo,
   Redo,
   Sparkles,
-  ChevronDown,
-  Palette,
   Highlighter,
   Type,
   AlignVerticalJustifyStart,
@@ -51,6 +51,8 @@ import {
   IndentIncrease,
   IndentDecrease,
   MoreVertical,
+  Plus,
+  Pipette,
   List,
   ListOrdered,
 } from 'lucide-react';
@@ -68,6 +70,126 @@ interface FormattingToolbarProps {
   pageSize?: string;
   onPageSizeChange?: (size: string) => void;
 }
+
+const TEXT_COLOR_SWATCHES = [
+  // Grayscale ramp (black to white)
+  '#000000', '#3F3F46', '#52525B', '#71717A', '#A1A1AA', '#D4D4D8', '#E5E7EB', '#FFFFFF',
+  // Bright base hues
+  '#D93025', '#F97316', '#FACC15', '#34A853', '#14B8A6', '#4285F4', '#7C3AED', '#D946EF',
+  // Light hues
+  '#F28B82', '#FDBA74', '#FDE68A', '#86EFAC', '#99F6E4', '#93C5FD', '#C4B5FD', '#F5B4FC',
+  // Medium/deep hues
+  '#C5221F', '#EA580C', '#D4A514', '#15803D', '#0F766E', '#1D4ED8', '#6D28D9', '#BE185D',
+  // Dark hues
+  '#8B1D18', '#9A3412', '#A16207', '#166534', '#115E59', '#1E3A8A', '#4C1D95', '#831843'
+];
+
+const normalizeHex = (value: string) => {
+  const cleaned = value.trim().replace('#', '');
+  if (/^[0-9a-fA-F]{3}$/.test(cleaned)) {
+    return `#${cleaned.split('').map((char) => char + char).join('').toLowerCase()}`;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+    return `#${cleaned.toLowerCase()}`;
+  }
+  return null;
+};
+
+const rgbToHex = (value: string) => {
+  const match = value.match(/rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/i);
+  if (!match) return null;
+
+  const [r, g, b] = match.slice(1, 4).map((channel) => {
+    const numeric = Number(channel);
+    return Number.isNaN(numeric) ? 0 : Math.max(0, Math.min(255, numeric));
+  });
+
+  return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+};
+
+const normalizeColorToHex = (value: string) => {
+  const hex = normalizeHex(value);
+  if (hex) return hex;
+
+  const rgbHex = rgbToHex(value);
+  if (rgbHex) return rgbHex;
+
+  if (typeof window === 'undefined') return null;
+
+  const probe = document.createElement('span');
+  probe.style.color = value;
+
+  if (!probe.style.color) return null;
+
+  const resolved = probe.style.color;
+  return rgbToHex(resolved) || normalizeHex(resolved);
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const hexToRgb = (hex: string) => {
+  const normalized = normalizeHex(hex);
+  if (!normalized) return null;
+  const value = normalized.slice(1);
+  const int = parseInt(value, 16);
+  return {
+    r: (int >> 16) & 255,
+    g: (int >> 8) & 255,
+    b: int & 255,
+  };
+};
+
+const rgbToHsv = (r: number, g: number, b: number) => {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const delta = max - min;
+
+  let h = 0;
+  if (delta > 0) {
+    if (max === rn) h = ((gn - bn) / delta) % 6;
+    else if (max === gn) h = (bn - rn) / delta + 2;
+    else h = (rn - gn) / delta + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+
+  const s = max === 0 ? 0 : (delta / max) * 100;
+  const v = max * 100;
+  return { h, s, v };
+};
+
+const hsvToRgb = (h: number, s: number, v: number) => {
+  const sat = clamp(s, 0, 100) / 100;
+  const val = clamp(v, 0, 100) / 100;
+  const c = val * sat;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = val - c;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (h >= 0 && h < 60) [r, g, b] = [c, x, 0];
+  else if (h >= 60 && h < 120) [r, g, b] = [x, c, 0];
+  else if (h >= 120 && h < 180) [r, g, b] = [0, c, x];
+  else if (h >= 180 && h < 240) [r, g, b] = [0, x, c];
+  else if (h >= 240 && h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255),
+  };
+};
+
+const hsvToHex = (h: number, s: number, v: number) => {
+  const { r, g, b } = hsvToRgb(h, s, v);
+  return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+};
 
 export default function FormattingToolbar({
   onAIToggle,
@@ -90,6 +212,15 @@ export default function FormattingToolbar({
   const [fontFamily, setFontFamily] = useState('Times New Roman');
   const [blockType, setBlockType] = useState('paragraph');
   const [textColor, setTextColor] = useState('#000000');
+  const [textColorInput, setTextColorInput] = useState('#000000');
+  const [highlightColor, setHighlightColor] = useState('transparent');
+  const [highlightColorInput, setHighlightColorInput] = useState('#ffff00');
+  const [isCustomColorPickerOpen, setIsCustomColorPickerOpen] = useState(false);
+  const [customColorPickerMode, setCustomColorPickerMode] = useState<'text' | 'highlight'>('text');
+  const [customColorPopupPosition, setCustomColorPopupPosition] = useState({ top: 0, left: 0 });
+  const [customHue, setCustomHue] = useState(0);
+  const [customSaturation, setCustomSaturation] = useState(100);
+  const [customValue, setCustomValue] = useState(100);
   const [textAlign, setTextAlign] = useState('left');
 
   // Dropdown states - only one can be open at a time
@@ -99,9 +230,16 @@ export default function FormattingToolbar({
   // Refs for click-outside detection and overflow calculation
   const toolbarRef = useRef<HTMLDivElement>(null);
   const mainToolbarRef = useRef<HTMLDivElement>(null);
+  const customColorPanelRef = useRef<HTMLDivElement>(null);
+  const customColorPopupRef = useRef<HTMLDivElement>(null);
+  const textColorCustomButtonRef = useRef<HTMLButtonElement>(null);
+  const highlightColorCustomButtonRef = useRef<HTMLButtonElement>(null);
+  const textColorTriggerButtonRef = useRef<HTMLButtonElement>(null);
+  const highlightTriggerButtonRef = useRef<HTMLButtonElement>(null);
 
   // Track which items are overflowing
   const [overflowItems, setOverflowItems] = useState<Set<string>>(new Set());
+  const [toolbarWidth, setToolbarWidth] = useState<number | null>(null);
 
   const fontSizes = ['8pt', '9pt', '10pt', '11pt', '12pt', '14pt', '16pt', '18pt', '20pt', '24pt', '28pt', '36pt', '48pt', '72pt'];
   const fontFamilies = [
@@ -203,17 +341,31 @@ export default function FormattingToolbar({
           }
 
           // Parse text color
-          const colorMatch = style.match(/color:\s*([^;]+)/);
+          const colorMatch = style.match(/(?:^|;)\s*color:\s*([^;]+)/);
           if (colorMatch) {
-            setTextColor(colorMatch[1].trim());
+            setTextColor(normalizeColorToHex(colorMatch[1].trim()) || '#000000');
           } else {
             setTextColor('#000000'); // Default
+          }
+
+          // Parse highlight color
+          const highlightMatch = style.match(/(?:^|;)\s*background-color:\s*([^;]+)/);
+          if (highlightMatch) {
+            const rawHighlight = highlightMatch[1].trim();
+            if (rawHighlight === 'transparent') {
+              setHighlightColor('transparent');
+            } else {
+              setHighlightColor(normalizeColorToHex(rawHighlight) || 'transparent');
+            }
+          } else {
+            setHighlightColor('transparent');
           }
         } else {
           // No style, use defaults
           setFontFamily('Times New Roman');
           setFontSize('12pt');
           setTextColor('#000000');
+          setHighlightColor('transparent');
         }
       }
     }
@@ -230,9 +382,14 @@ export default function FormattingToolbar({
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (toolbarRef.current && !toolbarRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedInsideToolbar = toolbarRef.current?.contains(target);
+      const clickedInsideCustomPopup = customColorPopupRef.current?.contains(target);
+
+      if (!clickedInsideToolbar && !clickedInsideCustomPopup) {
         setOpenDropdown(null);
         setIsMoreOpen(false);
+        setIsCustomColorPickerOpen(false);
       }
     };
 
@@ -257,8 +414,21 @@ export default function FormattingToolbar({
     };
 
     const calculateOverflow = () => {
-      const containerWidth = mainToolbar.offsetWidth;
-      if (containerWidth <= 0) {
+      const toolbarParent = toolbar.parentElement;
+      const maxOuterWidth = Math.max(
+        0,
+        (toolbarParent?.clientWidth ?? window.innerWidth) - 28
+      );
+
+      const toolbarComputed = window.getComputedStyle(toolbar);
+      const toolbarInset =
+        (parseFloat(toolbarComputed.paddingLeft) || 0) +
+        (parseFloat(toolbarComputed.paddingRight) || 0) +
+        (parseFloat(toolbarComputed.borderLeftWidth) || 0) +
+        (parseFloat(toolbarComputed.borderRightWidth) || 0);
+
+      const maxMainWidth = Math.max(0, maxOuterWidth - toolbarInset);
+      if (maxMainWidth <= 0) {
         return;
       }
 
@@ -270,7 +440,7 @@ export default function FormattingToolbar({
         (child) => child.getAttribute('data-toolbar-item') === 'more-menu'
       );
       const reservedMoreWidth = moreMenuItem ? getOuterWidth(moreMenuItem) + gap : 0;
-      const availableWidth = Math.max(0, containerWidth - reservedMoreWidth);
+      const availableWidth = Math.max(0, maxMainWidth - reservedMoreWidth);
 
       let usedWidth = 0;
       const newOverflowItems = new Set<string>();
@@ -315,6 +485,19 @@ export default function FormattingToolbar({
           usedWidth += item.width;
         }
       }
+
+      const finalMainWidth = Math.min(maxMainWidth, usedWidth + reservedMoreWidth);
+      const finalToolbarWidth = Math.min(
+        maxOuterWidth,
+        Math.max(finalMainWidth + toolbarInset, reservedMoreWidth + toolbarInset)
+      );
+
+      setToolbarWidth((prev) => {
+        if (prev === null || Math.abs(prev - finalToolbarWidth) > 1) {
+          return finalToolbarWidth;
+        }
+        return prev;
+      });
 
       // Only update if there's a change to avoid infinite loops
       setOverflowItems(prev => {
@@ -391,6 +574,15 @@ export default function FormattingToolbar({
     setOpenDropdown(null);
   };
 
+  const stepFontSize = (direction: 'up' | 'down') => {
+    const parsed = parseFloat(fontSize);
+    const current = Number.isFinite(parsed) ? parsed : 12;
+    const next = direction === 'up'
+      ? Math.min(72, current + 1)
+      : Math.max(1, current - 1);
+    applyFontSize(`${next}pt`);
+  };
+
   const applyFontFamily = (family: string) => {
     editor.update(() => {
       const selection = $getSelection();
@@ -425,25 +617,50 @@ export default function FormattingToolbar({
     setTextAlign(align);
   };
 
-  const applyTextColor = (color: string) => {
+  const setTextColorValue = (color: string, closeDropdown = true) => {
+    const normalizedColor = normalizeColorToHex(color) || '#000000';
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        $patchStyleText(selection, { 'color': color });
+        $patchStyleText(selection, { 'color': normalizedColor });
       }
     });
-    setTextColor(color);
-    setOpenDropdown(null);
+    setTextColor(normalizedColor);
+    setTextColorInput(normalizedColor);
+    if (closeDropdown) {
+      setOpenDropdown(null);
+      setIsCustomColorPickerOpen(false);
+    }
+  };
+
+  const applyTextColor = (color: string) => {
+    setTextColorValue(color, true);
+  };
+
+  const setHighlightColorValue = (color: string, closeDropdown = true) => {
+    const normalizedColor = color === 'transparent'
+      ? 'transparent'
+      : normalizeColorToHex(color) || '#ffff00';
+
+    editor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        $patchStyleText(selection, { 'background-color': normalizedColor });
+      }
+    });
+
+    setHighlightColor(normalizedColor);
+    if (normalizedColor !== 'transparent') {
+      setHighlightColorInput(normalizedColor);
+    }
+    if (closeDropdown) {
+      setOpenDropdown(null);
+      setIsCustomColorPickerOpen(false);
+    }
   };
 
   const applyHighlight = (color: string) => {
-    editor.update(() => {
-      const selection = $getSelection();
-      if ($isRangeSelection(selection)) {
-        $patchStyleText(selection, { 'background-color': color });
-      }
-    });
-    setOpenDropdown(null);
+    setHighlightColorValue(color, true);
   };
 
   const clearFormatting = () => {
@@ -512,6 +729,7 @@ export default function FormattingToolbar({
   };
 
   const toggleDropdown = (dropdown: string) => {
+    setIsCustomColorPickerOpen(false);
     setOpenDropdown((prev) => (prev === dropdown ? null : dropdown));
   };
 
@@ -520,11 +738,375 @@ export default function FormattingToolbar({
     setOpenDropdown(null);
   };
 
+  const syncCustomPickerFromColor = (color: string) => {
+    const rgb = hexToRgb(color);
+    if (!rgb) return;
+    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+    setCustomHue(hsv.h);
+    setCustomSaturation(hsv.s);
+    setCustomValue(hsv.v);
+  };
+
+  const handleCustomColorToggle = (mode: 'text' | 'highlight') => {
+    if (isCustomColorPickerOpen) {
+      setIsCustomColorPickerOpen(false);
+      return;
+    }
+
+    const triggerRect = mode === 'text'
+      ? textColorCustomButtonRef.current?.getBoundingClientRect()
+      : highlightColorCustomButtonRef.current?.getBoundingClientRect();
+    const colorTriggerRect = mode === 'text'
+      ? textColorTriggerButtonRef.current?.getBoundingClientRect()
+      : highlightTriggerButtonRef.current?.getBoundingClientRect();
+    const popupWidth = 420;
+    const popupHeight = 300;
+    const dropdownWidthEstimate = 238;
+    const margin = 16;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    const left = colorTriggerRect
+      ? clamp(
+          colorTriggerRect.left + dropdownWidthEstimate + 12,
+          margin,
+          viewportWidth - popupWidth - margin
+        )
+      : Math.max(margin, viewportWidth - popupWidth - margin);
+    const top = colorTriggerRect
+      ? clamp(colorTriggerRect.bottom + 2, margin, viewportHeight - popupHeight - margin)
+      : triggerRect
+      ? clamp(triggerRect.top - 20, margin, viewportHeight - popupHeight - margin)
+      : margin;
+
+    setCustomColorPickerMode(mode);
+    setCustomColorPopupPosition({ top, left });
+    if (mode === 'text') {
+      syncCustomPickerFromColor(textColor);
+      setTextColorInput(textColor);
+    } else {
+      const startColor = highlightColor === 'transparent' ? '#ffff00' : highlightColor;
+      syncCustomPickerFromColor(startColor);
+      setHighlightColorInput(startColor);
+    }
+    setIsCustomColorPickerOpen(true);
+    setOpenDropdown(null);
+  };
+
+  const applyCustomPickerColor = (hue: number, saturation: number, value: number, mode: 'text' | 'highlight') => {
+    const color = hsvToHex(hue, saturation, value);
+    if (mode === 'text') {
+      setTextColorValue(color, false);
+    } else {
+      setHighlightColorValue(color, false);
+    }
+  };
+
+  const updateCustomSaturationValue = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const panel = customColorPanelRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    const x = clamp(event.clientX - rect.left, 0, rect.width);
+    const y = clamp(event.clientY - rect.top, 0, rect.height);
+
+    const saturation = (x / rect.width) * 100;
+    const value = 100 - (y / rect.height) * 100;
+
+    setCustomSaturation(saturation);
+    setCustomValue(value);
+    applyCustomPickerColor(customHue, saturation, value, customColorPickerMode);
+  };
+
+  const handleHexCommit = (mode: 'text' | 'highlight') => {
+    const currentInput = mode === 'text' ? textColorInput : highlightColorInput;
+    const normalized = normalizeColorToHex(currentInput);
+    if (!normalized) {
+      if (mode === 'text') {
+        setTextColorInput(textColor);
+      } else {
+        setHighlightColorInput(highlightColor === 'transparent' ? '#ffff00' : highlightColor);
+      }
+      return;
+    }
+
+    if (mode === 'text') {
+      setTextColorValue(normalized, false);
+    } else {
+      setHighlightColorValue(normalized, false);
+    }
+    syncCustomPickerFromColor(normalized);
+  };
+
+  const handleEyeDropper = async () => {
+    type EyeDropperCtor = new () => { open: () => Promise<{ sRGBHex: string }> };
+    const eyeDropper = (window as Window & { EyeDropper?: EyeDropperCtor }).EyeDropper;
+    if (!eyeDropper) return;
+
+    try {
+      const result = await new eyeDropper().open();
+      const normalized = normalizeColorToHex(result.sRGBHex);
+      if (!normalized) return;
+      if (customColorPickerMode === 'text') {
+        setTextColorValue(normalized, false);
+      } else {
+        setHighlightColorValue(normalized, false);
+      }
+      syncCustomPickerFromColor(normalized);
+    } catch {
+      // User canceled the eyedropper.
+    }
+  };
+
+  const renderTextColorControl = () => (
+    <div className="toolbar-dropdown">
+      <button
+        ref={textColorTriggerButtonRef}
+        className="toolbar-dropdown-button toolbar-icon-button text-color-button"
+        onClick={() => {
+          setTextColorInput(textColor);
+          setIsCustomColorPickerOpen(false);
+          toggleDropdown('textColor');
+        }}
+        title="Text Color"
+        aria-label="Text color"
+      >
+        <span className="text-color-trigger" aria-hidden="true">
+          <span className="text-color-trigger-letter" style={{ color: textColor }}>A</span>
+        </span>      </button>
+      {openDropdown === 'textColor' && (
+        <div className="toolbar-dropdown-menu text-color-menu">
+          <div className="text-color-menu-header">
+            <span>Text color</span>
+            <span className="text-color-menu-current">{textColor.toUpperCase()}</span>
+          </div>
+          <div className="text-color-input-row">
+            <input
+              type="text"
+              value={textColorInput}
+              onChange={(event) => setTextColorInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  handleHexCommit('text');
+                }
+              }}
+              onBlur={() => handleHexCommit('text')}
+              className="text-color-text-input"
+              placeholder='Try "blue" or "#00c4cc"'
+              aria-label="Color value"
+            />
+            <button
+              type="button"
+              ref={textColorCustomButtonRef}
+              className="text-color-custom-button"
+              onClick={() => handleCustomColorToggle('text')}
+              aria-label="Add custom color"
+              title="Custom color"
+            >
+              <span className="text-color-custom-inner">
+                <Plus size={16} />
+              </span>
+            </button>
+          </div>
+          <div className="text-color-swatches" role="listbox" aria-label="Color swatches">
+            {TEXT_COLOR_SWATCHES.map((color) => {
+              const isActive = textColor.toLowerCase() === color.toLowerCase();
+              return (
+                <button
+                  key={color}
+                  className={`text-color-swatch${isActive ? ' is-active' : ''}`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => applyTextColor(color)}
+                  title={color}
+                  aria-label={`Set text color ${color}`}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderHighlightColorControl = () => (
+    <div className="toolbar-dropdown">
+      <button
+        ref={highlightTriggerButtonRef}
+        className="toolbar-dropdown-button toolbar-icon-button text-color-button"
+        onClick={() => {
+          setHighlightColorInput(highlightColor === 'transparent' ? '#ffff00' : highlightColor);
+          setIsCustomColorPickerOpen(false);
+          toggleDropdown('highlight');
+        }}
+        title="Highlight"
+        aria-label="Highlight color"
+      >
+        <span className="text-color-trigger" aria-hidden="true">
+          <Highlighter size={18} color={highlightColor === 'transparent' ? '#0f172a' : highlightColor} />
+        </span>
+      </button>
+      {openDropdown === 'highlight' && (
+        <div className="toolbar-dropdown-menu text-color-menu">
+          <div className="text-color-menu-header">
+            <span>Highlight color</span>
+            <span className="text-color-menu-current">
+              {highlightColor === 'transparent' ? 'NONE' : highlightColor.toUpperCase()}
+            </span>
+          </div>
+          <div className="text-color-input-row">
+            <input
+              type="text"
+              value={highlightColorInput}
+              onChange={(event) => setHighlightColorInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  handleHexCommit('highlight');
+                }
+              }}
+              onBlur={() => handleHexCommit('highlight')}
+              className="text-color-text-input"
+              placeholder='Try "yellow" or "#fff176"'
+              aria-label="Highlight color value"
+            />
+            <button
+              type="button"
+              ref={highlightColorCustomButtonRef}
+              className="text-color-custom-button"
+              onClick={() => handleCustomColorToggle('highlight')}
+              aria-label="Add custom highlight color"
+              title="Custom highlight color"
+            >
+              <span className="text-color-custom-inner">
+                <Plus size={16} />
+              </span>
+            </button>
+          </div>
+          <button
+            className="toolbar-dropdown-item"
+            onClick={() => applyHighlight('transparent')}
+          >
+            No Highlight
+          </button>
+          <div className="text-color-swatches" role="listbox" aria-label="Highlight swatches">
+            {TEXT_COLOR_SWATCHES.map((color) => {
+              const isActive = highlightColor.toLowerCase() === color.toLowerCase();
+              return (
+                <button
+                  key={color}
+                  className={`text-color-swatch${isActive ? ' is-active' : ''}`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => applyHighlight(color)}
+                  title={color}
+                  aria-label={`Set highlight color ${color}`}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   // Helper function to check if an item should be hidden (overflow)
   const isOverflowing = (itemId: string) => overflowItems.has(itemId);
 
+  const customColorPopup = isCustomColorPickerOpen && typeof document !== 'undefined'
+    ? createPortal(
+        <div
+          ref={customColorPopupRef}
+          className="text-color-custom-popup"
+          style={{ top: customColorPopupPosition.top, left: customColorPopupPosition.left }}
+        >
+          <div
+            ref={customColorPanelRef}
+            className="custom-color-saturation"
+            style={{ backgroundColor: `hsl(${customHue}, 100%, 50%)` }}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              updateCustomSaturationValue(event);
+            }}
+            onPointerMove={(event) => {
+              if (event.buttons === 1) {
+                updateCustomSaturationValue(event);
+              }
+            }}
+          >
+            <div className="custom-color-saturation-white" />
+            <div className="custom-color-saturation-black" />
+            <span
+              className="custom-color-saturation-thumb"
+              style={{
+                left: `${customSaturation}%`,
+                top: `${100 - customValue}%`,
+              }}
+            />
+          </div>
+          <div className="custom-color-hue-row">
+            <input
+              type="range"
+              min={0}
+              max={360}
+              value={customHue}
+              className="custom-color-hue-slider"
+              onChange={(event) => {
+                const hue = Number(event.target.value);
+                setCustomHue(hue);
+                applyCustomPickerColor(hue, customSaturation, customValue, customColorPickerMode);
+              }}
+            />
+          </div>
+          <div className="custom-color-footer">
+            <div className="custom-color-hex-chip">
+              <span
+                className="custom-color-hex-dot"
+                style={{
+                  backgroundColor: customColorPickerMode === 'text'
+                    ? textColor
+                    : (highlightColor === 'transparent' ? '#ffff00' : highlightColor),
+                }}
+              />
+              <input
+                type="text"
+                value={customColorPickerMode === 'text' ? textColorInput : highlightColorInput}
+                onChange={(event) => {
+                  if (customColorPickerMode === 'text') {
+                    setTextColorInput(event.target.value);
+                  } else {
+                    setHighlightColorInput(event.target.value);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    handleHexCommit(customColorPickerMode);
+                  }
+                }}
+                onBlur={() => handleHexCommit(customColorPickerMode)}
+                className="custom-color-hex-input"
+                aria-label="Hex color"
+              />
+            </div>
+            <button
+              type="button"
+              className="custom-color-eyedropper"
+              onClick={handleEyeDropper}
+              aria-label="Eyedropper"
+              title="Eyedropper"
+            >
+              <Pipette size={18} />
+            </button>
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
+
   return (
-    <div className="formatting-toolbar" ref={toolbarRef}>
+    <>
+    <div
+      className="formatting-toolbar"
+      ref={toolbarRef}
+      style={toolbarWidth !== null ? { width: `${toolbarWidth}px` } : undefined}
+    >
       <div className="formatting-toolbar-main" ref={mainToolbarRef}>
         {/* Undo/Redo - Always visible at the left */}
         <div className="toolbar-section" data-toolbar-item="undo-redo" style={{ marginLeft: '8px' }}>
@@ -553,14 +1135,12 @@ export default function FormattingToolbar({
           style={{ display: isOverflowing('style') ? 'none' : 'inline-block' }}
         >
           <button
-            className="toolbar-dropdown-button"
+            className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-style"
             onClick={() => toggleDropdown('style')}
           >
             <span className="toolbar-dropdown-label">
               {blockType === 'paragraph' ? 'Normal' : blockType.toUpperCase()}
-            </span>
-            <ChevronDown size={14} />
-          </button>
+            </span>          </button>
           {openDropdown === 'style' && (
             <div className="toolbar-dropdown-menu">
               <button onClick={formatParagraph} className="toolbar-dropdown-item">
@@ -586,11 +1166,12 @@ export default function FormattingToolbar({
           style={{ display: isOverflowing('font-family') ? 'none' : 'inline-block' }}
         >
           <button
-            className="toolbar-dropdown-button"
+            className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-font"
             onClick={() => toggleDropdown('font')}
           >
-            <span className="toolbar-dropdown-label">{fontFamily}</span>
-            <ChevronDown size={14} />
+            <span className="toolbar-dropdown-label toolbar-font-family-label" style={{ fontFamily }}>
+              {fontFamily}
+            </span>
           </button>
           {openDropdown === 'font' && (
             <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable">
@@ -615,11 +1196,42 @@ export default function FormattingToolbar({
           style={{ display: isOverflowing('font-size') ? 'none' : 'inline-block' }}
         >
           <button
-            className="toolbar-dropdown-button"
+            className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-size"
             onClick={() => toggleDropdown('size')}
           >
-            <span className="toolbar-dropdown-label">{fontSize}</span>
-            <ChevronDown size={14} />
+            <span
+              className="toolbar-modern-size-step"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                stepFontSize('down');
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              role="button"
+              aria-label="Decrease font size"
+            >
+              -
+            </span>
+            <span className="toolbar-dropdown-label toolbar-modern-size-value">{fontSize}</span>
+            <span
+              className="toolbar-modern-size-step"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                stepFontSize('up');
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              role="button"
+              aria-label="Increase font size"
+            >
+              +
+            </span>
           </button>
           {openDropdown === 'size' && (
             <div className="toolbar-dropdown-menu">
@@ -682,24 +1294,24 @@ export default function FormattingToolbar({
             onClick={() => toggleDropdown('lists')}
             title="Lists"
           >
-            {isBulletList ? <List size={18} /> : isNumberedList ? <ListOrdered size={18} /> : <List size={18} />}
-            <ChevronDown size={14} />
-          </button>
+            {isBulletList ? <List size={18} /> : isNumberedList ? <ListOrdered size={18} /> : <List size={18} />}          </button>
           {openDropdown === 'lists' && (
-            <div className="toolbar-dropdown-menu">
+            <div className="toolbar-dropdown-menu toolbar-list-menu">
               <button
                 onClick={toggleBulletList}
-                className={`toolbar-dropdown-item ${isBulletList ? 'active' : ''}`}
+                className={`toolbar-dropdown-item toolbar-dropdown-item-icon-only ${isBulletList ? 'active' : ''}`}
+                aria-label="Bullet List"
+                title="Bullet List"
               >
-                <List size={18} style={{ marginRight: '8px' }} />
-                Bullet List
+                <List size={18} />
               </button>
               <button
                 onClick={toggleNumberedList}
-                className={`toolbar-dropdown-item ${isNumberedList ? 'active' : ''}`}
+                className={`toolbar-dropdown-item toolbar-dropdown-item-icon-only ${isNumberedList ? 'active' : ''}`}
+                aria-label="Numbered List"
+                title="Numbered List"
               >
-                <ListOrdered size={18} style={{ marginRight: '8px' }} />
-                Numbered List
+                <ListOrdered size={18} />
               </button>
             </div>
           )}
@@ -711,66 +1323,8 @@ export default function FormattingToolbar({
           data-toolbar-item="colors"
           style={{ display: isOverflowing('colors') ? 'none' : 'flex' }}
         >
-            <div className="toolbar-dropdown">
-              <button
-                className="toolbar-dropdown-button toolbar-icon-button"
-                onClick={() => toggleDropdown('textColor')}
-                title="Text Color"
-              >
-                <Palette size={18} />
-                <ChevronDown size={14} />
-              </button>
-              {openDropdown === 'textColor' && (
-                <div className="toolbar-dropdown-menu color-picker-menu">
-                  <input
-                    type="color"
-                    value={textColor}
-                    onChange={(e) => applyTextColor(e.target.value)}
-                    className="color-picker-input"
-                  />
-                  <div className="color-presets">
-                    {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map(color => (
-                      <button
-                        key={color}
-                        className="color-preset"
-                        style={{ backgroundColor: color }}
-                        onClick={() => applyTextColor(color)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="toolbar-dropdown">
-              <button
-                className="toolbar-dropdown-button toolbar-icon-button"
-                onClick={() => toggleDropdown('highlight')}
-                title="Highlight"
-              >
-                <Highlighter size={18} />
-                <ChevronDown size={14} />
-              </button>
-              {openDropdown === 'highlight' && (
-                <div className="toolbar-dropdown-menu color-picker-menu">
-                  <button
-                    className="toolbar-dropdown-item"
-                    onClick={() => applyHighlight('transparent')}
-                  >
-                    No Highlight
-                  </button>
-                  <div className="color-presets">
-                    {['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FFA500', '#FFB6C1'].map(color => (
-                      <button
-                        key={color}
-                        className="color-preset"
-                        style={{ backgroundColor: color }}
-                        onClick={() => applyHighlight(color)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            {renderTextColorControl()}
+            {renderHighlightColorControl()}
           </div>
 
         <div
@@ -826,9 +1380,7 @@ export default function FormattingToolbar({
             onClick={() => toggleDropdown('lineSpacing')}
             title="Line Spacing"
           >
-            <AlignVerticalJustifyStart size={18} />
-            <ChevronDown size={14} />
-          </button>
+            <AlignVerticalJustifyStart size={18} />          </button>
           {openDropdown === 'lineSpacing' && (
             <div className="toolbar-dropdown-menu">
               {lineSpacings.map((spacing) => (
@@ -888,14 +1440,12 @@ export default function FormattingToolbar({
                     {overflowItems.has('style') && (
                       <div className="toolbar-dropdown">
                         <button
-                          className="toolbar-dropdown-button"
+                          className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-style"
                           onClick={() => toggleDropdown('style')}
                         >
                           <span className="toolbar-dropdown-label">
                             {blockType === 'paragraph' ? 'Normal' : blockType.toUpperCase()}
-                          </span>
-                          <ChevronDown size={14} />
-                        </button>
+                          </span>                        </button>
                         {openDropdown === 'style' && (
                           <div className="toolbar-dropdown-menu">
                             <button onClick={formatParagraph} className="toolbar-dropdown-item">
@@ -917,11 +1467,12 @@ export default function FormattingToolbar({
                     {overflowItems.has('font-family') && (
                       <div className="toolbar-dropdown">
                         <button
-                          className="toolbar-dropdown-button"
+                          className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-font"
                           onClick={() => toggleDropdown('font')}
                         >
-                          <span className="toolbar-dropdown-label">{fontFamily}</span>
-                          <ChevronDown size={14} />
+                          <span className="toolbar-dropdown-label toolbar-font-family-label" style={{ fontFamily }}>
+                            {fontFamily}
+                          </span>
                         </button>
                         {openDropdown === 'font' && (
                           <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable">
@@ -942,11 +1493,42 @@ export default function FormattingToolbar({
                     {overflowItems.has('font-size') && (
                       <div className="toolbar-dropdown">
                         <button
-                          className="toolbar-dropdown-button"
+                          className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-size"
                           onClick={() => toggleDropdown('size')}
                         >
-                          <span className="toolbar-dropdown-label">{fontSize}</span>
-                          <ChevronDown size={14} />
+                          <span
+                            className="toolbar-modern-size-step"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              stepFontSize('down');
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            role="button"
+                            aria-label="Decrease font size"
+                          >
+                            -
+                          </span>
+                          <span className="toolbar-dropdown-label toolbar-modern-size-value">{fontSize}</span>
+                          <span
+                            className="toolbar-modern-size-step"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              stepFontSize('up');
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            role="button"
+                            aria-label="Increase font size"
+                          >
+                            +
+                          </span>
                         </button>
                         {openDropdown === 'size' && (
                           <div className="toolbar-dropdown-menu">
@@ -995,24 +1577,24 @@ export default function FormattingToolbar({
                           onClick={() => toggleDropdown('lists')}
                           title="Lists"
                         >
-                          {isBulletList ? <List size={18} /> : isNumberedList ? <ListOrdered size={18} /> : <List size={18} />}
-                          <ChevronDown size={14} />
-                        </button>
+                          {isBulletList ? <List size={18} /> : isNumberedList ? <ListOrdered size={18} /> : <List size={18} />}                        </button>
                         {openDropdown === 'lists' && (
-                          <div className="toolbar-dropdown-menu">
+                          <div className="toolbar-dropdown-menu toolbar-list-menu">
                             <button
                               onClick={toggleBulletList}
-                              className={`toolbar-dropdown-item ${isBulletList ? 'active' : ''}`}
+                              className={`toolbar-dropdown-item toolbar-dropdown-item-icon-only ${isBulletList ? 'active' : ''}`}
+                              aria-label="Bullet List"
+                              title="Bullet List"
                             >
-                              <List size={18} style={{ marginRight: '8px' }} />
-                              Bullet List
+                              <List size={18} />
                             </button>
                             <button
                               onClick={toggleNumberedList}
-                              className={`toolbar-dropdown-item ${isNumberedList ? 'active' : ''}`}
+                              className={`toolbar-dropdown-item toolbar-dropdown-item-icon-only ${isNumberedList ? 'active' : ''}`}
+                              aria-label="Numbered List"
+                              title="Numbered List"
                             >
-                              <ListOrdered size={18} style={{ marginRight: '8px' }} />
-                              Numbered List
+                              <ListOrdered size={18} />
                             </button>
                           </div>
                         )}
@@ -1020,66 +1602,8 @@ export default function FormattingToolbar({
                     )}
                     {overflowItems.has('colors') && (
                       <div className="toolbar-section">
-                        <div className="toolbar-dropdown">
-                          <button
-                            className="toolbar-dropdown-button toolbar-icon-button"
-                            onClick={() => toggleDropdown('textColor')}
-                            title="Text Color"
-                          >
-                            <Palette size={18} />
-                            <ChevronDown size={14} />
-                          </button>
-                          {openDropdown === 'textColor' && (
-                            <div className="toolbar-dropdown-menu color-picker-menu">
-                              <input
-                                type="color"
-                                value={textColor}
-                                onChange={(e) => applyTextColor(e.target.value)}
-                                className="color-picker-input"
-                              />
-                              <div className="color-presets">
-                                {['#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'].map(color => (
-                                  <button
-                                    key={color}
-                                    className="color-preset"
-                                    style={{ backgroundColor: color }}
-                                    onClick={() => applyTextColor(color)}
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="toolbar-dropdown">
-                          <button
-                            className="toolbar-dropdown-button toolbar-icon-button"
-                            onClick={() => toggleDropdown('highlight')}
-                            title="Highlight"
-                          >
-                            <Highlighter size={18} />
-                            <ChevronDown size={14} />
-                          </button>
-                          {openDropdown === 'highlight' && (
-                            <div className="toolbar-dropdown-menu color-picker-menu">
-                              <button
-                                className="toolbar-dropdown-item"
-                                onClick={() => applyHighlight('transparent')}
-                              >
-                                No Highlight
-                              </button>
-                              <div className="color-presets">
-                                {['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FFA500', '#FFB6C1'].map(color => (
-                                  <button
-                                    key={color}
-                                    className="color-preset"
-                                    style={{ backgroundColor: color }}
-                                    onClick={() => applyHighlight(color)}
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        {renderTextColorControl()}
+                        {renderHighlightColorControl()}
                       </div>
                     )}
                     {overflowItems.has('alignment') && (
@@ -1121,9 +1645,7 @@ export default function FormattingToolbar({
                           onClick={() => toggleDropdown('lineSpacing')}
                           title="Line Spacing"
                         >
-                          <AlignVerticalJustifyStart size={18} />
-                          <ChevronDown size={14} />
-                        </button>
+                          <AlignVerticalJustifyStart size={18} />                        </button>
                         {openDropdown === 'lineSpacing' && (
                           <div className="toolbar-dropdown-menu">
                             {lineSpacings.map((spacing) => (
@@ -1218,9 +1740,7 @@ export default function FormattingToolbar({
                   onClick={() => toggleDropdown('pageSize')}
                   title="Page Size"
                 >
-                  <FileText size={18} />
-                  <ChevronDown size={14} />
-                </button>
+                  <FileText size={18} />                </button>
                 {openDropdown === 'pageSize' && (
                   <div className="toolbar-dropdown-menu">
                     <div className="toolbar-dropdown-header">
@@ -1253,9 +1773,7 @@ export default function FormattingToolbar({
                   onClick={() => toggleDropdown('margins')}
                   title="Page Margins"
                 >
-                  <Type size={18} />
-                  <ChevronDown size={14} />
-                </button>
+                  <Type size={18} />                </button>
                 {openDropdown === 'margins' && (
                   <div className="toolbar-dropdown-menu margins-dropdown">
                     <div className="margin-control">
@@ -1312,9 +1830,7 @@ export default function FormattingToolbar({
                   onClick={() => toggleDropdown('format')}
                   title="Format Document"
                 >
-                  <FileText size={18} />
-                  <ChevronDown size={14} />
-                </button>
+                  <FileText size={18} />                </button>
                 {openDropdown === 'format' && (
                   <div className="toolbar-dropdown-menu toolbar-dropdown-scrollable format-dropdown">
                     <div className="toolbar-dropdown-header">
@@ -1339,5 +1855,7 @@ export default function FormattingToolbar({
         </div>
       </div>
     </div>
+    {customColorPopup}
+    </>
   );
 }
