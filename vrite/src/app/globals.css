@@ -473,7 +473,7 @@ body {
   color: #334155;
   font-size: 12px;
   font-weight: 500;
-  line-height: 1;
+  line-height: 0.95;
   transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -486,17 +486,18 @@ body {
 .toolbar-modern-style {
   min-width: 0;
   width: fit-content;
-  padding: 0 12px;
+  padding: 0 8px;
   justify-content: flex-start;
 }
 
 .toolbar-modern-style .toolbar-dropdown-label {
   max-width: none;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 .toolbar-modern-font {
   min-width: 142px;
-  padding: 0 12px;
+  padding: 0 8px;
   justify-content: flex-start;
 }
 
@@ -504,27 +505,29 @@ body {
   min-width: 96px;
   justify-content: center;
   gap: 2px;
-  padding: 0 4px;
+  padding: 0 2px;
 }
 
 .toolbar-modern-field .toolbar-dropdown-label {
   font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
+  font-weight: 400;
+  line-height: 0.95;
 }
 
 .toolbar-modern-size-value {
   min-width: 34px;
   text-align: center;
   color: #111827;
-  font-weight: 300;
+  font-weight: 400;
   font-size: 12px;
+  line-height: 0.95;
   max-width: none;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 .toolbar-modern-size-step {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 6px;
   border: 1px solid transparent;
   display: inline-flex;
@@ -532,14 +535,15 @@ body {
   justify-content: center;
   color: #111827;
   font-size: 18px;
-  line-height: 1;
-  font-weight: 500;
+  line-height: 0.9;
+  font-weight: 400;
   user-select: none;
   cursor: pointer;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 .toolbar-font-family-label {
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .toolbar-modern-size-step:hover {

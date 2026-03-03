@@ -225,7 +225,7 @@ export default function MobileLandingPage() {
   }, []);
 
   return (
-    <div style={{ minHeight: '100dvh', background: '#f3f4f6', overflowY: 'auto', overflowX: 'hidden' }}>
+    <div style={{ height: '100dvh', background: '#f3f4f6', overflowY: 'auto', overflowX: 'hidden' }}>
 
       {/* ── Decorative menu bar ── */}
       <div style={{
