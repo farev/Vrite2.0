@@ -28,6 +28,7 @@ interface Message {
   isLoading?: boolean;
   isStreaming?: boolean;
   images?: Array<{ filename: string; data: string; width: number; height: number }>;
+  contextSnippets?: string[];
   sources?: Array<{ title: string; url: string }>;
 }
 
@@ -701,6 +702,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
       type: 'user',
       content: composedMessage,
       timestamp: new Date(),
+      contextSnippets: contextSnippets.length > 0 ? contextSnippets.map((snippet) => snippet.text) : undefined,
       images: allImages.length > 0 ? allImages : undefined
     };
 
@@ -710,6 +712,8 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
     // Clear selected images after adding to message (like text context snippets)
     onRemoveSelectedImage?.();
+    onClearContextSnippets?.();
+    onClearEditorSelection?.();
 
     // NOTE: Don't clear contextImages here - they're needed in triggerAIRequest
     // They'll be cleared after the request completes successfully
@@ -934,6 +938,16 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                     </div>
                   ) : (
                     <>
+                      {message.type === 'user' && message.contextSnippets && message.contextSnippets.length > 0 && (
+                        <div className="ai-message-context-preview">
+                          {message.contextSnippets.map((snippet, idx) => (
+                            <div key={`${message.id}-context-${idx}`} className="ai-message-context-chip" title={snippet}>
+                              <Sparkles size={13} />
+                              <span>{snippet}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {message.type === 'user' && message.images && message.images.length > 0 && (
                         <div className="ai-message-image-preview">
                           {message.images.map((img, idx) => (
@@ -949,7 +963,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                       <div
                         className={
                           message.type === 'user'
-                            ? 'ai-message-text !ml-auto !w-fit !max-w-[82%] !rounded-2xl !border !border-transparent !bg-slate-200 !px-3 !py-2 !text-slate-800'
+                            ? 'ai-message-text !ml-auto !w-fit !max-w-[82%] !rounded-2xl !border !border-transparent !bg-[#e5e7eb] !px-3 !py-2 !text-slate-800'
                             : 'ai-message-text'
                         }
                       >

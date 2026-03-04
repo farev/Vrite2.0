@@ -1169,7 +1169,7 @@ export default function FormattingToolbar({
             className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-font"
             onClick={() => toggleDropdown('font')}
           >
-            <span className="toolbar-dropdown-label toolbar-font-family-label" style={{ fontFamily }}>
+            <span className="toolbar-dropdown-label toolbar-font-family-label">
               {fontFamily}
             </span>
           </button>
@@ -1470,7 +1470,7 @@ export default function FormattingToolbar({
                           className="toolbar-dropdown-button toolbar-modern-field toolbar-modern-font"
                           onClick={() => toggleDropdown('font')}
                         >
-                          <span className="toolbar-dropdown-label toolbar-font-family-label" style={{ fontFamily }}>
+                          <span className="toolbar-dropdown-label toolbar-font-family-label">
                             {fontFamily}
                           </span>
                         </button>

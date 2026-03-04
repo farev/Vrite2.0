@@ -493,6 +493,8 @@ body {
 .toolbar-modern-style .toolbar-dropdown-label {
   max-width: none;
   font-family: Arial, Helvetica, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .toolbar-modern-font {
@@ -509,7 +511,7 @@ body {
 }
 
 .toolbar-modern-field .toolbar-dropdown-label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   line-height: 0.95;
 }
@@ -519,7 +521,7 @@ body {
   text-align: center;
   color: #111827;
   font-weight: 400;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 0.95;
   max-width: none;
   font-family: Arial, Helvetica, sans-serif;
@@ -544,6 +546,7 @@ body {
 
 .toolbar-font-family-label {
   font-weight: 400;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 .toolbar-modern-size-step:hover {
@@ -2284,6 +2287,34 @@ body {
   padding: 0;
   margin: 0;
   color: #0b1224;
+}
+
+.ai-message-context-preview {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px 20px;
+}
+
+.ai-message-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: clamp(160px, 50%, 280px);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.ai-message-context-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ai-message-image-preview {
