@@ -12,6 +12,9 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: {
+        maxAge: 60 * 60 * 24 * 365, // 1 year — keep session alive across browser restarts
+      },
       cookies: {
         getAll() {
           return request.cookies.getAll();
