@@ -212,12 +212,6 @@ export default function DocumentPage() {
     }
   };
 
-  const getCurrentPageSize = () => {
-    const wrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
-    const size = wrapper?.dataset.pageSize;
-    return size === 'a4' ? 'a4' : 'letter';
-  };
-
   const handleExportDocument = async (format: 'pdf' | 'docx' | 'txt') => {
     try {
       if (format === 'txt') {
@@ -266,89 +260,158 @@ export default function DocumentPage() {
       }
 
       if (format === 'pdf') {
-        // Get HTML content from editor (clean version without UI elements)
-        const contentElement = document.querySelector('.document-content-editable');
-        if (!contentElement) {
-          throw new Error('Document content not found');
-        }
+        // Inject @page size dynamically — CSS custom properties don't resolve
+        // inside @page rules, so we read the current page dimensions and inject
+        // a <style> element with the correct physical size.
+        const wrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
+        const widthPx = wrapper ? parseFloat(getComputedStyle(wrapper).getPropertyValue('--page-width')) : 816;
+        const heightPx = wrapper ? parseFloat(getComputedStyle(wrapper).getPropertyValue('--page-height')) : 1056;
+        const pageGap = wrapper
+          ? parseFloat(getComputedStyle(wrapper).getPropertyValue('--page-gap')) || 24
+          : 24;
+        const widthIn = (widthPx / 96).toFixed(4);
+        const heightIn = (heightPx / 96).toFixed(4);
 
-        setIsExporting(true);
+        const printStyle = document.createElement('style');
+        printStyle.id = 'print-page-size';
+        printStyle.textContent = `@page { size: ${widthIn}in ${heightIn}in; margin: 0; }`;
+        document.head.appendChild(printStyle);
 
-        const pageWrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
-        const pageContentElement = document.querySelector('.document-page-content') as HTMLElement | null;
-        const pageWidth = pageWrapper
-          ? getComputedStyle(pageWrapper).getPropertyValue('--page-width').trim()
-          : '';
-        const pageSize = getCurrentPageSize();
-        const pageContentStyles = pageContentElement ? getComputedStyle(pageContentElement) : null;
+        // ── Whitespace correction ────────────────────────────────────────────
+        // PaginationPlugin places page-break-containers based on screen layout.
+        // In @media print we apply box-sizing:border-box to .document-header-editor,
+        // shrinking it from ~144px (height:96px + padding-top:48px, content-box)
+        // to exactly 96px. This shifts every container ~48px upward in print.
+        // CSS alone can't reliably reposition the inline-height whitespace blocks,
+        // so we measure here and set the correct heights directly before printing.
+        const FOOTER_H = 96; // page-break-footer height (border-box, matches CSS)
+        const HEADER_PRINT_H = 96; // .document-header-editor height after border-box fix
 
-        const exportRoot = document.createElement('div');
-        exportRoot.className = 'pdf-export-root';
-        exportRoot.style.position = 'fixed';
-        exportRoot.style.left = '-99999px';
-        exportRoot.style.top = '0';
-        exportRoot.style.background = '#ffffff';
-        exportRoot.style.color = '#0f172a';
-        if (pageWidth) {
-          exportRoot.style.width = pageWidth;
-        }
+        const docPage = document.querySelector('.document-page') as HTMLElement | null;
+        const headerEl = document.querySelector('.document-header-editor') as HTMLElement | null;
+        // Actual rendered height of the header in screen mode (content-box = ~144px)
+        const headerScreenH = headerEl ? headerEl.getBoundingClientRect().height : 144;
+        // How much higher containers sit in print than screen (print header is shorter)
+        const headerDelta = Math.round(headerScreenH - HEADER_PRINT_H);
 
-        const exportPage = document.createElement('div');
-        exportPage.className = 'document-page';
-        if (pageWidth) {
-          exportPage.style.width = pageWidth;
-        }
+        type Saved = {
+          container: HTMLElement;
+          origVar: string;
+          topEl: HTMLElement | null;
+          origTopHeight: string;
+          origTopPriority: string;
+        };
+        let saved: Saved[] = [];
 
-        const exportPageContent = document.createElement('div');
-        exportPageContent.className = 'document-page-content';
-        exportPageContent.style.boxSizing = 'border-box';
-        if (pageContentStyles) {
-          exportPageContent.style.paddingTop = pageContentStyles.paddingTop;
-          exportPageContent.style.paddingRight = pageContentStyles.paddingRight;
-          exportPageContent.style.paddingBottom = pageContentStyles.paddingBottom;
-          exportPageContent.style.paddingLeft = pageContentStyles.paddingLeft;
-        }
+        const restoreCorrections = () => {
+          saved.forEach(({ container, origVar, topEl, origTopHeight, origTopPriority }) => {
+            origVar
+              ? container.style.setProperty('--corrected-whitespace', origVar)
+              : container.style.removeProperty('--corrected-whitespace');
 
-        const exportContent = document.createElement('div');
-        exportContent.className = 'document-content-editable';
-        exportContent.innerHTML = contentElement.innerHTML;
-        exportContent.style.width = '100%';
+            if (!topEl) return;
+            if (origTopHeight) {
+              topEl.style.setProperty('height', origTopHeight, origTopPriority);
+            } else {
+              topEl.style.removeProperty('height');
+            }
+          });
+          saved = [];
+        };
 
-        exportPageContent.appendChild(exportContent);
-        exportPage.appendChild(exportPageContent);
-        exportRoot.appendChild(exportPage);
-        document.body.appendChild(exportRoot);
+        const applyCorrections = () => {
+          restoreCorrections();
 
-        try {
-          const html2pdfModule = await import('html2pdf.js');
-          const html2pdf =
-            (html2pdfModule as { default?: typeof import('html2pdf.js') }).default ??
-            html2pdfModule;
+          document.querySelectorAll<HTMLElement>('.page-break-container').forEach((container, i) => {
+            if (!docPage) return;
 
-          await html2pdf()
-            .set({
-              margin: 0,
-              filename: `${documentTitle}.pdf`,
-              pagebreak: { mode: ['css', 'legacy'] },
-              image: { type: 'jpeg', quality: 0.98 },
-              html2canvas: {
-                scale: 3,
-                useCORS: true,
-                backgroundColor: '#ffffff',
-                letterRendering: true,
-              },
-              jsPDF: {
-                unit: 'pt',
-                format: pageSize,
-                orientation: 'portrait',
-              },
-            })
-            .from(exportPage)
-            .save();
-        } finally {
-          document.body.removeChild(exportRoot);
-          setIsExporting(false);
-        }
+            const topEl = container.querySelector<HTMLElement>('.page-break-top');
+            const originalWhitespace = topEl ? parseFloat(topEl.style.height || '0') || 0 : 0;
+
+            // Container's top edge relative to .document-page in screen coordinates.
+            // Subtracting both rects cancels out any scroll offset.
+            const containerScreenTop =
+              container.getBoundingClientRect().top - docPage.getBoundingClientRect().top;
+
+            // Convert to print coordinates:
+            // - headerDelta: print header is border-box (96px), screen may differ
+            // - i * pageGap: each previous break's gap is display:none in print,
+            //   so screen positions are i * pageGap too large vs. print positions
+            const containerPrintTop = containerScreenTop - headerDelta - (i * pageGap);
+
+            // The footer for page-break i should end at the (i+1)-th page boundary.
+            const footerEnd = (i + 1) * heightPx;
+            // floor() and -2px so footer ends BEFORE the boundary, not AT it.
+            // Chrome pushes content landing exactly on the boundary to the next page.
+            const computedWhitespace = Math.floor(footerEnd - FOOTER_H - containerPrintTop) - 2;
+
+            // Guard against bad measurements that can move a footer to its own page.
+            // If computed whitespace collapses to <= 0, fall back to near-screen spacing.
+            const newWhitespace =
+              computedWhitespace > 0
+                ? Math.max(0, Math.min(computedWhitespace, originalWhitespace || computedWhitespace))
+                : Math.max(originalWhitespace - 2, 0);
+
+            // Set both the CSS variable and an inline !important height on .page-break-top.
+            // This survives print-media transitions where React can re-apply inline styles.
+            saved.push({
+              container,
+              origVar: container.style.getPropertyValue('--corrected-whitespace'),
+              topEl,
+              origTopHeight: topEl ? topEl.style.getPropertyValue('height') : '',
+              origTopPriority: topEl ? topEl.style.getPropertyPriority('height') : '',
+            });
+
+            container.style.setProperty('--corrected-whitespace', `${newWhitespace}px`);
+            if (topEl) {
+              topEl.style.setProperty('height', `${newWhitespace}px`, 'important');
+            }
+          });
+        };
+        applyCorrections();
+        // ────────────────────────────────────────────────────────────────────
+
+        // Let the browser commit style changes before opening print preview.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+          });
+        });
+
+        // Keep print styles/variables applied until print flow fully finishes.
+        // Some Chrome versions return from window.print() before capture completes.
+        const mediaQueryList = window.matchMedia('print');
+        let cleanedUp = false;
+        const handleBeforePrint = () => {
+          applyCorrections();
+        };
+
+        const cleanupAfterPrint = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+
+          mediaQueryList.removeEventListener('change', handlePrintMediaChange);
+          window.removeEventListener('beforeprint', handleBeforePrint);
+
+          restoreCorrections();
+
+          if (printStyle.parentNode) {
+            printStyle.parentNode.removeChild(printStyle);
+          }
+        };
+
+        const handlePrintMediaChange = (e: MediaQueryListEvent) => {
+          if (!e.matches) {
+            cleanupAfterPrint();
+          }
+        };
+
+        window.addEventListener('beforeprint', handleBeforePrint);
+        window.addEventListener('afterprint', cleanupAfterPrint, { once: true });
+        mediaQueryList.addEventListener('change', handlePrintMediaChange);
+
+        window.print();
+        return;
       }
     } catch (error) {
       setIsExporting(false);

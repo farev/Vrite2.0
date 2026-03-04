@@ -30,7 +30,7 @@ import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin';
 import { TablePlugin } from '@lexical/react/LexicalTablePlugin';
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin';
 import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPlugin';
-import { $convertToMarkdownString, $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
+import { $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
 import { ListItemNode, ListNode } from '@lexical/list';
 import { LinkNode } from '@lexical/link';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
@@ -256,18 +256,11 @@ function KeyboardShortcutPlugin({ onCommandK }: { onCommandK: () => void }) {
   return null;
 }
 
-function MyOnChangePlugin({ onChange }: { onChange: (editorState: EditorState, content: string) => void }) {
+function MyOnChangePlugin({ onChange }: { onChange: (editorState: EditorState) => void }) {
   return (
     <OnChangePlugin
-      onChange={(editorState, editor) => {
-        // Convert editor content to markdown (preserves formatting)
-        let markdownContent = '';
-
-        editor.read(() => {
-          markdownContent = $convertToMarkdownString(TRANSFORMERS);
-        });
-
-        onChange(editorState, markdownContent);
+      onChange={(editorState) => {
+        onChange(editorState);
       }}
     />
   );
@@ -448,7 +441,6 @@ export default function DocumentEditor({
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
   const supabase = useMemo(() => createClient(), []);
-  const [documentContent, setDocumentContent] = useState('');
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
 
   // User can save to cloud if they're authenticated OR anonymous (both have Supabase sessions)
@@ -460,7 +452,6 @@ export default function DocumentEditor({
     isAuthenticated,
     onDocumentUpdated: (newContent, newTitle) => {
       console.log('[Editor] Reloading document from another tab');
-      setDocumentContent(newContent);
       onTitleChange(newTitle);
 
       // Update the Lexical editor with the new content
@@ -502,6 +493,15 @@ export default function DocumentEditor({
   const [isEditingHF, setIsEditingHF] = useState(false);
   const [editorRef, setEditorRef] = useState<LexicalEditor | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
+  // Helper to get plain text from editor (used for auto-title, format-document)
+  const getEditorPlainText = useCallback(() => {
+    if (!editorRef) return '';
+    let text = '';
+    editorRef.getEditorState().read(() => {
+      text = $getRoot().getTextContent();
+    });
+    return text;
+  }, [editorRef]);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
   const [selectedContextImages, setSelectedContextImages] = useState<Array<{ filename: string; data: string; width: number; height: number }>>([]);
@@ -510,7 +510,14 @@ export default function DocumentEditor({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-  const isDocumentEmpty = documentContent.trim().length === 0;
+  const isDocumentEmpty = useMemo(() => {
+    if (!editorState) return true;
+    let empty = true;
+    editorState.read(() => {
+      empty = $getRoot().getTextContent().trim().length === 0;
+    });
+    return empty;
+  }, [editorState]);
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
   const autoTitleTriggeredRef = useRef(false);
@@ -603,7 +610,7 @@ export default function DocumentEditor({
   const requestAutoTitle = useCallback(
     async (reason: string, contentOverride?: string) => {
       const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
-      const sourceContent = (contentOverride ?? documentContent).trim();
+      const sourceContent = (contentOverride ?? getEditorPlainText()).trim();
 
       console.log('[Editor] Auto-title request start', {
         reason,
@@ -685,7 +692,7 @@ export default function DocumentEditor({
         autoTitleInFlightRef.current = false;
       }
     },
-    [documentId, initialDocumentId, documentContent, documentTitle, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, supabase]
+    [documentId, initialDocumentId, getEditorPlainText, documentTitle, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, supabase]
   );
 
   const triggerAutoTitleIfEligible = useCallback(
@@ -744,8 +751,7 @@ export default function DocumentEditor({
     previousTitle = documentTitle;
   }, [documentTitle]);
   
-  const handleEditorChange = (editorState: EditorState, content: string) => {
-    setDocumentContent(content);
+  const handleEditorChange = (editorState: EditorState) => {
     setEditorState(editorState);
     setHasUnsavedChanges(true); // Mark document as having unsaved changes
   };
@@ -794,25 +800,37 @@ export default function DocumentEditor({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [documentTitle, documentContent, isDocumentEmpty, isContentPastQuarterPage, isTitleUnnamed, triggerAutoTitleIfEligible]);
+  }, [documentTitle, editorState, isDocumentEmpty, isContentPastQuarterPage, isTitleUnnamed, triggerAutoTitleIfEligible]);
 
-  // Fast local heading-extraction: if the first non-empty line is an H1, use it as the title
+  // Fast local heading-extraction: if the first non-empty node is an H1, use it as the title
   // immediately without waiting for the AI edge function or the 25% page-fill threshold.
   useEffect(() => {
     if (isDocumentEmpty || !isTitleUnnamed(documentTitle)) return;
     if (autoTitleTriggeredRef.current || autoTitleInFlightRef.current) return;
+    if (!editorState) return;
 
-    const firstLine = documentContent.split('\n').find((l) => l.trim().length > 0) ?? '';
-    if (firstLine.startsWith('# ')) {
-      const headingTitle = firstLine.slice(2).trim();
-      if (headingTitle && !isTitleUnnamed(headingTitle)) {
-        console.log('[Editor] Auto-title from H1 heading:', headingTitle);
-        const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
-        onTitleChange(headingTitle);
-        markAutoTitleTriggered(docIdentity);
+    let headingTitle = '';
+    editorState.read(() => {
+      const root = $getRoot();
+      const children = root.getChildren();
+      for (const child of children) {
+        const text = child.getTextContent().trim();
+        if (!text) continue;
+        // Check if first non-empty node is an H1 heading
+        if (child.getType() === 'heading' && 'getTag' in child && (child as any).getTag() === 'h1') {
+          headingTitle = text;
+        }
+        break; // Only check the first non-empty node
       }
+    });
+
+    if (headingTitle && !isTitleUnnamed(headingTitle)) {
+      console.log('[Editor] Auto-title from H1 heading:', headingTitle);
+      const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
+      onTitleChange(headingTitle);
+      markAutoTitleTriggered(docIdentity);
     }
-  }, [documentContent, documentTitle, isDocumentEmpty, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, documentId, initialDocumentId]);
+  }, [editorState, documentTitle, isDocumentEmpty, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, documentId, initialDocumentId]);
 
   // Manual save function with debouncing and deduplication
   const handleManualSave = useCallback(async (isManualTrigger = true) => {
@@ -934,7 +952,7 @@ export default function DocumentEditor({
       saveInProgress = false;
       setIsSaving(false);
     }
-  }, [documentId, documentTitle, documentContent, editorState, onLastSavedChange, onDocumentIdChange, isAuthenticated, showSignupModal, initialDocumentId]);
+  }, [documentId, documentTitle, editorState, onLastSavedChange, onDocumentIdChange, isAuthenticated, showSignupModal, initialDocumentId]);
 
   // Expose save callback to parent
   useEffect(() => {
@@ -1115,7 +1133,7 @@ export default function DocumentEditor({
         clearTimeout(pendingSaveTimeout);
       }
     };
-  }, [hasUnsavedChanges, documentContent, documentTitle, handleManualSave, isAuthenticated, documentId, initialDocumentId, onDocumentIdChange, onLastSavedChange]);
+  }, [hasUnsavedChanges, documentTitle, handleManualSave, isAuthenticated, documentId, initialDocumentId, onDocumentIdChange, onLastSavedChange]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -1199,7 +1217,7 @@ export default function DocumentEditor({
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges, documentContent, documentId, documentTitle, editorState, isAuthenticated, initialDocumentId]);
+  }, [hasUnsavedChanges, documentId, documentTitle, editorState, isAuthenticated, initialDocumentId]);
 
   const handleCommandK = useCallback(() => {
     setIsAISidebarOpen(true);
@@ -1247,7 +1265,7 @@ export default function DocumentEditor({
   const handleApplyChanges = (content: string, changes?: Array<{old_text: string, new_text: string}>) => {
     // Store the current and suggested content to trigger inline diff in editor
     // Content is markdown format
-    setOriginalContent(documentContent);
+    setOriginalContent(getEditorPlainText());
     setSuggestedContent(content);
     setIsDiffModeActive(true);
 
@@ -1367,10 +1385,7 @@ export default function DocumentEditor({
         });
       });
 
-      // Update document content state
-      if (suggestedContent) {
-        setDocumentContent(suggestedContent);
-      }
+      // Editor state is updated by the editor.update() above; no separate content state needed
     }
     setIsDiffModeActive(false);
     setOriginalContent(null);
@@ -1427,10 +1442,7 @@ export default function DocumentEditor({
         });
       });
 
-      // Update document content state
-      if (originalContent) {
-        setDocumentContent(originalContent);
-      }
+      // Editor state is updated by the editor.update() above; no separate content state needed
     }
     setIsDiffModeActive(false);
     setOriginalContent(null);
@@ -1474,7 +1486,7 @@ export default function DocumentEditor({
 
       const { data, error } = await supabase.functions.invoke('format-document', {
         body: {
-          content: documentContent,
+          content: getEditorPlainText(),
           format_type: formatType,
         },
       });
@@ -1487,7 +1499,7 @@ export default function DocumentEditor({
       if (data.type === 'tool_based' && data.changes) {
         // Apply markdown changes using DeltaApplicator
         const { DeltaApplicator } = await import('@/lib/deltaApplicator');
-        const suggestedContent = DeltaApplicator.applyDeltas(documentContent, data.changes);
+        const suggestedContent = DeltaApplicator.applyDeltas(getEditorPlainText(), data.changes);
 
         // Use the same inline diff UI as regular edits
         handleApplyChanges(suggestedContent);
@@ -1755,7 +1767,7 @@ export default function DocumentEditor({
           getSimplifiedDocument={getSimplifiedDocument}
           onApplyLexicalChanges={handleApplyLexicalChanges}
           onApplyChanges={handleApplyChanges}
-          documentContent={documentContent}
+          documentContent=""
           contextSnippets={contextSnippets}
           selectedContextImages={selectedContextImages}
           onRemoveContextSnippet={handleRemoveContextSnippet}

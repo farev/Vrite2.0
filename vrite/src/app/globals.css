@@ -1154,9 +1154,9 @@ body {
   position: relative;
 }
 
-/* Print Styles */
+/* Print Styles — @page size is injected dynamically by JS before window.print()
+   because CSS custom properties (var()) don't resolve inside @page rules. */
 @page {
-  size: var(--page-width) var(--page-height);
   margin: 0;
 }
 
@@ -1167,80 +1167,178 @@ body {
   .formatting-toolbar,
   .ai-sidebar,
   .ai-sidebar-shell,
-  .document-header {
+  .document-header,
+  .hf-separator,
+  .hf-badge,
+  .autocomplete-ghost-text,
+  .image-toolbar,
+  .image-resize-handles,
+  .spell-check-overlay,
+  .spell-check-menu {
     display: none !important;
   }
 
-  /* Reset body and container */
+  /* Remove header/footer editing dimming */
+  .document-page-content.hf-body-dimmed {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  /* Reset ALL containers — remove overflow:hidden and fixed heights
+     so content flows across print pages */
+  html {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
   body {
     background: white;
     margin: 0;
     padding: 0;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .app-shell {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
   }
 
   .document-editor-container {
     background: white;
     margin: 0;
     padding: 0;
+    overflow: visible !important;
+    height: auto !important;
   }
 
   .document-editor-body {
     display: block;
     width: 100%;
+    overflow: visible !important;
+    height: auto !important;
   }
 
   .document-main-column {
     width: 100%;
     max-width: none;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .document-main-stack {
+    height: auto !important;
+    overflow: visible !important;
   }
 
   .document-editor-wrapper {
     padding: 0;
     margin: 0;
+    overflow: visible !important;
+    min-height: 0 !important;
   }
 
-  /* Ensure pages print exactly as shown */
+  .document-editor-scroll {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Page container — shrink to content, no forced height */
   .document-page {
     width: var(--page-width);
-    height: var(--page-height);
+    min-height: 0 !important;
     margin: 0;
     padding: 0;
     box-shadow: none;
     border-radius: 0;
-    page-break-after: always;
     position: relative;
+    display: block !important;
   }
 
-  /* Keep page structure */
-  .document-page-header,
-  .document-page-footer {
-    display: flex !important;
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
+  /* Page break handling:
+     Switch from flex to block layout so CSS fragmentation works correctly.
+     When the container is display:flex, browsers refuse to break inside it
+     and move the entire container (including the footer) to the next page.
+     With display:block, break-before:page on the header fires correctly —
+     the footer stays at the bottom of the current page, header goes to the
+     next page. height:auto overrides the inline height set by PaginationPlugin
+     (which includes the gap) so only visible children determine the height. */
+  .page-break-container {
+    display: block !important;
+    height: auto !important;
   }
 
-  /* Page break markers */
-  .page-break-marker,
-  .page-break {
-    page-break-before: always;
-    height: 0 !important;
-    margin: 0;
-    border: none;
+  /* Hide the visual gap between pages */
+  .page-break-gap {
+    display: none !important;
   }
 
-  .page-break-marker::after {
-    display: none;
+  /* Footer: keep visible, fix sizing so padding fits inside 96px.
+     box-sizing:border-box ensures height:96px includes the padding-bottom:48px,
+     keeping the footer at exactly 96px (not 144px with content-box).
+     break-inside:avoid prevents the browser from splitting the 96px footer. */
+  .page-break-footer {
+    display: block !important;
+    box-sizing: border-box !important;
+    break-inside: avoid;
+    color: #000 !important;
   }
 
-  /* Prevent content from breaking across pages where we have markers */
-  .document-page-content-area {
-    page-break-inside: avoid;
+  /* Header: triggers new print page, fix sizing.
+     break-before:page fires correctly on a block child of a block container. */
+  .page-break-header {
+    display: block !important;
+    box-sizing: border-box !important;
+    break-before: page;
+    color: #000 !important;
   }
 
-  /* Content styling */
+  /* Whitespace: pure block spacer.
+     --corrected-whitespace is set on the parent .page-break-container by JS
+     before printing (accounts for the 48px header height delta in print vs
+     screen layout). Using a CSS variable on the parent means React/Lexical
+     re-renders of the child (.page-break-top) cannot override it.
+     break-after:auto allows the browser to avoid orphaning the footer when
+     there is a tiny rounding overflow at the page boundary. */
+  .page-break-top {
+    display: block !important;
+    height: var(--corrected-whitespace) !important;
+    break-after: auto;
+  }
+
+  /* SimpleHeaderEditor / SimpleFooterEditor: fix box-sizing so their total
+     height is exactly 96px in print, matching PaginationPlugin's assumption.
+     With content-box (default) + height:96px + padding-top:48px the box is
+     144px tall, which shifts the content editable down by 48px extra and
+     causes the footer to overflow the page by exactly that amount. */
+  .document-header-editor,
+  .document-footer-editor {
+    box-sizing: border-box !important;
+    color: #000 !important;
+  }
+
+  .hf-content-editable,
+  .hf-editor-root {
+    color: #000 !important;
+  }
+
+  /* Content area — convert from flex to block so CSS fragmentation works.
+     display:flex on this container (even with flex:none as a flex item) blocks
+     Chrome from honoring break-before:page inside it. Block layout is required
+     for predictable page breaks throughout the content tree. */
+  .document-page-content {
+    display: block !important;
+    flex: none !important;
+  }
+
+  .document-editor-surface {
+    display: block !important;
+  }
+
   .document-content-editable {
     width: 100%;
-    min-height: auto;
+    min-height: auto !important;
   }
 
   /* Ensure proper text rendering */
