@@ -10,7 +10,9 @@ import {
   Check,
   Pencil,
   Paperclip,
-  AtSign
+  AtSign,
+  Globe,
+  ExternalLink
 } from 'lucide-react';
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
@@ -26,17 +28,18 @@ interface Message {
   isLoading?: boolean;
   isStreaming?: boolean;
   images?: Array<{ filename: string; data: string; width: number; height: number }>;
+  contextSnippets?: string[];
+  sources?: Array<{ title: string; url: string }>;
 }
 
 // Helper component to format message content with special styling for tool usage
 function FormattedMessageContent({ content }: { content: string }) {
-  // Split content by tool usage pattern
-  const parts = content.split(/(Using \w+[\w_-]* tool\.\.\.|Edited document)/g);
+  // Split content by tool usage and search indicator patterns
+  const parts = content.split(/(Using \w+[\w_-]* tool\.\.\.|Edited document|Found results)/g);
 
   return (
     <>
       {parts.map((part, index) => {
-        // Check if this part is a tool usage message
         if (part === 'Edited document') {
           return (
             <span key={index} className="ai-tool-usage">
@@ -46,15 +49,26 @@ function FormattedMessageContent({ content }: { content: string }) {
           );
         }
 
+        if (part === 'Found results') {
+          return (
+            <span key={index} className="ai-tool-usage">
+              <Globe size={14} />
+              Found results
+            </span>
+          );
+        }
+
         const toolMatch = part.match(/Using (\w+[\w_-]*) tool\.\.\./);
         if (toolMatch) {
           const toolName = toolMatch[1];
           return (
             <span key={index} className="ai-tool-usage">
-              {toolName === 'edit_document' && (
+              {toolName === 'edit_document' ? (
                 <Pencil size={14} />
-              )}
-              Using <strong>{toolName}</strong> tool...
+              ) : toolName === 'search' ? (
+                <Globe size={14} />
+              ) : null}
+              Using tool <strong>{toolName}</strong>...
             </span>
           );
         }
@@ -238,6 +252,8 @@ export default function AIAssistantSidebar({
     let changes: LexicalChange[] = [];
     let reasoning = '';
     let summary = '';
+    let sources: Array<{ title: string; url: string }> = [];
+    let streamFinalized = false;
 
     try {
       while (true) {
@@ -265,6 +281,27 @@ export default function AIAssistantSidebar({
                 ));
                 break;
 
+              case 'searching':
+                if (!accumulatedContent.includes('Using search tool...')) {
+                  const prefix = accumulatedContent ? '\n\n' : '';
+                  accumulatedContent += prefix + 'Using search tool...';
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === messageId
+                      ? { ...msg, content: accumulatedContent, isStreaming: true, isLoading: false }
+                      : msg
+                  ));
+                }
+                break;
+
+              case 'search_complete':
+                accumulatedContent = accumulatedContent.replace('Using search tool...', 'Found results\n\n');
+                setMessages(prev => prev.map(msg =>
+                  msg.id === messageId
+                    ? { ...msg, content: accumulatedContent, isStreaming: true, isLoading: false }
+                    : msg
+                ));
+                break;
+
               case 'changes':
                 // Buffer changes - don't apply yet
                 changes = event.changes;
@@ -285,6 +322,9 @@ export default function AIAssistantSidebar({
 
               case 'summary':
                 summary = event.summary;
+                if (event.sources && Array.isArray(event.sources) && event.sources.length > 0) {
+                  sources = event.sources;
+                }
                 // Append summary to the accumulated content
                 if (summary && !accumulatedContent.includes(summary)) {
                   accumulatedContent += `\n\n${summary}`;
@@ -297,13 +337,17 @@ export default function AIAssistantSidebar({
                 break;
 
               case 'complete':
-                console.log('[AIAssistant] Stream complete. Changes:', changes.length, 'Summary:', !!summary);
+                streamFinalized = true;
+                if (event.sources && Array.isArray(event.sources) && event.sources.length > 0) {
+                  sources = event.sources;
+                }
+                console.log('[AIAssistant] Stream complete. Changes:', changes.length, 'Sources:', sources.length);
                 console.log('[AIAssistant] Final accumulated content:', accumulatedContent);
 
                 const finalizedContent = accumulatedContent.replace(
                   /Using edit_document tool\.\.\./g,
                   'Edited document'
-                );
+                ).replace(/Searching the web\.\.\./g, 'Using search tool...');
 
                 // Apply all buffered changes with diff highlighting
                 if (changes.length > 0 && onApplyLexicalChanges) {
@@ -316,7 +360,13 @@ export default function AIAssistantSidebar({
 
                 setMessages(prev => prev.map(msg =>
                   msg.id === messageId
-                    ? { ...msg, content: finalContent, isStreaming: false, isLoading: false }
+                    ? {
+                        ...msg,
+                        content: finalContent,
+                        isStreaming: false,
+                        isLoading: false,
+                        sources: sources.length > 0 ? sources : undefined,
+                      }
                     : msg
                 ));
 
@@ -334,6 +384,28 @@ export default function AIAssistantSidebar({
             console.error('[AIAssistant] Error parsing SSE event:', parseError);
           }
         }
+      }
+      // Fallback: if the stream ended without a 'complete' event, finalize the message
+      if (!streamFinalized) {
+        console.log('[AIAssistant] Stream ended without complete event, finalizing manually');
+        const finalizedContent = accumulatedContent
+          .replace(/Using edit_document tool\.\.\./g, 'Edited document')
+          .replace(/Searching the web\.\.\./g, 'Using search tool...')
+          .trim() || 'Response received.';
+        if (changes.length > 0 && onApplyLexicalChanges) {
+          onApplyLexicalChanges(changes, [...contextImages, ...selectedContextImages]);
+        }
+        setMessages(prev => prev.map(msg =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                content: finalizedContent,
+                isStreaming: false,
+                isLoading: false,
+                sources: sources.length > 0 ? sources : undefined,
+              }
+            : msg
+        ));
       }
     } finally {
       reader.releaseLock();
@@ -630,6 +702,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
       type: 'user',
       content: composedMessage,
       timestamp: new Date(),
+      contextSnippets: contextSnippets.length > 0 ? contextSnippets.map((snippet) => snippet.text) : undefined,
       images: allImages.length > 0 ? allImages : undefined
     };
 
@@ -639,6 +712,8 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
     // Clear selected images after adding to message (like text context snippets)
     onRemoveSelectedImage?.();
+    onClearContextSnippets?.();
+    onClearEditorSelection?.();
 
     // NOTE: Don't clear contextImages here - they're needed in triggerAIRequest
     // They'll be cleared after the request completes successfully
@@ -858,11 +933,21 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                     <div className="ai-message-streaming">
                       <div className="ai-message-text">
                         <FormattedMessageContent content={message.content} />
-                        <span className="ai-streaming-cursor">▊</span>
+                        <span className="ai-streaming-cursor">▍</span>
                       </div>
                     </div>
                   ) : (
                     <>
+                      {message.type === 'user' && message.contextSnippets && message.contextSnippets.length > 0 && (
+                        <div className="ai-message-context-preview">
+                          {message.contextSnippets.map((snippet, idx) => (
+                            <div key={`${message.id}-context-${idx}`} className="ai-message-context-chip" title={snippet}>
+                              <Sparkles size={13} />
+                              <span>{snippet}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {message.type === 'user' && message.images && message.images.length > 0 && (
                         <div className="ai-message-image-preview">
                           {message.images.map((img, idx) => (
@@ -878,12 +963,29 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                       <div
                         className={
                           message.type === 'user'
-                            ? 'ai-message-text !ml-auto !w-fit !max-w-[82%] !rounded-2xl !border !border-transparent !bg-slate-200 !px-3 !py-2 !text-slate-800'
+                            ? 'ai-message-text !ml-auto !w-fit !max-w-[82%] !rounded-2xl !border !border-transparent !bg-[#e5e7eb] !px-3 !py-2 !text-slate-800'
                             : 'ai-message-text'
                         }
                       >
                         <FormattedMessageContent content={message.content} />
                       </div>
+                      {message.type === 'assistant' && message.sources && message.sources.length > 0 && (
+                        <div className="ai-message-sources">
+                          <span className="ai-sources-label">Sources</span>
+                          {message.sources.map((source, idx) => (
+                            <a
+                              key={idx}
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ai-source-link"
+                            >
+                              <ExternalLink size={12} />
+                              <span className="ai-source-title">{source.title}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                       {message.type === 'assistant' && !message.isLoading && (
                         <div className="ai-message-actions">
                           <button
