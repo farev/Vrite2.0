@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { User, LogOut, Settings, ChevronDown, LogIn } from 'lucide-react';
+import { User, LogOut, Settings, LogIn } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
@@ -63,7 +63,7 @@ export default function UserProfile() {
     return (
       <button
         onClick={() => showSignupModal('save')}
-        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium"
+        className="flex items-center gap-2 px-4 py-2 bg-[#20a4f3] hover:bg-[#1693de] text-white rounded-lg transition-colors font-medium"
       >
         <LogIn className="w-4 h-4" />
         Sign In
@@ -78,7 +78,7 @@ export default function UserProfile() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+        className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#e9f6fe] transition-colors"
       >
         {avatarUrl ? (
           <img
@@ -91,19 +91,18 @@ export default function UserProfile() {
             <User className="w-5 h-5 text-white" />
           </div>
         )}
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300 max-w-32 truncate">
+        <span className="text-sm font-medium text-[#1f2937] max-w-32 truncate">
           {displayName}
         </span>
-        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+        <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-[#d7ebf9] py-1 z-50">
+          <div className="px-4 py-3 border-b border-[#e9f6fe]">
+            <p className="text-sm font-medium text-gray-900 truncate">
               {displayName}
             </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+            <p className="text-xs text-gray-500 truncate">
               {user.email}
             </p>
           </div>
@@ -113,7 +112,7 @@ export default function UserProfile() {
               setIsOpen(false);
               // TODO: Navigate to settings page
             }}
-            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-[#e9f6fe] transition-colors"
           >
             <Settings className="w-4 h-4" />
             Settings
@@ -121,7 +120,7 @@ export default function UserProfile() {
 
           <button
             onClick={handleSignOut}
-            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-rose-50 transition-colors"
           >
             <LogOut className="w-4 h-4" />
             Sign Out

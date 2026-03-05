@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
+import { getActiveDriveToken } from '@/lib/get-drive-token';
 import { useAuth } from '@/contexts/AuthContext';
 import { generateTempId } from '@/lib/storage';
 import {
@@ -55,36 +56,33 @@ export default function Home() {
     const hadDrivePreviously = await hasEverConnectedDrive(session.user.id);
 
     if (hadDrivePreviously) {
-      // Token expired - auto redirect to sign in
-      console.log('[Home] Drive token expired, redirecting to sign in...');
+      // Token expired — try a silent refresh using the stored Google refresh_token
+      console.log('[Home] Drive token expired, attempting silent refresh...');
+      const refreshed = await getActiveDriveToken();
+      if (refreshed) {
+        console.log('[Home] Drive token refreshed silently — no redirect needed');
+        return;
+      }
 
-      // Save current path for return
+      // Refresh failed (token revoked, credentials missing, etc.) — fall back to OAuth
+      console.log('[Home] Silent refresh failed, redirecting to sign in...');
       localStorage.setItem('oauth_return_path', window.location.pathname);
-
-      // Redirect to sign in
       const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
+          queryParams: { access_type: 'offline', prompt: 'consent' },
           scopes: 'email profile openid https://www.googleapis.com/auth/drive.file',
         },
       });
-
       if (error) {
         console.error('[Home] Failed to initiate OAuth:', error);
-        // Fall back to showing toast
         setShowDriveToast(true);
       }
     } else {
-      // User never granted Drive permissions - show toast notification
+      // User never granted Drive permissions — show toast notification
       console.log('[Home] User never granted Drive permissions, showing notification');
-
-      // Check if user dismissed the toast before
       const dismissed = sessionStorage.getItem(DRIVE_PERMISSION_TOAST_DISMISSED_KEY);
       if (!dismissed) {
         setShowDriveToast(true);
@@ -227,9 +225,24 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, [router, supabase, handleMissingDriveToken]);
 
-  const handleEnableDrivePermissions = () => {
+  const handleEnableDrivePermissions = async () => {
     setShowDriveToast(false);
-    showSignupModal('permissions-missing');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && !session.user.is_anonymous) {
+      // Authenticated user — trigger OAuth to refresh Drive token
+      const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`;
+      localStorage.setItem('oauth_return_path', window.location.pathname);
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+          scopes: 'email profile openid https://www.googleapis.com/auth/drive.file',
+        },
+      });
+    } else {
+      showSignupModal('permissions-missing');
+    }
   };
 
   const handleDismissToast = () => {
