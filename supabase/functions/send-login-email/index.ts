@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
     const supabase = createSupabaseClient();
     const { data: user, error: userError } = await supabase
       .from('users')
-      .select('id, email, welcome_email_sent_at')
+      .select('id, email, full_name, welcome_email_sent_at')
       .eq('id', payload.userId)
       .single();
 
@@ -67,6 +67,8 @@ Deno.serve(async (req) => {
       );
     }
 
+    const firstName = user.full_name?.split(' ')[0] || 'there';
+
     const emailResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -78,20 +80,19 @@ Deno.serve(async (req) => {
         to: recipient,
         subject: 'Welcome to VibeWrite',
         text: `Welcome to VibeWrite
-Hey there,
+Hey ${firstName},
 
-Welcome to VibeWrite.
+Welcome to VibeWrite!
 
-We built this because we were tired of "dumb" word processors. VibeWrite is AI-native from the ground up—think Cursor, but for documents. Instead of staring at a blank page, just hit Cmd + K and let the editor work with you. Whether you're drafting a memo or refactoring an entire essay, the goal is to keep you in flow.
+Wasting time on manual work is a thing of the past. We have seen this with coding and now he have built it for writing. VibeWrite assists you with writing, formatting, and finishing all of your documents. Need an specific format? Need beatiful tables? Need properly crafted formulas? Just ask VibeWrite to do it!
 
-We need your help: We’re building this in the open and want to make sure we’re solving the right problems. If you have 15 minutes, we’d love to hop on a quick call to hear your thoughts https://calendly.com/d/ctmj-ssb-tdc/vibewrite.
+We could use your help. We want to make sure we’re solving the right problems. If you have 15 minutes, we’d love to hop on a quick call to hear your thoughts https://calendly.com/fabiareor/30min.
 
 If you're short on time, just reply to this email and tell us: what’s the one thing you wish your current writing tool could do?
 
-Cheers,
-
+Best,
 Fabian and Carlos
-Founders, VibeWrite`,
+Founders at VibeWrite`,
       }),
     });
 
