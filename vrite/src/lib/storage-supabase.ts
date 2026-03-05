@@ -178,7 +178,7 @@ export async function listDocumentsFromSupabase(): Promise<DocumentData[]> {
     return (docs || []).map(doc => ({
       id: doc.id,
       title: doc.title,
-      editorState: '{"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}}', // Empty editor state for list view
+      editorState: JSON.stringify(doc.editor_state),
       lastModified: new Date(doc.last_modified).getTime(),
     }));
   } catch (error) {
