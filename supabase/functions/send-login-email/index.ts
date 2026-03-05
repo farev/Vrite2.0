@@ -51,6 +51,7 @@ Deno.serve(async (req) => {
 
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
     const resendFrom = Deno.env.get('RESEND_FROM');
+    const appUrl = Deno.env.get('APP_URL') || 'https://www.vibewrite.work';
     if (!resendApiKey || !resendFrom) {
       console.error('[send-login-email] Missing Resend configuration');
       return new Response(
@@ -79,20 +80,26 @@ Deno.serve(async (req) => {
         from: resendFrom,
         to: recipient,
         subject: 'Welcome to VibeWrite',
-        text: `Welcome to VibeWrite
-Hey ${firstName},
-
-Welcome to VibeWrite!
-
-Wasting time on manual work is a thing of the past. We have seen this with coding and now he have built it for writing. VibeWrite assists you with writing, formatting, and finishing all of your documents. Need an specific format? Need beatiful tables? Need properly crafted formulas? Just ask VibeWrite to do it!
-
-We could use your help. We want to make sure we’re solving the right problems. If you have 15 minutes, we’d love to hop on a quick call to hear your thoughts https://calendly.com/fabiareor/30min.
-
-If you're short on time, just reply to this email and tell us: what’s the one thing you wish your current writing tool could do?
-
-Best,
-Fabian and Carlos
-Founders at VibeWrite`,
+        html: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#ffffff;font-family:Georgia,serif;color:#1a1a1a">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;padding:48px 32px">
+    <tr><td>
+      <p style="font-size:16px;line-height:1.7;margin:0 0 16px">Hey ${firstName},</p>
+      <p style="font-size:16px;line-height:1.7;margin:0 0 16px">Welcome to VibeWrite!</p>
+      <p style="font-size:16px;line-height:1.7;margin:0 0 16px">Wasting time on manual work is a thing of the past. We have seen this with coding and now we have built it for writing. VibeWrite assists you with writing, formatting, and finishing all of your documents. Need a specific format? Need beautiful tables? Need properly crafted formulas? Just ask VibeWrite to do it!</p>
+      <p style="font-size:16px;line-height:1.7;margin:0 0 16px">We want to make sure we’re solving the right problems and could use your help. If you have 15 minutes, we’d love to hop on a quick call to hear your thoughts: <a href="https://calendly.com/fabiareor/30min" style="color:#2563eb">book a time here</a>.</p>
+      <p style="font-size:16px;line-height:1.7;margin:0 0 32px">If you’re short on time, just reply to this email and tell us: what’s the one thing you wish your current writing tool could do?</p>
+      <p style="font-size:16px;line-height:1.7;margin:0 0 48px">Best,<br>Fabian and Carlos<br><span style="color:#6b7280">Founders at VibeWrite</span></p>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:0 0 32px">
+      <div style="text-align:center">
+        <img src="${appUrl}/vibewrite-logo.png" alt="VibeWrite" width="180" style="display:block;margin:0 auto;max-width:180px">
+      </div>
+    </td></tr>
+  </table>
+</body>
+</html>`,
       }),
     });
 
