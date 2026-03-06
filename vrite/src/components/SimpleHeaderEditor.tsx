@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { LexicalEditor } from 'lexical';
 import { HeaderFooterRichEditor } from './HeaderFooterRichEditor';
 
@@ -25,8 +25,13 @@ export function SimpleHeaderEditor({
   onEditorBlur,
   onEditingChange,
 }: SimpleHeaderEditorProps) {
+  const [forceEdit, setForceEdit] = useState(false);
+
   return (
-    <div className="document-header-editor">
+    <div
+      className="document-header-editor"
+      onDoubleClick={() => setForceEdit(true)}
+    >
       <HeaderFooterRichEditor
         initialState={headerEditorState}
         placeholder=""
@@ -34,7 +39,11 @@ export function SimpleHeaderEditor({
         onStateChange={onHeaderChange}
         onEditorFocus={onEditorFocus}
         onEditorBlur={onEditorBlur}
-        onEditingChange={onEditingChange}
+        onEditingChange={(editing) => {
+          if (!editing) setForceEdit(false);
+          onEditingChange?.(editing);
+        }}
+        forceEdit={forceEdit}
       />
     </div>
   );

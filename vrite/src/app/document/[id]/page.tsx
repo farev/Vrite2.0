@@ -260,157 +260,108 @@ export default function DocumentPage() {
       }
 
       if (format === 'pdf') {
-        // Inject @page size dynamically — CSS custom properties don't resolve
-        // inside @page rules, so we read the current page dimensions and inject
-        // a <style> element with the correct physical size.
-        const wrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
-        const widthPx = wrapper ? parseFloat(getComputedStyle(wrapper).getPropertyValue('--page-width')) : 816;
-        const heightPx = wrapper ? parseFloat(getComputedStyle(wrapper).getPropertyValue('--page-height')) : 1056;
-        const pageGap = wrapper
-          ? parseFloat(getComputedStyle(wrapper).getPropertyValue('--page-gap')) || 24
-          : 24;
-        const widthIn = (widthPx / 96).toFixed(4);
-        const heightIn = (heightPx / 96).toFixed(4);
+        setIsExporting(true);
+        try {
+          // 1. Read page settings from data attributes (set by DocumentEditor)
+          const wrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
+          const pageSize = wrapper?.dataset.pageSize || 'letter';
+          const margins = {
+            top:    parseFloat(wrapper?.dataset.marginTop    || '72'),
+            right:  parseFloat(wrapper?.dataset.marginRight  || '72'),
+            bottom: parseFloat(wrapper?.dataset.marginBottom || '72'),
+            left:   parseFloat(wrapper?.dataset.marginLeft   || '72'),
+          };
+          const footerShowPageNumber = wrapper?.dataset.footerShowPageNumber === 'true';
 
-        const printStyle = document.createElement('style');
-        printStyle.id = 'print-page-size';
-        printStyle.textContent = `@page { size: ${widthIn}in ${heightIn}in; margin: 0; }`;
-        document.head.appendChild(printStyle);
+          // 2. Clone the editor content
+          const contentEl = document.querySelector('.document-content-editable');
+          if (!contentEl) throw new Error('Editor content not found');
+          const clone = contentEl.cloneNode(true) as HTMLElement;
 
-        // ── Whitespace correction ────────────────────────────────────────────
-        // PaginationPlugin places page-break-containers based on screen layout.
-        // In @media print we apply box-sizing:border-box to .document-header-editor,
-        // shrinking it from ~144px (height:96px + padding-top:48px, content-box)
-        // to exactly 96px. This shifts every container ~48px upward in print.
-        // CSS alone can't reliably reposition the inline-height whitespace blocks,
-        // so we measure here and set the correct heights directly before printing.
-        const FOOTER_H = 96; // page-break-footer height (border-box, matches CSS)
-        const HEADER_PRINT_H = 96; // .document-header-editor height after border-box fix
+          // 3. Extract per-page header/footer HTML from the live DOM and the clone.
+          //    Each item's .html is the full Lexical innerHTML — all inline styles
+          //    (font-family, font-size, text-align, color, bold, italic, etc.) are
+          //    already embedded so Puppeteer renders them pixel-for-pixel as in the editor.
+          const getHFHtml = (el: Element | null): string =>
+            el?.textContent?.trim() ? (el.innerHTML || '') : '';
 
-        const docPage = document.querySelector('.document-page') as HTMLElement | null;
-        const headerEl = document.querySelector('.document-header-editor') as HTMLElement | null;
-        // Actual rendered height of the header in screen mode (content-box = ~144px)
-        const headerScreenH = headerEl ? headerEl.getBoundingClientRect().height : 144;
-        // How much higher containers sit in print than screen (print header is shorter)
-        const headerDelta = Math.round(headerScreenH - HEADER_PRINT_H);
+          const globalHeaderEl = document.querySelector('.document-header-editor .hf-content-editable');
+          const globalFooterEl = document.querySelector('.document-footer-editor .hf-content-editable');
 
-        type Saved = {
-          container: HTMLElement;
-          origVar: string;
-          topEl: HTMLElement | null;
-          origTopHeight: string;
-          origTopPriority: string;
-        };
-        let saved: Saved[] = [];
+          // Page count is known here: one page per break + 1
+          const pageBreakContainers = Array.from(clone.querySelectorAll('.page-break-container'));
+          const totalPages = pageBreakContainers.length + 1;
 
-        const restoreCorrections = () => {
-          saved.forEach(({ container, origVar, topEl, origTopHeight, origTopPriority }) => {
-            origVar
-              ? container.style.setProperty('--corrected-whitespace', origVar)
-              : container.style.removeProperty('--corrected-whitespace');
+          // Helper: wrap footer HTML with a right-aligned "Page X of Y" if enabled.
+          // We bake the page number into the HTML on the client so the server can
+          // render it as part of the footer mini-PDF — no separate pdf-lib text overlay needed.
+          const withPageNum = (html: string, pageNum: number): string => {
+            if (!footerShowPageNumber) return html;
+            const numSpan = `<span style="font-size:9pt;color:#9ca3af;white-space:nowrap;` +
+              `font-family:'Times New Roman',serif;flex-shrink:0;">` +
+              `Page ${pageNum} of ${totalPages}</span>`;
+            return `<div style="display:flex;justify-content:space-between;` +
+              `align-items:flex-end;width:100%;">` +
+              `<div style="flex:1;">${html}</div>` +
+              `<div style="padding-left:12pt;">${numSpan}</div></div>`;
+          };
 
-            if (!topEl) return;
-            if (origTopHeight) {
-              topEl.style.setProperty('height', origTopHeight, origTopPriority);
-            } else {
-              topEl.style.removeProperty('height');
-            }
+          //    Array layout (N pages total):
+          //      headerItems[0]   = global header   (page 1)
+          //      headerItems[1..] = page-break headers (pages 2..N)
+          //      footerItems[0..N-2] = page-break footers (pages 1..N-1)
+          //      footerItems[N-1] = global footer    (page N)
+          const headerItems: { html: string }[] = [{ html: getHFHtml(globalHeaderEl) }];
+          const footerItems: { html: string }[] = [];
+
+          // 4. Replace page-break-containers with simple break divs; collect per-page HTML.
+          let pageNum = 1;
+          pageBreakContainers.forEach((container) => {
+            const breakFooterEl = container.querySelector('.page-break-footer .hf-content-editable');
+            const breakHeaderEl = container.querySelector('.page-break-header .hf-content-editable');
+            footerItems.push({ html: withPageNum(getHFHtml(breakFooterEl), pageNum) });
+            headerItems.push({ html: getHFHtml(breakHeaderEl) });
+            pageNum++;
+
+            const breakDiv = document.createElement('div');
+            breakDiv.className = 'pdf-page-break';
+            container.parentNode!.replaceChild(breakDiv, container);
           });
-          saved = [];
-        };
+          footerItems.push({ html: withPageNum(getHFHtml(globalFooterEl), totalPages) });
 
-        const applyCorrections = () => {
-          restoreCorrections();
-
-          document.querySelectorAll<HTMLElement>('.page-break-container').forEach((container, i) => {
-            if (!docPage) return;
-
-            const topEl = container.querySelector<HTMLElement>('.page-break-top');
-            const originalWhitespace = topEl ? parseFloat(topEl.style.height || '0') || 0 : 0;
-
-            // Container's top edge relative to .document-page in screen coordinates.
-            // Subtracting both rects cancels out any scroll offset.
-            const containerScreenTop =
-              container.getBoundingClientRect().top - docPage.getBoundingClientRect().top;
-
-            // Convert to print coordinates:
-            // - headerDelta: print header is border-box (96px), screen may differ
-            // - i * pageGap: each previous break's gap is display:none in print,
-            //   so screen positions are i * pageGap too large vs. print positions
-            const containerPrintTop = containerScreenTop - headerDelta - (i * pageGap);
-
-            // The footer for page-break i should end at the (i+1)-th page boundary.
-            const footerEnd = (i + 1) * heightPx;
-            // floor() and -2px so footer ends BEFORE the boundary, not AT it.
-            // Chrome pushes content landing exactly on the boundary to the next page.
-            const computedWhitespace = Math.floor(footerEnd - FOOTER_H - containerPrintTop) - 2;
-
-            // Guard against bad measurements that can move a footer to its own page.
-            // If computed whitespace collapses to <= 0, fall back to near-screen spacing.
-            const newWhitespace =
-              computedWhitespace > 0
-                ? Math.max(0, Math.min(computedWhitespace, originalWhitespace || computedWhitespace))
-                : Math.max(originalWhitespace - 2, 0);
-
-            // Set both the CSS variable and an inline !important height on .page-break-top.
-            // This survives print-media transitions where React can re-apply inline styles.
-            saved.push({
-              container,
-              origVar: container.style.getPropertyValue('--corrected-whitespace'),
-              topEl,
-              origTopHeight: topEl ? topEl.style.getPropertyValue('height') : '',
-              origTopPriority: topEl ? topEl.style.getPropertyPriority('height') : '',
-            });
-
-            container.style.setProperty('--corrected-whitespace', `${newWhitespace}px`);
-            if (topEl) {
-              topEl.style.setProperty('height', `${newWhitespace}px`, 'important');
-            }
+          // 5. POST to Puppeteer API. The server renders each header/footer HTML as a
+          //    mini vector PDF and overlays it on the correct page via pdf-lib.
+          const response = await fetch('/api/export/pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              html: clone.innerHTML,
+              title: documentTitle,
+              pageSize,
+              margins,
+              headerItems,
+              footerItems,
+            }),
           });
-        };
-        applyCorrections();
-        // ────────────────────────────────────────────────────────────────────
 
-        // Let the browser commit style changes before opening print preview.
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => resolve());
-          });
-        });
-
-        // Keep print styles/variables applied until print flow fully finishes.
-        // Some Chrome versions return from window.print() before capture completes.
-        const mediaQueryList = window.matchMedia('print');
-        let cleanedUp = false;
-        const handleBeforePrint = () => {
-          applyCorrections();
-        };
-
-        const cleanupAfterPrint = () => {
-          if (cleanedUp) return;
-          cleanedUp = true;
-
-          mediaQueryList.removeEventListener('change', handlePrintMediaChange);
-          window.removeEventListener('beforeprint', handleBeforePrint);
-
-          restoreCorrections();
-
-          if (printStyle.parentNode) {
-            printStyle.parentNode.removeChild(printStyle);
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error((err as { error?: string }).error || 'PDF export failed');
           }
-        };
 
-        const handlePrintMediaChange = (e: MediaQueryListEvent) => {
-          if (!e.matches) {
-            cleanupAfterPrint();
-          }
-        };
-
-        window.addEventListener('beforeprint', handleBeforePrint);
-        window.addEventListener('afterprint', cleanupAfterPrint, { once: true });
-        mediaQueryList.addEventListener('change', handlePrintMediaChange);
-
-        window.print();
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${documentTitle || 'document'}.pdf`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch (error) {
+          console.error('[PDF Export] Error:', error);
+          alert('Failed to export PDF. Please try again.');
+        } finally {
+          setIsExporting(false);
+        }
         return;
       }
     } catch (error) {

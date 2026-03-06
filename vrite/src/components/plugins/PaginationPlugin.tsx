@@ -18,7 +18,7 @@ interface PaginationPluginProps {
   footerHeight: number; // in pixels
   headerHeight?: number; // in pixels (UI header, not margin)
   onPageCountChange?: (count: number) => void;
-  headerContent?: string; // Content from first page header to use on all pages
+  headerContent?: string; // Default header for newly created page breaks (template from page 1)
 }
 
 // Enable for debugging
@@ -42,7 +42,7 @@ export default function PaginationPlugin({
   footerHeight,
   headerHeight = 96, // Default header height (matches margin)
   onPageCountChange,
-  headerContent = '', // Content from first page header
+  headerContent = '', // Default header for newly created page breaks
 }: PaginationPluginProps) {
   const [editor] = useLexicalComposerContext();
   const [pageCount, setPageCount] = useState(1);
@@ -206,7 +206,7 @@ export default function PaginationPlugin({
       const newPageCount = breaks.length + 1;
       debugLog('New page count:', newPageCount);
 
-      // Create signature to detect changes (include headerContent so header changes trigger updates)
+      // Create signature to detect changes (include headerContent so header template changes trigger updates)
       const signature = `${headerContent}|${breaks.map((b) => `${b.key}:${Math.round(b.height)}`).join('|')}`;
 
       // If nothing changed, just update page count if needed
@@ -226,27 +226,35 @@ export default function PaginationPlugin({
         () => {
           const root = $getRoot();
 
-          // Remove existing page breaks
+          // Capture each existing page break's header/footer content before removing it,
+          // keyed by page number so it can be restored to the new node at the same position.
+          const savedContent = new Map<number, { headerText: string; footerText: string }>();
           let removedCount = 0;
           root.getChildren().forEach((node) => {
             if ($isPageBreakNode(node)) {
+              savedContent.set(node.getPageNumber(), {
+                headerText: node.getHeaderText(),
+                footerText: node.getFooterText(),
+              });
               node.remove();
               removedCount++;
             }
           });
           debugLog('Removed existing breaks:', removedCount);
 
-          // Insert new page breaks
+          // Insert new page breaks, preserving per-page header/footer content.
+          // New page breaks (no prior content) default to headerContent for the header
+          // (template from the first-page header) and empty for the footer.
           breaks.forEach((breakItem) => {
             const targetNode = $getNodeByKey(breakItem.key);
             if (targetNode) {
-              // Pass headerContent so all page headers match the first page
+              const existing = savedContent.get(breakItem.pageNumber);
               const pageBreak = $createPageBreakNode(
                 Math.round(breakItem.height),
                 breakItem.pageNumber,
-                '', // footerText - empty uses default page number
-                headerContent, // headerText - use content from first page header
-                true // showPageNumbers
+                existing?.footerText ?? '',            // preserve custom footer or empty
+                existing?.headerText ?? headerContent, // preserve custom header or use template
+                true
               );
               targetNode.insertBefore(pageBreak);
               debugLog('Inserted page break before:', breakItem.key, 'page:', breakItem.pageNumber);

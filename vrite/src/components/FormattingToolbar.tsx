@@ -362,9 +362,9 @@ export default function FormattingToolbar({
             } else {
               setHighlightColor(normalizeColorToHex(rawHighlight) || 'transparent');
             }
-          } else {
-            setHighlightColor('transparent');
-          }
+        } else {
+          setHighlightColor('transparent');
+        }
         } else {
           // No style, use defaults
           setFontFamily('Times New Roman');
@@ -372,6 +372,7 @@ export default function FormattingToolbar({
           setTextColor('#000000');
           setHighlightColor('transparent');
         }
+      }
       }
     });
   }, [editor]);

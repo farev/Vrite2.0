@@ -1,6 +1,6 @@
 'use client';
 
-import React, { type JSX } from 'react';
+import React, { useState, type JSX } from 'react';
 import type {
   EditorConfig,
   LexicalEditor,
@@ -55,8 +55,8 @@ function PageBreakComponent({
   onEditorFocus?: (editor: LexicalEditor) => void;
   onEditorBlur?: () => void;
 }) {
-  const footerPlaceholder = '';
-  const headerPlaceholder = '';
+  const [forceEditFooter, setForceEditFooter] = useState(false);
+  const [forceEditHeader, setForceEditHeader] = useState(false);
 
   return (
     <div
@@ -76,14 +76,17 @@ function PageBreakComponent({
       <div
         className="page-break-footer"
         style={{ height: `${footerHeight}px` }}
+        onDoubleClick={() => setForceEditFooter(true)}
       >
         <HeaderFooterRichEditor
           initialState={footerEditorState || null}
-          placeholder={footerPlaceholder}
+          placeholder=""
           label="Footer"
           onStateChange={onFooterEdit}
           onEditorFocus={onEditorFocus}
           onEditorBlur={onEditorBlur}
+          onEditingChange={(editing) => { if (!editing) setForceEditFooter(false); }}
+          forceEdit={forceEditFooter}
         />
       </div>
 
@@ -97,14 +100,17 @@ function PageBreakComponent({
       <div
         className="page-break-header"
         style={{ height: `${headerHeight}px` }}
+        onDoubleClick={() => setForceEditHeader(true)}
       >
         <HeaderFooterRichEditor
           initialState={headerEditorState || null}
-          placeholder={headerPlaceholder}
+          placeholder=""
           label="Header"
           onStateChange={onHeaderEdit}
           onEditorFocus={onEditorFocus}
           onEditorBlur={onEditorBlur}
+          onEditingChange={(editing) => { if (!editing) setForceEditHeader(false); }}
+          forceEdit={forceEditHeader}
         />
       </div>
     </div>

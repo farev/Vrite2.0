@@ -873,13 +873,13 @@ export default function DocumentEditor({
             // Update existing temporary document
             updateTemporaryDocument(tempId, {
               title: documentTitle,
-              editorState: JSON.stringify(editorState.toJSON()),
+              editorState: JSON.stringify({ ...editorState.toJSON(), __hf__: headerFooterSettings }),
             });
           } else {
             // Create new temporary document
             const newTempId = saveTemporaryDocument({
               title: documentTitle,
-              editorState: JSON.stringify(editorState.toJSON()),
+              editorState: JSON.stringify({ ...editorState.toJSON(), __hf__: headerFooterSettings }),
             });
 
             setDocumentId(newTempId);
@@ -915,7 +915,7 @@ export default function DocumentEditor({
       const documentData: DocumentData = {
         id: documentId,
         title: documentTitle,
-        editorState: JSON.stringify(editorState.toJSON()),
+        editorState: JSON.stringify({ ...editorState.toJSON(), __hf__: headerFooterSettings }),
         lastModified: Date.now(),
       };
 
@@ -1060,7 +1060,13 @@ export default function DocumentEditor({
             if (savedDoc.editorState) {
               // Update the Lexical editor with the loaded editor state
               console.log('[Editor] Loading from Lexical JSON');
-              const parsedState = editorRef.parseEditorState(savedDoc.editorState);
+              const stateObj = JSON.parse(savedDoc.editorState);
+              // Extract and restore header/footer settings if present
+              if (stateObj.__hf__) {
+                setHeaderFooterSettings(stateObj.__hf__);
+                delete stateObj.__hf__;
+              }
+              const parsedState = editorRef.parseEditorState(JSON.stringify(stateObj));
               editorRef.setEditorState(parsedState);
               console.log('[Editor] Content loaded into editor');
             } else {
@@ -1677,6 +1683,13 @@ export default function DocumentEditor({
                 className="document-editor-wrapper"
                 style={editorWrapperStyle}
                 data-page-size={pageSize}
+                data-margin-top={documentMargins.top}
+                data-margin-right={documentMargins.right}
+                data-margin-bottom={documentMargins.bottom}
+                data-margin-left={documentMargins.left}
+                data-header-enabled={headerFooterSettings.headerEnabled ? 'true' : 'false'}
+                data-footer-enabled={headerFooterSettings.footerEnabled ? 'true' : 'false'}
+                data-footer-show-page-number={headerFooterSettings.footerShowPageNumber ? 'true' : 'false'}
               >
                   <div className="document-page" style={{ minHeight: `${pageStackHeight}px` }}>
                     {/* Header - for page 1 */}

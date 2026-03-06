@@ -48,6 +48,7 @@ interface HeaderFooterRichEditorProps {
   onEditorBlur?: () => void;
   onEditingChange?: (editing: boolean) => void;
   className?: string;
+  forceEdit?: boolean; // External trigger to enter edit mode
 }
 
 function EditorBridge({
@@ -66,18 +67,18 @@ function EditorBridge({
   const [editor] = useLexicalComposerContext();
   const hasInitialized = useRef(false);
 
-  // Load initial state once
+  // Load initial state once — but only after it arrives (document load is async,
+  // so initialState starts as null and updates later with the saved state).
   useEffect(() => {
     if (hasInitialized.current) return;
+    if (!initialState) return; // Wait until a real state arrives before marking initialized
     hasInitialized.current = true;
 
-    if (initialState) {
-      try {
-        const parsed = editor.parseEditorState(initialState);
-        editor.setEditorState(parsed);
-      } catch {
-        // If parsing fails, leave editor with default empty state
-      }
+    try {
+      const parsed = editor.parseEditorState(initialState);
+      editor.setEditorState(parsed);
+    } catch {
+      // If parsing fails, leave editor with default empty state
     }
   }, [editor, initialState]);
 
@@ -180,8 +181,16 @@ export function HeaderFooterRichEditor({
   onEditorBlur,
   onEditingChange,
   className,
+  forceEdit,
 }: HeaderFooterRichEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
+
+  useEffect(() => {
+    if (forceEdit && !isEditing) {
+      setIsEditing(true);
+      onEditingChange?.(true);
+    }
+  }, [forceEdit]); // eslint-disable-line react-hooks/exhaustive-deps
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Double-click to enter editing
