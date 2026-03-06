@@ -4,6 +4,9 @@ import { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { recordDriveConnection } from '@/lib/check-drive-integration';
 
+// Google access tokens expire in 1 hour; store with a 5-minute safety buffer
+const GOOGLE_TOKEN_TTL_MS = 55 * 60 * 1000;
+
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
@@ -24,10 +27,19 @@ export async function GET(request: NextRequest) {
 
     console.log('[AuthCallback] Session established for user:', data.session?.user.email);
 
-    // Record successful Drive connection if user has provider_token
+    // Record successful Drive connection and store tokens for silent refresh
     if (data.session?.provider_token && data.session?.user?.id) {
-      await recordDriveConnection(data.session.user.id, data.session.user.email, supabase);
-      console.log('[AuthCallback] Recorded Drive connection for user');
+      await recordDriveConnection(
+        data.session.user.id,
+        data.session.user.email,
+        supabase,
+        {
+          accessToken: data.session.provider_token,
+          refreshToken: data.session.provider_refresh_token ?? null,
+          expiresAt: new Date(Date.now() + GOOGLE_TOKEN_TTL_MS),
+        }
+      );
+      console.log('[AuthCallback] Recorded Drive connection and stored tokens for user');
     }
 
     // Trigger one-time welcome email via Supabase Edge Function (best effort)

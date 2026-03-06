@@ -5,6 +5,7 @@
 
 import { GoogleDriveClient } from './google-drive';
 import { createClient } from './supabase/client';
+import { getActiveDriveToken } from './get-drive-token';
 import * as anonymousStorage from './storage-anonymous';
 import * as supabaseStorage from './storage-supabase';
 
@@ -23,7 +24,6 @@ const AUTO_SAVE_INTERVAL = 30000; // 30 seconds in milliseconds
  * Routes to appropriate storage based on authentication type
  */
 export async function saveDocument(data: DocumentData): Promise<DocumentData> {
-  // Get access token from Supabase session
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
 
@@ -32,20 +32,15 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
     throw new Error('Not authenticated');
   }
 
-  const isAnonymous = session.user.is_anonymous || false;
-  const hasProviderToken = !!session.provider_token;
-
-  // Anonymous users or users without OAuth tokens save to Supabase database
-  if (isAnonymous || !hasProviderToken) {
+  if (session.user.is_anonymous) {
     return supabaseStorage.saveDocumentToSupabase(data);
   }
 
-  // Authenticated OAuth users save to Google Drive
+  const accessToken = await getActiveDriveToken();
 
-  const accessToken = session.provider_token;
-
+  // No Drive token available — fall back to Supabase
   if (!accessToken) {
-    throw new Error('No access token available');
+    return supabaseStorage.saveDocumentToSupabase(data);
   }
 
   try {
@@ -84,17 +79,15 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
 export async function loadDocument(): Promise<DocumentData | null> {
   console.log('[Storage] Loading most recent document');
 
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = await getActiveDriveToken();
 
-  if (!session?.provider_token) {
-    console.error('[Storage] No session or provider token');
+  if (!accessToken) {
+    console.error('[Storage] No Drive token available');
     return null;
   }
 
   try {
-    // Use Google Drive client
-    const driveClient = new GoogleDriveClient(session.provider_token);
+    const driveClient = new GoogleDriveClient(accessToken);
     const files = await driveClient.listDocuments();
 
     if (files.length === 0) {
@@ -153,16 +146,14 @@ export function getLastModifiedString(timestamp: number): string {
 export async function hasSavedDocument(): Promise<boolean> {
   console.log('[Storage] Checking for saved documents');
 
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = await getActiveDriveToken();
 
-  if (!session?.provider_token) {
+  if (!accessToken) {
     return false;
   }
 
   try {
-    // Use Google Drive client
-    const driveClient = new GoogleDriveClient(session.provider_token);
+    const driveClient = new GoogleDriveClient(accessToken);
     const files = await driveClient.listDocuments();
     return files.length > 0;
   } catch (error) {
@@ -185,26 +176,22 @@ export async function listAllDocuments(): Promise<DocumentData[]> {
     return [];
   }
 
-  const isAnonymous = session.user.is_anonymous || false;
-  const hasProviderToken = !!session.provider_token;
-
-  // Anonymous users or users without OAuth use Supabase
-  if (isAnonymous || !hasProviderToken) {
+  if (session.user.is_anonymous) {
     console.log('[Storage] Listing from Supabase database');
     return supabaseStorage.listDocumentsFromSupabase();
   }
 
-  // Authenticated OAuth users use cloud storage
-  console.log('[Storage] Listing from Google Drive');
+  const accessToken = await getActiveDriveToken();
 
-  if (!session.provider_token) {
-    console.error('[Storage] No provider token available');
-    return [];
+  if (!accessToken) {
+    console.log('[Storage] No Drive token — listing from Supabase database');
+    return supabaseStorage.listDocumentsFromSupabase();
   }
 
+  console.log('[Storage] Listing from Google Drive');
+
   try {
-    // Use Google Drive client
-    const driveClient = new GoogleDriveClient(session.provider_token);
+    const driveClient = new GoogleDriveClient(accessToken);
     const files = await driveClient.listDocuments();
 
     return files.map(file => ({
@@ -233,29 +220,25 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
     return null;
   }
 
-  const isAnonymous = session.user.is_anonymous || false;
-  const hasProviderToken = !!session.provider_token;
-
   // Check if this is a UUID (Supabase document) or cloud storage ID
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId);
 
-  // Anonymous users, users without OAuth, or UUID documents use Supabase
-  if (isAnonymous || !hasProviderToken || isUUID) {
+  if (session.user.is_anonymous || isUUID) {
     console.log('[Storage] Loading from Supabase database');
     return supabaseStorage.loadDocumentFromSupabase(documentId);
   }
 
-  // Authenticated OAuth users with non-UUID IDs use cloud storage
-  console.log('[Storage] Loading from Google Drive');
+  const accessToken = await getActiveDriveToken();
 
-  if (!session.provider_token) {
-    console.error('[Storage] No provider token available');
-    return null;
+  if (!accessToken) {
+    console.log('[Storage] No Drive token — loading from Supabase database');
+    return supabaseStorage.loadDocumentFromSupabase(documentId);
   }
 
+  console.log('[Storage] Loading from Google Drive');
+
   try {
-    // Use Google Drive client
-    const driveClient = new GoogleDriveClient(session.provider_token);
+    const driveClient = new GoogleDriveClient(accessToken);
     const { editorState, metadata } = await driveClient.getDocument(documentId);
 
     return {
@@ -278,13 +261,11 @@ export { AUTO_SAVE_INTERVAL };
  * false if permissions are missing (403/PERMISSION_DENIED).
  */
 export async function checkDrivePermissions(): Promise<boolean> {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-
-  if (!session?.provider_token) return true; // No Drive expected
+  const accessToken = await getActiveDriveToken();
+  if (!accessToken) return true; // No Drive token — Drive not expected
 
   try {
-    const driveClient = new GoogleDriveClient(session.provider_token);
+    const driveClient = new GoogleDriveClient(accessToken);
     await driveClient.listDocuments();
     return true;
   } catch (error) {

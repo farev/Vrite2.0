@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Image as ImageIcon,
   Table,
+  MessageSquare,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
@@ -46,7 +47,7 @@ export default function MenuBar({
   onInsertTable,
   onInsertEquation,
 }: MenuBarProps) {
-  type DropdownKey = 'file' | 'export' | 'insert' | 'table';
+  type DropdownKey = 'file' | 'export' | 'insert' | 'table' | 'feedback';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(documentTitle);
@@ -55,7 +56,15 @@ export default function MenuBar({
   const [hoveredCell, setHoveredCell] = useState<{ row: number; col: number } | null>(null);
 
   const toggleDropdown = (key: DropdownKey) => {
-    setOpenDropdown((prev) => (prev === key ? null : key));
+    setOpenDropdown((prev) => {
+      const nextOpen = prev === key ? null : key;
+      if (nextOpen === 'feedback') {
+        window.dispatchEvent(
+          new CustomEvent('topbar-dropdown-opened', { detail: { source: 'feedback' } })
+        );
+      }
+      return nextOpen;
+    });
   };
 
   useEffect(() => {
@@ -82,6 +91,20 @@ export default function MenuBar({
       document.removeEventListener('mousedown', handleClickOutside, true);
     };
   }, []);
+
+  useEffect(() => {
+    const handleOtherDropdownOpened = (event: Event) => {
+      const customEvent = event as CustomEvent<{ source?: string }>;
+      if (customEvent.detail?.source !== 'feedback' && openDropdown === 'feedback') {
+        setOpenDropdown(null);
+      }
+    };
+
+    window.addEventListener('topbar-dropdown-opened', handleOtherDropdownOpened);
+    return () => {
+      window.removeEventListener('topbar-dropdown-opened', handleOtherDropdownOpened);
+    };
+  }, [openDropdown]);
 
   const commitTitleChange = () => {
     const trimmed = draftTitle.trim();
@@ -319,8 +342,47 @@ export default function MenuBar({
         </div>
       </div>
 
-      <div className="menu-bar-profile-slot">
-        <UserProfile />
+      <div className="menu-bar-actions">
+        <div className="menu-item menu-feedback-item">
+          <button
+            className="menu-button menu-feedback-button"
+            onClick={() => toggleDropdown('feedback')}
+            aria-haspopup="menu"
+            aria-expanded={openDropdown === 'feedback'}
+          >
+            <MessageSquare size={14} />
+            Feedback
+          </button>
+          {openDropdown === 'feedback' && (
+            <div className="menu-dropdown menu-feedback-dropdown" role="menu">
+              <div className="menu-feedback-title">Share Feedback</div>
+              <a
+                className="menu-dropdown-item menu-feedback-link"
+                href="mailto:fabian@vibewrite.work"
+              >
+                fabian@vibewrite.work
+              </a>
+              <a
+                className="menu-dropdown-item menu-feedback-link"
+                href="mailto:carlos@vibewrite.work"
+              >
+                carlos@vibewrite.work
+              </a>
+              <a
+                className="menu-dropdown-item menu-feedback-link"
+                href="https://calendly.com/fabiareor/30min"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Book a call
+              </a>
+            </div>
+          )}
+        </div>
+
+        <div className="menu-bar-profile-slot">
+          <UserProfile />
+        </div>
       </div>
     </div>
   );
