@@ -517,6 +517,7 @@ interface CommandRequest {
     height: number;
   }>;
   stream?: boolean;
+  previous_response_id?: string;
 }
 
 interface CommandResponse {
@@ -555,103 +556,65 @@ function extractSources(responseOutput: any[]): Array<{ title: string; url: stri
   });
 }
 
-async function getSummaryAfterResponsesAPI(
+
+async function streamSummaryAfterEdit(
   instruction: string,
   changes: any[],
-  openaiConfig: any
-): Promise<string> {
-  if (changes.length === 0) return '';
+  openaiConfig: any,
+  writer: WritableStreamDefaultWriter
+): Promise<void> {
+  if (changes.length === 0) return;
+  const encode = (data: any) => new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+  const changeDetails = changes.slice(0, 5).map((c, i) =>
+    `${i + 1}. [${c.type}] ${JSON.stringify(c).slice(0, 200)}`
+  ).join('\n');
   try {
-    const summaryMessages: ChatMessage[] = [
-      {
-        role: 'system',
-        content: 'Briefly summarize the document edits that were performed. Return JSON with field "summary". Keep it to 1-2 sentences.',
-      },
-      {
-        role: 'user',
-        content: `Instruction: "${instruction.slice(0, 300)}". Applied ${changes.length} document change(s). Provide a brief summary.`,
-      },
-    ];
-
-    const summaryStream = await createChatCompletionStream(openaiConfig, {
-      model: 'gpt-5-mini',
-      messages: summaryMessages,
-      max_completion_tokens: 200,
+    const stream = await createChatCompletionStream(openaiConfig, {
+      model: 'gpt-5-nano',
+      messages: [
+        {
+          role: 'system',
+          content: 'In one sentence, describe what you changed in the document. Use first person past tense (e.g. "I added...", "I updated...") and be specific about the actual content.',
+        },
+        {
+          role: 'user',
+          content: `Instruction: "${instruction.slice(0, 300)}"\n\nChanges made:\n${changeDetails}`,
+        },
+      ],
+      max_completion_tokens: 750,
       reasoning_effort: 'minimal',
-      response_format: { type: 'json_object' },
     });
-
-    const summaryReader = summaryStream.getReader();
-    const summaryDecoder = new TextDecoder();
-    let summaryBuffer = '';
-    let summaryContent = '';
-
-    while (true) {
-      const { done, value } = await summaryReader.read();
-      if (done) break;
-      summaryBuffer += summaryDecoder.decode(value, { stream: true });
-      const lines = summaryBuffer.split('\n');
-      summaryBuffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim() || !line.startsWith('data: ')) continue;
-        if (line.includes('[DONE]')) continue;
-        try {
-          const chunk: ChatCompletionChunk = JSON.parse(line.slice(6));
-          summaryContent += chunk.choices?.[0]?.delta?.content || '';
-        } catch (e) { /* ignore */ }
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          if (line.includes('[DONE]')) continue;
+          try {
+            const chunk = JSON.parse(line.slice(6));
+            const token = chunk.choices?.[0]?.delta?.content || '';
+            if (token) {
+              await writer.write(encode({ type: 'summary_token', content: token }));
+            }
+          } catch (e) { /* ignore parse errors */ }
+        }
       }
+    } finally {
+      reader.releaseLock();
     }
-
-    const result = JSON.parse(summaryContent || '{}');
-    return result.summary || 'Changes applied.';
   } catch (e) {
-    console.error('[ai-command] Summary error:', e);
-    return 'Changes applied.';
+    console.error('[ai-command] Summary stream error:', e);
   }
+  await writer.write(encode({ type: 'summary_done' }));
 }
 
-async function getSummaryAfterEdit(
-  instruction: string,
-  changes: any[],
-  openaiConfig: any
-): Promise<string> {
-  if (changes.length === 0) return '';
-  console.log('[ai-command] Generating edit summary for', changes.length, 'changes...');
-  try {
-    const changeDetails = changes.slice(0, 5).map((c, i) =>
-      `${i + 1}. [${c.type}] ${JSON.stringify(c).slice(0, 200)}`
-    ).join('\n');
-
-    const result = await Promise.race([
-      createChatCompletion(openaiConfig, {
-        model: 'gpt-5-nano',
-        messages: [
-          {
-            role: 'system',
-            content: 'In one sentence, describe what you changed in the document. Use first person past tense (e.g. "I added...", "I updated...") and be specific about the actual content.',
-          },
-          {
-            role: 'user',
-            content: `Instruction: "${instruction.slice(0, 300)}"\n\nChanges made:\n${changeDetails}`,
-          },
-        ],
-        max_completion_tokens: 750,
-        reasoning_effort: 'minimal',
-      }),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
-    ]);
-    if (!result) {
-      console.warn('[ai-command] Summary timed out, using fallback');
-      return '';
-    }
-    const summary = (result as any).choices?.[0]?.message?.content?.trim() || '';
-    console.log('[ai-command] Summary generated:', summary);
-    return summary;
-  } catch (e) {
-    console.error('[ai-command] Summary error:', e);
-    return '';
-  }
-}
 
 async function processResponsesStream(
   openaiStream: ReadableStream<Uint8Array>,
@@ -671,6 +634,11 @@ async function processResponsesStream(
   let hasEmittedChanges = false;
   let responseCompleted = false;
   let searchingEmitted = false;
+
+  // Timing
+  const streamStart = Date.now();
+  let firstTokenMs = 0;
+  let functionCallStartMs = 0;
 
   const encode = (data: any) => new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 
@@ -708,11 +676,13 @@ async function processResponsesStream(
         const eventType = pendingEventType || data.type || '';
         pendingEventType = '';
 
-        console.log('[ai-command] Responses API event:', eventType);
-
         if (eventType === 'response.output_text.delta') {
           const delta = data.delta || '';
           if (delta) {
+            if (!firstTokenMs) {
+              firstTokenMs = Date.now() - streamStart;
+              console.log(`[ai-command] ⚡ First text token in ${firstTokenMs}ms`);
+            }
             await writer.write(encode({ type: 'token', content: delta }));
           }
         } else if (
@@ -730,7 +700,8 @@ async function processResponsesStream(
           if (data.item?.type === 'function_call') {
             functionName = data.item.name || '';
             functionArgs = '';
-            console.log('[ai-command] Function call starting:', functionName);
+            functionCallStartMs = Date.now() - streamStart;
+            console.log(`[ai-command] Function call starting: ${functionName} at ${functionCallStartMs}ms`);
           }
         } else if (eventType === 'response.function_call_arguments.delta') {
           functionArgs += (data.delta || '');
@@ -747,18 +718,21 @@ async function processResponsesStream(
           }
           if (changes.length > 0 && !hasEmittedChanges) {
             hasEmittedChanges = true;
+            const functionCallDone = Date.now() - streamStart;
+            console.log(`[ai-command] ⚡ Function call args done at ${functionCallDone}ms (tool call took ${functionCallDone - functionCallStartMs}ms)`);
             await writer.write(encode({ type: 'changes', changes }));
           }
         } else if (eventType === 'response.completed' || eventType === 'response.done') {
           responseCompleted = true;
           const responseOutput = data.response?.output || [];
+          const responseId = data.response?.id;
           const sources = extractSources(responseOutput);
+          // Emit complete immediately so client can apply changes without waiting for summary
+          await writer.write(encode({ type: 'complete', sources, response_id: responseId }));
+          // Stream summary tokens after complete (client shows them as live streaming text)
           if (changes.length > 0) {
-            const summary = await getSummaryAfterEdit(instruction, changes, openaiConfig);
-            const finalSummary = summary || `Applied ${changes.length} change${changes.length !== 1 ? 's' : ''} to the document.`;
-            await writer.write(encode({ type: 'summary', summary: finalSummary, sources }));
+            await streamSummaryAfterEdit(instruction, changes, openaiConfig, writer);
           }
-          await writer.write(encode({ type: 'complete', sources }));
         }
       }
     }
@@ -766,12 +740,10 @@ async function processResponsesStream(
     // Handle stream ending without response.completed
     if (!responseCompleted) {
       console.log('[ai-command] Stream ended without response.completed, completing manually');
-      if (changes.length > 0) {
-        const summary = await getSummaryAfterEdit(instruction, changes, openaiConfig);
-        const finalSummary = summary || `Applied ${changes.length} change${changes.length !== 1 ? 's' : ''} to the document.`;
-        await writer.write(encode({ type: 'summary', summary: finalSummary, sources: [] }));
-      }
       await writer.write(encode({ type: 'complete', sources: [] }));
+      if (changes.length > 0) {
+        await streamSummaryAfterEdit(instruction, changes, openaiConfig, writer);
+      }
     }
   } catch (error) {
     console.error('[ai-command] Error in Responses API stream processing:', error);
@@ -789,15 +761,17 @@ async function processResponsesStream(
 async function handleStreamingRequest(
   messages: ChatMessage[],
   instruction: string,
-  openaiConfig: any
+  openaiConfig: any,
+  previous_response_id?: string,
 ): Promise<Response> {
   console.log('[ai-command] Handling streaming request (Responses API with web search)');
 
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
 
-  // Convert ChatMessage[] to ResponseInput[] (structurally compatible)
-  const input: ResponseInput[] = messages
+  // Always send full input — previous_response_id still benefits from server-side KV cache
+  // (sending only the last message would fail if the prior response ended with a tool call)
+  const fullInput: ResponseInput[] = messages
     .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system')
     .map(msg => ({
       role: msg.role as 'user' | 'assistant' | 'system',
@@ -807,12 +781,35 @@ async function handleStreamingRequest(
   // Start stream processing in background
   (async () => {
     try {
-      const openaiStream = await createResponseStream(openaiConfig, {
-        model: 'gpt-5-mini',
-        input,
-        tools: [WEB_SEARCH_TOOL, EDIT_DOCUMENT_TOOL_RESPONSES],
-        max_output_tokens: 128000,
-      });
+      let openaiStream: ReadableStream<Uint8Array>;
+      try {
+        const tOpenAI = Date.now();
+        openaiStream = await createResponseStream(openaiConfig, {
+          model: 'gpt-5-mini',
+          input: fullInput,
+          tools: [WEB_SEARCH_TOOL, EDIT_DOCUMENT_TOOL_RESPONSES],
+          max_output_tokens: 128000,
+          reasoning: { effort: 'low' },
+          ...(previous_response_id && { previous_response_id, store: true }),
+          ...(!previous_response_id && { store: true }),
+        });
+        console.log(`[ai-command] ⚡ OpenAI stream connected in ${Date.now() - tOpenAI}ms`);
+      } catch (chainError) {
+        if (previous_response_id) {
+          // Chaining failed (expired/invalid ID) — retry with full context
+          console.warn('[ai-command] Response chaining failed, retrying with full context');
+          openaiStream = await createResponseStream(openaiConfig, {
+            model: 'gpt-5-mini',
+            input: fullInput,
+            tools: [WEB_SEARCH_TOOL, EDIT_DOCUMENT_TOOL_RESPONSES],
+            max_output_tokens: 128000,
+            reasoning: { effort: 'low' },
+            store: true,
+          });
+        } else {
+          throw chainError;
+        }
+      }
 
       await processResponsesStream(openaiStream, writer, instruction, openaiConfig);
     } catch (error) {
@@ -962,16 +959,23 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const t0 = Date.now();
   try {
     console.log('[ai-command] Starting authentication verification...');
     // Verify authentication
     const { user, supabase } = await verifyAuth(req);
-    console.log('[ai-command] ✅ Authentication successful for user:', user.id);
-    console.log('[ai-command] User email:', user.email);
+    console.log(`[ai-command] ✅ Auth done in ${Date.now() - t0}ms. User: ${user.id}`);
 
-    // Check rate limit (10 requests per minute)
-    console.log('[ai-command] Checking rate limit for user:', user.id);
-    const isAllowed = await checkRateLimit(user.id, 'ai-command', supabase, 10, 60);
+    // Parallelize rate limit check, request body parsing, and OpenAI client init
+    const tParallel = Date.now();
+    console.log('[ai-command] Checking rate limit, parsing body, and getting OpenAI config in parallel...');
+    const [isAllowed, requestData, openaiConfig] = await Promise.all([
+      checkRateLimit(user.id, 'ai-command', supabase, 10, 60),
+      req.json() as Promise<CommandRequest>,
+      getOpenAIClient(),
+    ]);
+    console.log(`[ai-command] ✅ Parallel init done in ${Date.now() - tParallel}ms (total: ${Date.now() - t0}ms)`);
+
     console.log('[ai-command] Rate limit check result:', isAllowed ? 'ALLOWED' : 'BLOCKED');
 
     if (!isAllowed) {
@@ -985,10 +989,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Parse request body
-    console.log('[ai-command] Parsing request body...');
-    const requestData: CommandRequest = await req.json();
-    const { document, instruction, conversation_history, context_snippets, context_images, stream = false } = requestData;
+    const { document, instruction, conversation_history, context_snippets, context_images, stream = false, previous_response_id } = requestData;
 
     console.log('[ai-command] Request data received:');
     console.log('  - Document blocks:', document?.blocks?.length || 0);
@@ -996,6 +997,7 @@ Deno.serve(async (req) => {
     console.log('  - Conversation history length:', conversation_history?.length || 0);
     console.log('  - Context snippets:', context_snippets?.length || 0);
     console.log('  - Stream mode:', stream);
+    console.log('  - Previous response ID:', previous_response_id || 'none (first turn)');
 
     if (!instruction?.trim() || !document) {
       console.error('[ai-command] ❌ Missing required fields');
@@ -1008,9 +1010,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get OpenAI client
-    console.log('[ai-command] Retrieving OpenAI configuration...');
-    const openaiConfig = await getOpenAIClient();
     console.log('[ai-command] ✅ OpenAI configuration retrieved successfully');
 
     // Build messages array
@@ -1106,7 +1105,7 @@ Use the edit_document tool to make changes, then provide reasoning and summary.`
     // Branch based on streaming mode
     if (stream) {
       console.log('[ai-command] Using streaming mode');
-      return await handleStreamingRequest(messages, instruction, openaiConfig);
+      return await handleStreamingRequest(messages, instruction, openaiConfig, previous_response_id);
     } else {
       console.log('[ai-command] Using non-streaming mode');
       const response = await handleNonStreamingRequest(messages, openaiConfig);

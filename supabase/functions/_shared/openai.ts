@@ -194,6 +194,9 @@ export async function createResponseStream(
     input: ResponseInput[];
     tools?: ResponseTool[];
     max_output_tokens?: number;
+    previous_response_id?: string;
+    store?: boolean;
+    reasoning?: { effort: 'low' | 'medium' | 'high' };
   }
 ): Promise<ReadableStream<Uint8Array>> {
   console.log('=== [OpenAI] Creating Response Stream (Responses API) ===');
@@ -215,6 +218,9 @@ export async function createResponseStream(
     tools: options.tools,
     max_output_tokens: options.max_output_tokens,
     stream: true,
+    ...(options.previous_response_id && { previous_response_id: options.previous_response_id }),
+    ...(options.store !== undefined && { store: options.store }),
+    ...(options.reasoning && { reasoning: options.reasoning }),
   });
   console.log('[OpenAI] Request body size:', requestBody.length, 'bytes');
 
