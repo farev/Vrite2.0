@@ -1695,28 +1695,28 @@ export default function FormattingToolbar({
                 <div className="toolbar-section">
                 <button
                   className={`toolbar-button ${isStrikethrough ? 'active' : ''}`}
-                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough')}
+                  onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough'); }}
                   title="Strikethrough"
                 >
                   <Strikethrough size={18} />
                 </button>
                 <button
                   className={`toolbar-button ${isSubscript ? 'active' : ''}`}
-                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'subscript')}
+                  onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'subscript'); }}
                   title="Subscript"
                 >
                   <Subscript size={18} />
                 </button>
                 <button
                   className={`toolbar-button ${isSuperscript ? 'active' : ''}`}
-                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'superscript')}
+                  onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'superscript'); }}
                   title="Superscript"
                 >
                   <Superscript size={18} />
                 </button>
                 <button
                   className="toolbar-button"
-                  onClick={clearFormatting}
+                  onMouseDown={(e) => { e.preventDefault(); clearFormatting(); }}
                   title="Clear Formatting"
                 >
                   <RemoveFormatting size={18} />

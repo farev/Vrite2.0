@@ -17,6 +17,7 @@ import {
   $isNodeSelection,
   SELECTION_CHANGE_COMMAND,
   COMMAND_PRIORITY_LOW,
+  $insertNodes,
 } from 'lexical';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
@@ -31,6 +32,7 @@ import { TablePlugin } from '@lexical/react/LexicalTablePlugin';
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin';
 import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPlugin';
 import { $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
+import { $generateNodesFromDOM } from '@lexical/html';
 import { ListItemNode, ListNode } from '@lexical/list';
 import { LinkNode } from '@lexical/link';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
@@ -56,6 +58,7 @@ import { SpellCheckPlugin } from './plugins/SpellCheckPlugin';
 import TableActionMenuPlugin from './plugins/TableActionMenuPlugin';
 import TableNavigationPlugin from './plugins/TableNavigationPlugin';
 import InactiveSelectionPlugin from './plugins/InactiveSelectionPlugin';
+import FormattingKeyboardShortcutsPlugin from './plugins/FormattingKeyboardShortcutsPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode, $createEquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
@@ -107,6 +110,9 @@ const theme = {
     bold: 'document-text-bold',
     italic: 'document-text-italic',
     underline: 'document-text-underline',
+    strikethrough: 'document-text-strikethrough',
+    subscript: 'document-text-subscript',
+    superscript: 'document-text-superscript',
   },
 };
 
@@ -420,6 +426,7 @@ interface DocumentEditorProps {
   onInsertImageReady?: (handler: () => void) => void;
   onInsertTableReady?: (handler: (rows: number, columns: number) => void) => void;
   onInsertEquationReady?: (handler: () => void) => void;
+  onImportReady?: (handler: (html: string, title: string) => void) => void;
 }
 
 // Track previous title to detect changes
@@ -440,6 +447,7 @@ export default function DocumentEditor({
   onInsertImageReady,
   onInsertTableReady,
   onInsertEquationReady,
+  onImportReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
   const supabase = useMemo(() => createClient(), []);
@@ -1016,6 +1024,23 @@ export default function DocumentEditor({
       });
     }
   }, [onInsertEquationReady, editorRef]);
+
+  // Expose import handler to parent
+  useEffect(() => {
+    if (onImportReady && editorRef) {
+      onImportReady((html: string, title: string) => {
+        editorRef.update(() => {
+          const parser = new DOMParser();
+          const dom = parser.parseFromString(html, 'text/html');
+          const nodes = $generateNodesFromDOM(editorRef, dom);
+          $getRoot().clear();
+          $insertNodes(nodes);
+        });
+        onTitleChange(title);
+        setHasUnsavedChanges(true);
+      });
+    }
+  }, [onImportReady, editorRef, onTitleChange]);
 
   // Reset the loaded flag when document ID changes
   useEffect(() => {
@@ -1760,6 +1785,7 @@ export default function DocumentEditor({
                   <TableNavigationPlugin />
                   <TabIndentationPlugin />
                   <KeyboardShortcutPlugin onCommandK={handleCommandK} />
+                  <FormattingKeyboardShortcutsPlugin />
                   <ClipboardPlugin />
                   <InactiveSelectionPlugin isChatFocused={isChatFocused} />
                   <ImagePlugin />

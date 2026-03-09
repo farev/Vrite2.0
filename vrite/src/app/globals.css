@@ -1294,6 +1294,20 @@ body {
   text-decoration: underline;
 }
 
+.document-text-strikethrough {
+  text-decoration: line-through;
+}
+
+.document-text-subscript {
+  font-size: 0.75em;
+  vertical-align: sub;
+}
+
+.document-text-superscript {
+  font-size: 0.75em;
+  vertical-align: super;
+}
+
 /* Lists */
 .document-list-ul {
   margin: 0 0 12pt 24pt;
