@@ -23,6 +23,8 @@ export default function DocumentPage() {
   const insertImageCallbackRef = useRef<(() => void) | null>(null);
   const insertTableCallbackRef = useRef<((rows: number, columns: number) => void) | null>(null);
   const insertEquationCallbackRef = useRef<(() => void) | null>(null);
+  const applyFormatCallbackRef = useRef<((formatKey: string) => void) | null>(null);
+  const [activeFormatKey, setActiveFormatKey] = useState<string>('default');
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const router = useRouter();
@@ -75,6 +77,17 @@ export default function DocumentPage() {
 
   const handleInsertEquationReady = useCallback((callback: () => void) => {
     insertEquationCallbackRef.current = callback;
+  }, []);
+
+  const handleApplyFormatReady = useCallback((callback: (formatKey: string) => void) => {
+    applyFormatCallbackRef.current = callback;
+  }, []);
+
+  const handleApplyFormat = useCallback((formatKey: string) => {
+    setActiveFormatKey(formatKey);
+    if (applyFormatCallbackRef.current) {
+      applyFormatCallbackRef.current(formatKey);
+    }
   }, []);
 
   useEffect(() => {
@@ -407,6 +420,8 @@ export default function DocumentPage() {
             insertEquationCallbackRef.current();
           }
         }}
+        onApplyFormat={handleApplyFormat}
+        activeFormatKey={activeFormatKey}
       />
       <DocumentEditor
         documentTitle={documentTitle}
@@ -416,6 +431,7 @@ export default function DocumentPage() {
         onInsertImageReady={handleInsertImageReady}
         onInsertTableReady={handleInsertTableReady}
         onInsertEquationReady={handleInsertEquationReady}
+        onApplyFormatReady={handleApplyFormatReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
         isAuthenticated={isAuthenticated}

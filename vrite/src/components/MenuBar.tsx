@@ -10,10 +10,12 @@ import {
   ChevronDown,
   Image as ImageIcon,
   Table,
+  Layout,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
 import UserProfile from './auth/UserProfile';
+import { DOCUMENT_FORMATS } from '../lib/document-formats';
 
 interface MenuBarProps {
   onNewDocument: () => void;
@@ -29,6 +31,8 @@ interface MenuBarProps {
   onInsertImage?: () => void;
   onInsertTable?: (rows: number, columns: number) => void;
   onInsertEquation?: () => void;
+  onApplyFormat?: (formatKey: string) => void;
+  activeFormatKey?: string;
 }
 
 export default function MenuBar({
@@ -45,8 +49,10 @@ export default function MenuBar({
   onInsertImage,
   onInsertTable,
   onInsertEquation,
+  onApplyFormat,
+  activeFormatKey,
 }: MenuBarProps) {
-  type DropdownKey = 'file' | 'export' | 'insert' | 'table';
+  type DropdownKey = 'file' | 'export' | 'insert' | 'table' | 'format';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(documentTitle);
@@ -309,7 +315,36 @@ export default function MenuBar({
             </div>
 
             <div className="menu-item">
-              <button className="menu-button">Format</button>
+              <button
+                className={`menu-button${openDropdown === 'format' ? ' active' : ''}`}
+                onClick={() => toggleDropdown('format')}
+              >
+                Format
+              </button>
+              {openDropdown === 'format' && (
+                <div className="menu-dropdown">
+                  <div className="menu-dropdown-section-label">Document Format</div>
+                  {Object.entries(DOCUMENT_FORMATS).map(([key, preset]) => (
+                    <button
+                      key={key}
+                      className={`menu-dropdown-item format-preset-item${activeFormatKey === key ? ' active' : ''}`}
+                      onClick={() => {
+                        onApplyFormat?.(key);
+                        setOpenDropdown(null);
+                      }}
+                    >
+                      <Layout size={14} className="menu-dropdown-item-icon" />
+                      <span className="format-preset-label">
+                        <span className="format-preset-name">{preset.label}</span>
+                        <span className="format-preset-desc">{preset.description}</span>
+                      </span>
+                      {preset.columns === 2 && (
+                        <span className="format-preset-badge">2 col</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="menu-item">

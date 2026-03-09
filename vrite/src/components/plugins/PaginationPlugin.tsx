@@ -17,6 +17,7 @@ interface PaginationPluginProps {
   pageGap: number; // in pixels
   footerHeight: number; // in pixels
   onPageCountChange?: (count: number) => void;
+  disabled?: boolean;
 }
 
 /**
@@ -31,13 +32,31 @@ export default function PaginationPlugin({
   pageGap,
   footerHeight,
   onPageCountChange,
+  disabled = false,
 }: PaginationPluginProps) {
   const [editor] = useLexicalComposerContext();
   const [pageCount, setPageCount] = useState(1);
   const lastSignatureRef = useRef<string>('');
   const rafRef = useRef<number | null>(null);
 
+  // When disabled, remove any existing page break nodes and report single page
+  useEffect(() => {
+    if (!disabled) return;
+    editor.update(() => {
+      const root = $getRoot();
+      root.getChildren().forEach((node) => {
+        if ($isPageBreakNode(node)) {
+          node.remove();
+        }
+      });
+    }, { tag: 'pagination' });
+    setPageCount(1);
+    onPageCountChange?.(1);
+    lastSignatureRef.current = '';
+  }, [disabled, editor, onPageCountChange]);
+
   const calculatePages = useCallback(() => {
+    if (disabled) return;
     const rootElement = editor.getRootElement();
     if (!rootElement) return;
 
@@ -146,7 +165,7 @@ export default function PaginationPlugin({
       setPageCount(newPageCount);
       onPageCountChange?.(newPageCount);
     }
-  }, [editor, footerHeight, margins.bottom, margins.top, pageGap, pageHeight, pageCount, onPageCountChange]);
+  }, [editor, footerHeight, margins.bottom, margins.top, pageGap, pageHeight, pageCount, onPageCountChange, disabled]);
 
   useEffect(() => {
     const schedule = () => {

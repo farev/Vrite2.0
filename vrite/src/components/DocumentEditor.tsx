@@ -74,6 +74,7 @@ import {
   loadTemporaryDocument,
   checkDrivePermissions,
 } from '../lib/storage';
+import { DOCUMENT_FORMATS, DEFAULT_FORMAT_KEY, type DocumentFormatPreset } from '../lib/document-formats';
 import DrivePermissionsToast from './DrivePermissionsToast';
 import {
   serializeLexicalToSimplified,
@@ -425,6 +426,7 @@ interface DocumentEditorProps {
   onInsertImageReady?: (handler: () => void) => void;
   onInsertTableReady?: (handler: (rows: number, columns: number) => void) => void;
   onInsertEquationReady?: (handler: () => void) => void;
+  onApplyFormatReady?: (handler: (formatKey: string) => void) => void;
 }
 
 // Track previous title to detect changes
@@ -445,6 +447,7 @@ export default function DocumentEditor({
   onInsertImageReady,
   onInsertTableReady,
   onInsertEquationReady,
+  onApplyFormatReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
   const supabase = useMemo(() => createClient(), []);
@@ -484,6 +487,12 @@ export default function DocumentEditor({
     bottom: 72,
     left: 72,
   });
+  const [activeFormatKey, setActiveFormatKey] = useState<string>(DEFAULT_FORMAT_KEY);
+  const [columnCount, setColumnCount] = useState<1 | 2>(1);
+  const [documentDefaultFont, setDocumentDefaultFont] = useState('Times New Roman');
+  const [documentDefaultFontSize, setDocumentDefaultFontSize] = useState('12pt');
+  const [documentDefaultLineSpacing, setDocumentDefaultLineSpacing] = useState(1.4);
+  const [documentColumnGap, setDocumentColumnGap] = useState('0in');
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const [isDiffModeActive, setIsDiffModeActive] = useState(false);
   const [originalContent, setOriginalContent] = useState<string | null>(null);
@@ -547,13 +556,19 @@ export default function DocumentEditor({
   );
 
   const editorSurfaceStyle = useMemo(
-    () => ({
-      paddingTop: `${documentMargins.top}pt`,
-      paddingRight: `${documentMargins.right}pt`,
-      paddingBottom: `${documentMargins.bottom}pt`,
-      paddingLeft: `${documentMargins.left}pt`,
-    }),
-    [documentMargins]
+    () =>
+      ({
+        paddingTop: `${documentMargins.top}pt`,
+        paddingRight: `${documentMargins.right}pt`,
+        paddingBottom: `${documentMargins.bottom}pt`,
+        paddingLeft: `${documentMargins.left}pt`,
+        '--doc-column-count': columnCount,
+        '--doc-column-gap': documentColumnGap,
+        '--doc-font-family': documentDefaultFont,
+        '--doc-font-size': documentDefaultFontSize,
+        '--doc-line-height': documentDefaultLineSpacing,
+      }) as CSSProperties,
+    [documentMargins, columnCount, documentColumnGap, documentDefaultFont, documentDefaultFontSize, documentDefaultLineSpacing]
   );
 
   const isTitleUnnamed = useCallback((title: string) => {
@@ -986,6 +1001,28 @@ export default function DocumentEditor({
       });
     }
   }, [onInsertEquationReady, editorRef]);
+
+  const handleApplyFormat = useCallback((formatKey: string) => {
+    const preset: DocumentFormatPreset | undefined = DOCUMENT_FORMATS[formatKey];
+    if (!preset) {
+      return;
+    }
+    setActiveFormatKey(formatKey);
+    setPageSize(preset.pageSize as keyof typeof PAGE_SIZES);
+    setDocumentMargins(preset.margins);
+    setColumnCount(preset.columns);
+    setDocumentColumnGap(preset.columnGap);
+    setDocumentDefaultFont(preset.fontFamily);
+    setDocumentDefaultFontSize(preset.fontSize);
+    setDocumentDefaultLineSpacing(preset.lineSpacing);
+  }, []);
+
+  // Expose apply format callback to parent
+  useEffect(() => {
+    if (onApplyFormatReady) {
+      onApplyFormatReady(handleApplyFormat);
+    }
+  }, [onApplyFormatReady, handleApplyFormat]);
 
   // Reset the loaded flag when document ID changes
   useEffect(() => {
@@ -1674,6 +1711,7 @@ export default function DocumentEditor({
                     pageGap={PAGE_GAP}
                     footerHeight={PAGE_FOOTER_HEIGHT_PX}
                     onPageCountChange={setPageCount}
+                    disabled={columnCount > 1}
                   />
 
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}
