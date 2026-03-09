@@ -19,10 +19,12 @@ export default function DocumentPage() {
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const saveCallbackRef = useRef<(() => void) | null>(null);
   const insertImageCallbackRef = useRef<(() => void) | null>(null);
   const insertTableCallbackRef = useRef<((rows: number, columns: number) => void) | null>(null);
   const insertEquationCallbackRef = useRef<(() => void) | null>(null);
+  const importCallbackRef = useRef<((html: string, title: string) => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const router = useRouter();
@@ -77,6 +79,46 @@ export default function DocumentPage() {
     insertEquationCallbackRef.current = callback;
   }, []);
 
+  const handleImportCallbackReady = useCallback((callback: (html: string, title: string) => void) => {
+    importCallbackRef.current = callback;
+  }, []);
+
+  const handleImportDocument = useCallback(async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    setIsImporting(true);
+    try {
+      let result: { html: string; title: string; warnings: string[] };
+      if (ext === 'docx') {
+        const { importDocx } = await import('@/lib/import-docx');
+        result = await importDocx(file);
+      } else if (ext === 'pdf') {
+        const { importPdf } = await import('@/lib/import-pdf');
+        result = await importPdf(file);
+      } else {
+        alert('Unsupported file format. Please select a .docx or .pdf file.');
+        return;
+      }
+
+      if (result.warnings.length > 0) {
+        console.warn('[Import] Warnings:', result.warnings);
+      }
+
+      // If the editor import handler is ready (same page), use it directly
+      if (importCallbackRef.current) {
+        importCallbackRef.current(result.html, result.title);
+      } else {
+        // Otherwise hand off via sessionStorage and navigate to new doc
+        sessionStorage.setItem('vrite_import_pending', JSON.stringify({ html: result.html, title: result.title }));
+        router.push('/document/new');
+      }
+    } catch (error) {
+      console.error('[Import] Error:', error);
+      alert('Failed to import file. The file may be corrupted or unsupported.');
+    } finally {
+      setIsImporting(false);
+    }
+  }, [router]);
+
   useEffect(() => {
     const id = params.id as string;
     const isTempDoc = id.startsWith('temp-');
@@ -128,7 +170,22 @@ export default function DocumentPage() {
       const isTempDoc = id.startsWith('temp-');
 
       if (id === 'new') {
-        // New document
+        // New document — check for a pending import
+        const pending = sessionStorage.getItem('vrite_import_pending');
+        if (pending) {
+          sessionStorage.removeItem('vrite_import_pending');
+          try {
+            const { html, title } = JSON.parse(pending) as { html: string; title: string };
+            // Wait briefly for the editor to mount and register its import handler
+            setTimeout(() => {
+              if (importCallbackRef.current) {
+                importCallbackRef.current(html, title);
+              }
+            }, 500);
+          } catch {
+            console.warn('[DocumentPage] Failed to parse pending import data');
+          }
+        }
         setDocumentId(null);
         setIsLoading(false);
         return;
@@ -421,7 +478,19 @@ export default function DocumentPage() {
             insertEquationCallbackRef.current();
           }
         }}
+        onImportDocument={handleImportDocument}
+        isImporting={isImporting}
       />
+      {isImporting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30">
+          <div className="rounded-lg bg-white px-4 py-3 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600"></div>
+              <span className="text-sm text-slate-700">Importing document...</span>
+            </div>
+          </div>
+        </div>
+      )}
       <DocumentEditor
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}
@@ -430,6 +499,7 @@ export default function DocumentPage() {
         onInsertImageReady={handleInsertImageReady}
         onInsertTableReady={handleInsertTableReady}
         onInsertEquationReady={handleInsertEquationReady}
+        onImportReady={handleImportCallbackReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
         isAuthenticated={isAuthenticated}

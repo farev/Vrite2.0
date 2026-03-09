@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   Table,
   MessageSquare,
+  Upload,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
@@ -30,6 +31,8 @@ interface MenuBarProps {
   onInsertImage?: () => void;
   onInsertTable?: (rows: number, columns: number) => void;
   onInsertEquation?: () => void;
+  onImportDocument?: (file: File) => void;
+  isImporting?: boolean;
 }
 
 export default function MenuBar({
@@ -46,9 +49,12 @@ export default function MenuBar({
   onInsertImage,
   onInsertTable,
   onInsertEquation,
+  onImportDocument,
+  isImporting,
 }: MenuBarProps) {
-  type DropdownKey = 'file' | 'export' | 'insert' | 'table' | 'feedback';
+  type DropdownKey = 'file' | 'export' | 'import' | 'insert' | 'table' | 'feedback';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(documentTitle);
   const menuBarRef = useRef<HTMLDivElement>(null);
@@ -200,7 +206,22 @@ export default function MenuBar({
               >
                 File
               </button>
-              {(openDropdown === 'file' || openDropdown === 'export') && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".docx,.pdf"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file && onImportDocument) {
+                    onImportDocument(file);
+                  }
+                  // Reset so the same file can be re-selected
+                  e.target.value = '';
+                  setOpenDropdown(null);
+                }}
+              />
+              {(openDropdown === 'file' || openDropdown === 'export' || openDropdown === 'import') && (
                 <div className="menu-dropdown">
                   <button className="menu-dropdown-item" onClick={onNewDocument}>
                     <File size={16} />
@@ -212,7 +233,46 @@ export default function MenuBar({
                     Save
                     <span className="menu-shortcut">Ctrl+S</span>
                   </button>
-                  <div className="menu-dropdown-divider" />
+                  {onImportDocument && (
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        className="menu-dropdown-item"
+                        onClick={() => toggleDropdown('import')}
+                      >
+                        <Upload size={16} />
+                        Import from...
+                        <ChevronDown size={14} style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} />
+                      </button>
+                      {openDropdown === 'import' && (
+                        <div className="menu-dropdown-submenu import-dropdown-submenu">
+                          <button
+                            className="menu-dropdown-item"
+                            onClick={() => {
+                              if (fileInputRef.current) {
+                                fileInputRef.current.accept = '.docx';
+                                fileInputRef.current.click();
+                              }
+                            }}
+                            disabled={isImporting}
+                          >
+                            Word Document (.docx)
+                          </button>
+                          <button
+                            className="menu-dropdown-item"
+                            onClick={() => {
+                              if (fileInputRef.current) {
+                                fileInputRef.current.accept = '.pdf';
+                                fileInputRef.current.click();
+                              }
+                            }}
+                            disabled={isImporting}
+                          >
+                            PDF Document (.pdf)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     className="menu-dropdown-item"
                     onClick={() => toggleDropdown('export')}
@@ -242,7 +302,6 @@ export default function MenuBar({
                       </button>
                     </div>
                   )}
-                  <div className="menu-dropdown-divider" />
                   <button className="menu-dropdown-item" onClick={onPrint}>
                     <Printer size={16} />
                     Print

@@ -314,6 +314,11 @@ body {
   padding: 4px 0;
 }
 
+.import-dropdown-submenu {
+  top: 0;
+  bottom: auto;
+}
+
 /* Document Editor Styles - Word-like Interface */
 .document-editor-container {
   background: #f3f4f6;
