@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import posthog from 'posthog-js';
 
 export type SignupModalTrigger =
   | 'save'
@@ -114,6 +115,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         if (authenticated) {
           hideSignupModal();
+          // Identify the authenticated user in PostHog
+          posthog.identify(session.user.id, {
+            email: session.user.email,
+          });
+          // Track sign-in events
+          if (event === 'SIGNED_IN') {
+            posthog.capture('user_logged_in', { provider: 'google' });
+          } else if (event === 'USER_UPDATED') {
+            // Anonymous → OAuth upgrade counts as sign-up
+            posthog.capture('user_signed_up', { provider: 'google' });
+          }
         }
 
         setIsLoading(false);
@@ -122,6 +134,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setIsAnonymous(false);
         setSessionToken(null);
         setUserId(null);
+
+        if (event === 'SIGNED_OUT') {
+          posthog.reset();
+        }
 
         // Only create an anonymous session when we know for certain there is no
         // existing session (INITIAL_SESSION with null = first-ever visit, or
@@ -141,6 +157,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (isAuthenticated) {
       return;
     }
+
+    posthog.capture('signup_modal_shown', { trigger });
 
     setSignupModalState({
       isOpen: true,

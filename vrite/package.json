@@ -37,6 +37,7 @@
     "onnxruntime-web": "^1.23.2",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.5.207",
+    "posthog-js": "^1.360.0",
     "puppeteer-core": "^24.38.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

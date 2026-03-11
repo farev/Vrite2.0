@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { FileText, Plus, Search, MoreVertical, Trash2, Clock, Upload } from 'lucide-react';
 import { listAllDocuments, getLastModifiedString, type DocumentData } from '@/lib/storage';
 import { createClient } from '@/lib/supabase/client';
+import { usePostHog } from 'posthog-js/react';
 
 export default function HomePage() {
   const [documents, setDocuments] = useState<DocumentData[]>([]);
@@ -16,6 +17,7 @@ export default function HomePage() {
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const supabase = createClient();
+  const posthog = usePostHog();
 
   useEffect(() => {
     loadDocuments();
@@ -64,6 +66,7 @@ export default function HomePage() {
   };
 
   const handleCreateDocument = () => {
+    posthog.capture('document_created', { type: 'blank' });
     router.push('/document/new');
   };
 
@@ -82,6 +85,7 @@ export default function HomePage() {
         alert('Unsupported file format. Please select a .docx or .pdf file.');
         return;
       }
+      posthog.capture('document_created', { type: 'imported', import_format: ext });
       sessionStorage.setItem('vrite_import_pending', JSON.stringify({ html: result.html, title: result.title }));
       router.push('/document/new');
     } catch (error) {
@@ -93,6 +97,9 @@ export default function HomePage() {
   };
 
   const handleOpenDocument = (documentId: string) => {
+    posthog.capture('document_opened', {
+      storage_provider: documentId.startsWith('temp-') ? 'local' : 'google_drive',
+    });
     router.push(`/document/${documentId}`);
   };
 

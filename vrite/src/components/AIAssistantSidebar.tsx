@@ -18,6 +18,7 @@ import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePostHog } from 'posthog-js/react';
 import { compressImageToBase64 } from './nodes/ImageNode';
 
 interface Message {
@@ -166,6 +167,7 @@ export default function AIAssistantSidebar({
   onChatFocusChange
 }: AIAssistantSidebarProps) {
   const { isAuthenticated, isAnonymous, sessionToken, showSignupModal } = useAuth();
+  const posthog = usePostHog();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -516,6 +518,7 @@ export default function AIAssistantSidebar({
             )
           );
           setIsLoading(false);
+          posthog.capture('ai_rate_limit_hit');
           showSignupModal('ai-limit-reached');
           return;
         }
@@ -710,6 +713,11 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
     const hasTypedMessage = inputMessage.trim().length > 0;
     const hasAddedContext = attachmentNames.length > 0 || addedLinks.length > 0 || contextSnippets.length > 0 || contextImages.length > 0 || selectedContextImages.length > 0;
     if ((!hasTypedMessage && !hasAddedContext) || isLoading) return;
+
+    posthog.capture('ai_command_submitted', {
+      has_context_snippet: contextSnippets.length > 0,
+      has_image: contextImages.length > 0 || selectedContextImages.length > 0,
+    });
 
     const composedMessage = hasTypedMessage ? inputMessage : 'Use the added context to help with this request.';
 
@@ -1032,7 +1040,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
             <div className="ai-diff-actions">
               <div className="diff-mode-actions">
                 <button
-                  onClick={() => onRejectAllChanges?.()}
+                  onClick={() => { posthog.capture('ai_diff_rejected'); onRejectAllChanges?.(); }}
                   className="diff-mode-btn diff-mode-reject-all"
                   title="Reject all changes"
                 >
@@ -1040,7 +1048,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                   Reject All
                 </button>
                 <button
-                  onClick={() => onAcceptAllChanges?.()}
+                  onClick={() => { posthog.capture('ai_diff_accepted'); onAcceptAllChanges?.(); }}
                   className="diff-mode-btn diff-mode-accept-all"
                   title="Accept all changes"
                 >

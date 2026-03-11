@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { AuthProvider } from "@/contexts/AuthContext";
 import SignupModal from "@/components/SignupModal";
 import MobileGate from "@/components/MobileGate";
+import { PostHogProvider } from "./providers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,12 +32,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AuthProvider>
-          <MobileGate>
-            {children}
-          </MobileGate>
-          <SignupModal />
-        </AuthProvider>
+        <PostHogProvider>
+          <AuthProvider>
+            <MobileGate>
+              {children}
+            </MobileGate>
+            <SignupModal />
+          </AuthProvider>
+        </PostHogProvider>
         <Analytics />
       </body>
     </html>

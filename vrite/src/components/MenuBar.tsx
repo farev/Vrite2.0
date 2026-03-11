@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { usePostHog } from 'posthog-js/react';
 import {
   File,
   Save,
@@ -54,6 +55,7 @@ export default function MenuBar({
 }: MenuBarProps) {
   type DropdownKey = 'file' | 'export' | 'import' | 'insert' | 'table' | 'feedback';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
+  const posthog = usePostHog();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(documentTitle);
@@ -228,7 +230,10 @@ export default function MenuBar({
                     New Document
                     <span className="menu-shortcut">Ctrl+N</span>
                   </button>
-                  <button className="menu-dropdown-item" onClick={onSaveDocument}>
+                  <button className="menu-dropdown-item" onClick={() => {
+                    posthog.capture('document_saved', { is_autosave: false });
+                    onSaveDocument();
+                  }}>
                     <Save size={16} />
                     Save
                     <span className="menu-shortcut">Ctrl+S</span>
@@ -284,19 +289,19 @@ export default function MenuBar({
                     <div className="menu-dropdown-submenu">
                       <button
                         className="menu-dropdown-item"
-                        onClick={() => onExportDocument('pdf')}
+                        onClick={() => { posthog.capture('document_exported', { format: 'pdf' }); onExportDocument('pdf'); }}
                       >
                         PDF Document
                       </button>
                       <button
                         className="menu-dropdown-item"
-                        onClick={() => onExportDocument('docx')}
+                        onClick={() => { posthog.capture('document_exported', { format: 'docx' }); onExportDocument('docx'); }}
                       >
                         Word Document
                       </button>
                       <button
                         className="menu-dropdown-item"
-                        onClick={() => onExportDocument('txt')}
+                        onClick={() => { posthog.capture('document_exported', { format: 'txt' }); onExportDocument('txt'); }}
                       >
                         Text File
                       </button>
