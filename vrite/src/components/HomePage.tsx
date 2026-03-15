@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Plus, Search, MoreVertical, Trash2, Clock } from 'lucide-react';
-import { listAllDocuments, loadDocumentById, getLastModifiedString, type DocumentData } from '@/lib/storage';
+import { FileText, Plus, Search, Trash2 } from 'lucide-react';
+import { listAllDocuments, loadDocumentById, getLastModifiedString, deleteDocument, type DocumentData } from '@/lib/storage';
 import { createClient } from '@/lib/supabase/client';
 
 import React from 'react';
@@ -135,6 +135,8 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [userEmail, setUserEmail] = useState<string>('');
   const [isLoadingRef, setIsLoadingRef] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -184,12 +186,32 @@ export default function HomePage() {
     }
   };
 
-  const handleCreateDocument = () => {
-    router.push('/document/new');
+  const handleCreateDocument = (format?: string) => {
+    const query = format ? `?format=${format}` : '';
+    router.push(`/document/new${query}`);
   };
 
   const handleOpenDocument = (documentId: string) => {
     router.push(`/document/${documentId}`);
+  };
+
+  const handleDeleteDocument = (e: React.MouseEvent, doc: DocumentData) => {
+    e.stopPropagation();
+    setDeleteTarget({ id: doc.id!, title: doc.title || 'Untitled Document' });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await deleteDocument(deleteTarget.id);
+      setDocuments(prev => prev.filter(d => d.id !== deleteTarget.id));
+    } catch (err) {
+      console.error('[HomePage] Delete failed:', err);
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
   };
 
   const handleSignOut = async () => {
@@ -252,7 +274,7 @@ export default function HomePage() {
             </button>
             <button
               className="homepage-template-card"
-              onClick={() => handleCreateDocument()}
+              onClick={() => handleCreateDocument('ieee')}
             >
               <div className="homepage-template-preview document-template">
                 <div className="template-lines">
@@ -266,7 +288,7 @@ export default function HomePage() {
             </button>
             <button
               className="homepage-template-card"
-              onClick={() => handleCreateDocument()}
+              onClick={() => handleCreateDocument('apa7')}
             >
               <div className="homepage-template-preview document-template">
                 <div className="template-lines">
@@ -280,7 +302,7 @@ export default function HomePage() {
             </button>
             <button
               className="homepage-template-card"
-              onClick={() => handleCreateDocument()}
+              onClick={() => handleCreateDocument('mla9')}
             >
               <div className="homepage-template-preview document-template">
                 <div className="template-lines">
@@ -337,6 +359,13 @@ export default function HomePage() {
                 >
                   <div className="homepage-document-preview">
                     <DocumentPreviewContent doc={doc} />
+                      <button
+                        className="homepage-document-delete-btn"
+                        onClick={(e) => handleDeleteDocument(e, doc)}
+                        title="Delete document"
+                      >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                   <div className="homepage-document-info-bottom">
                     <h3 className="homepage-document-title">{doc.title || 'Untitled Document'}</h3>
@@ -347,15 +376,6 @@ export default function HomePage() {
                       <div className="homepage-document-meta">
                         <span>Opened {getLastModifiedString(doc.lastModified)}</span>
                       </div>
-                      <button
-                        className="homepage-document-menu"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // implement menu later
-                        }}
-                      >
-                        <MoreVertical size={16} />
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -364,6 +384,25 @@ export default function HomePage() {
           )}
         </section>
       </main>
+
+      {deleteTarget && (
+        <div className="delete-modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="delete-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="delete-modal-title">Delete document?</h3>
+            <p className="delete-modal-body">
+              &ldquo;<span className="delete-modal-docname">{deleteTarget.title}</span>&rdquo; will be permanently deleted.
+            </p>
+            <div className="delete-modal-actions">
+              <button className="delete-modal-cancel" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
+                Cancel
+              </button>
+              <button className="delete-modal-confirm" onClick={confirmDelete} disabled={isDeleting}>
+                {isDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

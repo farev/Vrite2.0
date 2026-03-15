@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import MenuBar from '@/components/MenuBar';
 import { createClient } from '@/lib/supabase/client';
-import { loadDocumentById, loadTemporaryDocument } from '@/lib/storage';
+import { loadDocumentById, loadTemporaryDocument, deleteDocument } from '@/lib/storage';
+import { deleteTemporaryDocument } from '@/lib/storage-anonymous';
+import { DOCUMENT_FORMATS } from '@/lib/document-formats';
 import { useAuth } from '@/contexts/AuthContext';
 
 const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), { 
@@ -27,8 +29,11 @@ export default function DocumentPage() {
   const [activeFormatKey, setActiveFormatKey] = useState<string>('default');
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const supabase = createClient();
   const { showSignupModal } = useAuth();
 
@@ -81,7 +86,12 @@ export default function DocumentPage() {
 
   const handleApplyFormatReady = useCallback((callback: (formatKey: string) => void) => {
     applyFormatCallbackRef.current = callback;
-  }, []);
+    const format = searchParams.get('format');
+    if (format && DOCUMENT_FORMATS[format]) {
+      callback(format);
+      setActiveFormatKey(format);
+    }
+  }, [searchParams]);
 
   const handleApplyFormat = useCallback((formatKey: string) => {
     setActiveFormatKey(formatKey);
@@ -216,6 +226,28 @@ export default function DocumentPage() {
 
   const handleBackToHome = () => {
     router.push('/');
+  };
+
+  const handleDeleteDocument = () => {
+    setDeleteTarget({ id: params.id as string, title: documentTitle });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.id.startsWith('temp-')) {
+        deleteTemporaryDocument(deleteTarget.id);
+      } else {
+        await deleteDocument(deleteTarget.id);
+      }
+      router.push('/');
+    } catch (err) {
+      console.error('[DocumentPage] Delete failed:', err);
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
   };
 
   const handleSaveDocument = () => {
@@ -400,6 +432,7 @@ export default function DocumentPage() {
         onExportDocument={handleExportDocument}
         onPrint={handlePrint}
         onBackToHome={handleBackToHome}
+        onDeleteDocument={handleDeleteDocument}
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}
         lastSaved={lastSaved}
@@ -423,6 +456,24 @@ export default function DocumentPage() {
         onApplyFormat={handleApplyFormat}
         activeFormatKey={activeFormatKey}
       />
+      {deleteTarget && (
+        <div className="delete-modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="delete-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="delete-modal-title">Delete document?</h3>
+            <p className="delete-modal-body">
+              &ldquo;<span className="delete-modal-docname">{deleteTarget.title}</span>&rdquo; will be permanently deleted.
+            </p>
+            <div className="delete-modal-actions">
+              <button className="delete-modal-cancel" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
+                Cancel
+              </button>
+              <button className="delete-modal-confirm" onClick={confirmDelete} disabled={isDeleting}>
+                {isDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <DocumentEditor
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}

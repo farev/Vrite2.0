@@ -256,6 +256,41 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
 export { AUTO_SAVE_INTERVAL };
 
 /**
+ * Delete a document from cloud storage (Google Drive) or Supabase database
+ */
+export async function deleteDocument(documentId: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session) {
+    console.error('[Storage] No session — cannot delete');
+    return;
+  }
+
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId);
+
+  if (session.user.is_anonymous || isUUID) {
+    console.log('[Storage] Deleting from Supabase database');
+    const { error } = await supabase.from('documents').delete().eq('id', documentId);
+    if (error) throw new Error(`Failed to delete from Supabase: ${error.message}`);
+    return;
+  }
+
+  const accessToken = await getActiveDriveToken();
+
+  if (!accessToken) {
+    console.log('[Storage] No Drive token — deleting from Supabase database');
+    const { error } = await supabase.from('documents').delete().eq('id', documentId);
+    if (error) throw new Error(`Failed to delete from Supabase: ${error.message}`);
+    return;
+  }
+
+  console.log('[Storage] Deleting from Google Drive');
+  const driveClient = new GoogleDriveClient(accessToken);
+  await driveClient.deleteFile(documentId);
+}
+
+/**
  * Probe whether the current session has Google Drive access.
  * Returns true if Drive is accessible (or user has no provider token),
  * false if permissions are missing (403/PERMISSION_DENIED).

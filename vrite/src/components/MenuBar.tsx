@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   Table,
   Layout,
+  Trash2,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
@@ -23,6 +24,7 @@ interface MenuBarProps {
   onExportDocument: (format: 'pdf' | 'docx' | 'txt') => void;
   onPrint: () => void;
   onBackToHome?: () => void;
+  onDeleteDocument?: () => void;
   documentTitle: string;
   onTitleChange: (title: string) => void;
   lastSaved: number | null;
@@ -41,6 +43,7 @@ export default function MenuBar({
   onExportDocument,
   onPrint,
   onBackToHome,
+  onDeleteDocument,
   documentTitle,
   onTitleChange,
   lastSaved,
@@ -231,6 +234,15 @@ export default function MenuBar({
                     Print
                     <span className="menu-shortcut">Ctrl+P</span>
                   </button>
+                  {onDeleteDocument && (
+                    <>
+                      <div className="menu-dropdown-divider" />
+                      <button className="menu-dropdown-item menu-dropdown-item-danger" onClick={() => { onDeleteDocument(); setOpenDropdown(null); }}>
+                        <Trash2 size={16} />
+                        Delete document
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
