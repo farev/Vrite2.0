@@ -276,7 +276,7 @@ export default function HomePage() {
           <div className="homepage-template-gallery">
             <button
               className="homepage-template-card"
-              onClick={handleCreateDocument}
+              onClick={() => handleCreateDocument()}
             >
               <div className="homepage-template-preview blank-template">
                 <Plus size={48} className="text-blue-500" />
@@ -353,7 +353,7 @@ export default function HomePage() {
               {!searchQuery && (
                 <button
                   className="homepage-empty-button"
-                  onClick={handleCreateDocument}
+                  onClick={() => handleCreateDocument()}
                 >
                   <Plus size={20} />
                   Create Document
