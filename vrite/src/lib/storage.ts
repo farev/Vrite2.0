@@ -13,6 +13,7 @@ export interface DocumentData {
   id?: string;
   title: string;
   editorState: string; // Lexical editor state as JSON string (required)
+  formatKey?: string; // Active document format preset (e.g. 'ieee', 'apa7')
   lastModified: number;
   _drivePermissionsFallback?: boolean; // true when saved to Supabase due to missing Drive scopes
 }
@@ -46,7 +47,7 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
   try {
     // Use Google Drive client
     const driveClient = new GoogleDriveClient(accessToken);
-    const file = await driveClient.saveDocument(data.id || null, data.title, data.editorState);
+    const file = await driveClient.saveDocument(data.id || null, data.title, data.editorState, data.formatKey);
 
     return {
       id: file.id,
@@ -239,12 +240,13 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
 
   try {
     const driveClient = new GoogleDriveClient(accessToken);
-    const { editorState, metadata } = await driveClient.getDocument(documentId);
+    const { editorState, formatKey, metadata } = await driveClient.getDocument(documentId);
 
     return {
       id: metadata.id,
       title: metadata.name.replace('.vrite.json', ''),
       editorState,
+      formatKey,
       lastModified: new Date(metadata.modifiedTime).getTime(),
     };
   } catch (error) {

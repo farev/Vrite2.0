@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { FileText, Plus, Search, Trash2 } from 'lucide-react';
 import { listAllDocuments, loadDocumentById, getLastModifiedString, deleteDocument, type DocumentData } from '@/lib/storage';
 import { createClient } from '@/lib/supabase/client';
+import { DOCUMENT_FORMATS } from '@/lib/document-formats';
 
 import React from 'react';
 
@@ -73,10 +74,13 @@ function renderLexicalNodes(editorStateStr: string): React.ReactNode[] {
 function DocumentPreviewContent({ doc }: { doc: DocumentData }) {
   const [content, setContent] = useState<React.ReactNode[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [previewFormatKey, setPreviewFormatKey] = useState<string | undefined>(doc.formatKey);
 
   useEffect(() => {
     // Known empty state we use for lists
     const emptyState = '{"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}}';
+
+    setPreviewFormatKey(doc.formatKey);
 
     if (doc.editorState && doc.editorState !== emptyState) {
       setContent(renderLexicalNodes(doc.editorState));
@@ -86,6 +90,7 @@ function DocumentPreviewContent({ doc }: { doc: DocumentData }) {
       let isMounted = true;
       loadDocumentById(doc.id).then(fullDoc => {
         if (isMounted) {
+          setPreviewFormatKey(fullDoc?.formatKey || doc.formatKey);
           if (fullDoc && fullDoc.editorState && fullDoc.editorState !== emptyState) {
             setContent(renderLexicalNodes(fullDoc.editorState));
           } else {
@@ -116,7 +121,13 @@ function DocumentPreviewContent({ doc }: { doc: DocumentData }) {
 
   return (
     <div className="doc-preview-text-container">
-      <div className="doc-preview-text">
+      <div
+        className="doc-preview-text"
+        style={{
+          columnCount: previewFormatKey && DOCUMENT_FORMATS[previewFormatKey]?.columns === 2 ? 2 : 1,
+          columnGap: previewFormatKey ? DOCUMENT_FORMATS[previewFormatKey]?.columnGap : '0in',
+        }}
+      >
         {content.length > 0 ? content : (
           <div className="doc-preview-content">
             <div className="doc-preview-line"></div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getNodeByKey, $getRoot } from 'lexical';
+import { $getNodeByKey, $getRoot, HISTORY_MERGE_TAG } from 'lexical';
 import { $createPageBreakNode, $isPageBreakNode } from '../nodes/PageBreakNode';
 
 interface PaginationPluginProps {
@@ -49,7 +49,7 @@ export default function PaginationPlugin({
           node.remove();
         }
       });
-    }, { tag: 'pagination' });
+    }, { tag: HISTORY_MERGE_TAG });
     setPageCount(1);
     onPageCountChange?.(1);
     lastSignatureRef.current = '';
@@ -158,7 +158,7 @@ export default function PaginationPlugin({
           targetNode.insertBefore($createPageBreakNode(Math.round(breakItem.height)));
         }
       });
-    }, { tag: 'pagination' });
+    }, { tag: HISTORY_MERGE_TAG });
 
     const newPageCount = Math.max(1, breaks.length + 1);
     if (newPageCount !== pageCount) {
@@ -179,7 +179,7 @@ export default function PaginationPlugin({
     };
 
     const unregister = editor.registerUpdateListener(({ tags }) => {
-      if (tags.has('pagination')) {
+      if (tags.has(HISTORY_MERGE_TAG)) {
         return;
       }
       schedule();

@@ -21,7 +21,7 @@ import {
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
-import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
+import { HistoryPlugin, createEmptyHistoryState } from '@lexical/react/LexicalHistoryPlugin';
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
@@ -512,6 +512,7 @@ export default function DocumentEditor({
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [showDrivePermissionsToast, setShowDrivePermissionsToast] = useState(false);
   const isDocumentEmpty = documentContent.trim().length === 0;
+  const historyStateRef = useRef(createEmptyHistoryState());
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
   const autoTitleTriggeredRef = useRef(false);
@@ -901,6 +902,7 @@ export default function DocumentEditor({
         id: documentId,
         title: documentTitle,
         editorState: JSON.stringify(editorState.toJSON()),
+        formatKey: activeFormatKey !== DEFAULT_FORMAT_KEY ? activeFormatKey : undefined,
         lastModified: Date.now(),
       };
 
@@ -955,7 +957,7 @@ export default function DocumentEditor({
       saveInProgress = false;
       setIsSaving(false);
     }
-  }, [documentId, documentTitle, documentContent, editorState, onLastSavedChange, onDocumentIdChange, isAuthenticated, showSignupModal, initialDocumentId]);
+  }, [documentId, documentTitle, documentContent, editorState, activeFormatKey, onLastSavedChange, onDocumentIdChange, isAuthenticated, showSignupModal, initialDocumentId]);
 
   // Expose save callback to parent
   useEffect(() => {
@@ -1002,11 +1004,9 @@ export default function DocumentEditor({
     }
   }, [onInsertEquationReady, editorRef]);
 
-  const handleApplyFormat = useCallback((formatKey: string) => {
+  const applyFormatPreset = useCallback((formatKey: string) => {
     const preset: DocumentFormatPreset | undefined = DOCUMENT_FORMATS[formatKey];
-    if (!preset) {
-      return;
-    }
+    if (!preset) return;
     setActiveFormatKey(formatKey);
     setPageSize(preset.pageSize as keyof typeof PAGE_SIZES);
     setDocumentMargins(preset.margins);
@@ -1016,6 +1016,11 @@ export default function DocumentEditor({
     setDocumentDefaultFontSize(preset.fontSize);
     setDocumentDefaultLineSpacing(preset.lineSpacing);
   }, []);
+
+  const handleApplyFormat = useCallback((formatKey: string) => {
+    applyFormatPreset(formatKey);
+    setHasUnsavedChanges(true);
+  }, [applyFormatPreset]);
 
   // Expose apply format callback to parent
   useEffect(() => {
@@ -1069,6 +1074,10 @@ export default function DocumentEditor({
               console.log('[Editor] Loading from Lexical JSON');
               const parsedState = editorRef.parseEditorState(savedDoc.editorState);
               editorRef.setEditorState(parsedState);
+              // Clear undo history so pressing Ctrl+Z can't undo back to the
+              // empty initial editor state before the document was loaded.
+              historyStateRef.current.undoStack = [];
+              historyStateRef.current.redoStack = [];
               console.log('[Editor] Content loaded into editor');
             } else {
               console.log('[Editor] No editorState found - starting with empty document');
@@ -1076,6 +1085,11 @@ export default function DocumentEditor({
                 const root = $getRoot();
                 root.clear();
               });
+            }
+
+            // Restore document format preset if saved
+            if (savedDoc.formatKey) {
+              applyFormatPreset(savedDoc.formatKey);
             }
 
             // Update sync timestamp for temp docs
@@ -1094,7 +1108,7 @@ export default function DocumentEditor({
     } else if (!initialDocumentId) {
       console.log('[Editor] New document - not loading existing document');
     }
-  }, [initialDocumentId, editorRef, isAuthenticated]);
+  }, [initialDocumentId, editorRef, isAuthenticated, applyFormatPreset]);
 
   // Auto-save effect with debouncing - save if there are unsaved changes
   useEffect(() => {
@@ -1340,75 +1354,85 @@ export default function DocumentEditor({
   const handleAcceptAllChanges = useCallback(() => {
     // Accept all changes - find all DiffNodes and accept them
     if (editorRef) {
-      editorRef.update(() => {
-        const root = $getRoot();
-        const allNodes: LexicalNode[] = [];
+      // Format-document path: no pendingChanges (DiffNodes), apply markdown directly to Lexical editor
+      if (!pendingChanges && suggestedContent) {
+        editorRef.update(() => {
+          const root = $getRoot();
+          root.clear();
+          $convertFromMarkdownString(suggestedContent, TRANSFORMERS);
+        });
+        setHasUnsavedChanges(true);
+      } else {
+        editorRef.update(() => {
+          const root = $getRoot();
+          const allNodes: LexicalNode[] = [];
 
-        // Collect all nodes
-        const collectNodes = (node: LexicalNode) => {
-          allNodes.push(node);
-          if ('getChildren' in node && typeof node.getChildren === 'function') {
-            const children = node.getChildren() as LexicalNode[];
-            children.forEach(collectNodes);
-          }
-        };
-        collectNodes(root);
+          // Collect all nodes
+          const collectNodes = (node: LexicalNode) => {
+            allNodes.push(node);
+            if ('getChildren' in node && typeof node.getChildren === 'function') {
+              const children = node.getChildren() as LexicalNode[];
+              children.forEach(collectNodes);
+            }
+          };
+          collectNodes(root);
 
-        // Accept all diff nodes
-        allNodes.forEach((node) => {
-          if ($isDiffNode(node)) {
-            const diffType = node.getDiffType();
-            const text = node.getText();
-            const nodeData = node.exportJSON();
-            const parent = node.getParent();
+          // Accept all diff nodes
+          allNodes.forEach((node) => {
+            if ($isDiffNode(node)) {
+              const diffType = node.getDiffType();
+              const text = node.getText();
+              const nodeData = node.exportJSON();
+              const parent = node.getParent();
 
-            if (diffType === 'deletion') {
-              // For deletions, accepting means removing the content entirely
-              node.remove();
-              // Remove empty parent paragraph if it only contained the deletion
-              if (parent && parent.getTextContent().trim() === '') {
-                parent.remove();
-              }
-            } else {
-              // For additions/replacements, check if it's an image
-              if (nodeData.imageData) {
-                // Create an ImageNode
-                const imageNode = $createImageNode({
-                  src: nodeData.imageData.src,
-                  altText: nodeData.imageData.altText,
-                  width: typeof nodeData.imageData.width === 'number' ? nodeData.imageData.width : (nodeData.imageData.width === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.width))),
-                  height: typeof nodeData.imageData.height === 'number' ? nodeData.imageData.height : (nodeData.imageData.height === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.height))),
-                  alignment: nodeData.imageData.alignment as 'left' | 'center' | 'right',
-                  caption: nodeData.imageData.caption || '',
-                  showCaption: nodeData.imageData.showCaption || false,
-                });
-
-                // Replace the parent paragraph with the image
-                if (parent) {
-                  parent.replace(imageNode);
+              if (diffType === 'deletion') {
+                // For deletions, accepting means removing the content entirely
+                node.remove();
+                // Remove empty parent paragraph if it only contained the deletion
+                if (parent && parent.getTextContent().trim() === '') {
+                  parent.remove();
                 }
-              } else if (nodeData.equationData) {
-                // Create an inline EquationNode (all equations are inline now)
-                const equationNode = $createEquationNode(
-                  nodeData.equationData.equation,
-                  true  // Always inline
-                );
-
-                // Replace the DiffNode with the inline EquationNode
-                node.replace(equationNode);
               } else {
-                // Regular text replacement
-                const textNode = $createTextNode(text);
-                if (nodeData.isBold) textNode.toggleFormat('bold');
-                if (nodeData.isItalic) textNode.toggleFormat('italic');
+                // For additions/replacements, check if it's an image
+                if (nodeData.imageData) {
+                  // Create an ImageNode
+                  const imageNode = $createImageNode({
+                    src: nodeData.imageData.src,
+                    altText: nodeData.imageData.altText,
+                    width: typeof nodeData.imageData.width === 'number' ? nodeData.imageData.width : (nodeData.imageData.width === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.width))),
+                    height: typeof nodeData.imageData.height === 'number' ? nodeData.imageData.height : (nodeData.imageData.height === 'inherit' ? 'inherit' : parseInt(String(nodeData.imageData.height))),
+                    alignment: nodeData.imageData.alignment as 'left' | 'center' | 'right',
+                    caption: nodeData.imageData.caption || '',
+                    showCaption: nodeData.imageData.showCaption || false,
+                  });
 
-                // Replace the DiffNode with the new TextNode
-                node.replace(textNode);
+                  // Replace the parent paragraph with the image
+                  if (parent) {
+                    parent.replace(imageNode);
+                  }
+                } else if (nodeData.equationData) {
+                  // Create an inline EquationNode (all equations are inline now)
+                  const equationNode = $createEquationNode(
+                    nodeData.equationData.equation,
+                    true  // Always inline
+                  );
+
+                  // Replace the DiffNode with the inline EquationNode
+                  node.replace(equationNode);
+                } else {
+                  // Regular text replacement
+                  const textNode = $createTextNode(text);
+                  if (nodeData.isBold) textNode.toggleFormat('bold');
+                  if (nodeData.isItalic) textNode.toggleFormat('italic');
+
+                  // Replace the DiffNode with the new TextNode
+                  node.replace(textNode);
+                }
               }
             }
-          }
+          });
         });
-      });
+      }
 
       // Update document content state
       if (suggestedContent) {
@@ -1422,7 +1446,7 @@ export default function DocumentEditor({
     if (suggestedContent) {
       triggerAutoTitleIfEligible('ai-accepted', suggestedContent);
     }
-  }, [editorRef, suggestedContent, triggerAutoTitleIfEligible]);
+  }, [editorRef, pendingChanges, suggestedContent, triggerAutoTitleIfEligible, setHasUnsavedChanges]);
 
   const handleRejectAllChanges = useCallback(() => {
     // Reject all changes - find all DiffNodes and reject them
@@ -1691,7 +1715,7 @@ export default function DocumentEditor({
 
                   <MyOnChangePlugin onChange={handleEditorChange} />
                   <EditorRefPlugin setEditorRef={setEditorRef} />
-                  <HistoryPlugin />
+                  <HistoryPlugin externalHistoryState={historyStateRef.current} />
                   <ListPlugin />
                   <LinkPlugin />
                   <TablePlugin />
