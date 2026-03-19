@@ -142,7 +142,76 @@ body {
   justify-content: center;
   align-self: center;
   flex-shrink: 0;
+}
+
+.menu-bar-actions {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.menu-feedback-item {
+  position: relative;
+}
+
+.menu-button.menu-feedback-button {
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: #f5fbff;
+  color: #1f4f73;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.menu-button.menu-feedback-button:hover {
+  background: #e9f6fe;
+  border-color: #7ec8f8;
+}
+
+.menu-button.menu-feedback-button[aria-expanded='true'] {
+  background: #e9f6fe;
+  border-color: #20a4f3;
+  box-shadow: 0 0 0 1px #20a4f3 inset;
+}
+
+.menu-dropdown.menu-feedback-dropdown {
+  left: auto;
+  right: 0;
+  min-width: 250px;
+  margin-top: 8px;
+  border: 1px solid #d7ebf9;
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+  padding: 4px 0;
+}
+
+.menu-feedback-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e9f6fe;
+}
+
+.menu-feedback-link {
+  text-decoration: none;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 400;
+  gap: 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.menu-feedback-link:hover {
+  background: #e9f6fe;
+  color: #374151;
 }
 
 .menu-item {
@@ -320,6 +389,11 @@ body {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   min-width: 160px;
   padding: 4px 0;
+}
+
+.import-dropdown-submenu {
+  top: 0;
+  bottom: auto;
 }
 
 /* Document Editor Styles - Word-like Interface */
@@ -897,11 +971,151 @@ body {
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   border-radius: 4px;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .document-page-content {
   position: relative;
   box-sizing: border-box;
+  flex: 1;
+  order: 1; /* Place between header and footer */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Page headers and footers */
+.document-page-header,
+.document-page-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10pt;
+  color: #6b7280;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.document-page-header {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.document-page-footer {
+  border-top: 1px solid #e5e7eb;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Header and footer content */
+.page-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.page-footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.header-title {
+  font-style: italic;
+  font-size: 9pt;
+  color: #9ca3af;
+}
+
+.page-number {
+  text-align: center;
+  font-family: 'Times New Roman', serif;
+  font-size: 10pt;
+  color: #6b7280;
+}
+
+/* Header/Footer Editor Styles (Google Docs style) */
+.document-header-editor {
+  height: 96px; /* Matches margin height (1 inch) */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 0 72pt;
+  padding-top: 48px; /* 0.5 inch from top of page — matches page-break headers */
+  cursor: default;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  color: #6b7280;
+  order: 0; /* Place at top */
+  position: relative;
+}
+
+.document-footer-editor {
+  height: 96px; /* Matches margin height (1 inch) */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 72pt;
+  padding-bottom: 48px; /* 0.5 inch from bottom of page — matches page-break footers */
+  cursor: default;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  color: #6b7280;
+  order: 2; /* Place at bottom */
+  position: relative;
+}
+
+/* Editable content (editing state) */
+.header-content-editable,
+.footer-content-editable {
+  outline: none;
+  cursor: text;
+  padding: 2px 4px;
+  display: inline-block;
+  min-width: 150px;
+  color: #374151;
+}
+
+.header-footer-input {
+  flex: 1;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  outline: none;
+  background: white;
+}
+
+.header-toggle-btn {
+  padding: 4px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.header-toggle-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.header-text,
+.footer-text {
+  font-style: italic;
+  color: #6b7280;
+}
+
+.header-placeholder,
+.footer-placeholder {
+  color: #d1d5db;
+  font-style: italic;
 }
 
 /* Content Editable */
@@ -924,6 +1138,189 @@ body {
   box-sizing: border-box;
 }
 
+/* Remove top margin from first content element so text starts flush with header boundary */
+.document-content-editable > *:first-child {
+  margin-top: 0;
+}
+
+/* Page break container - holds the full page break structure */
+.page-break-container {
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  position: relative;
+}
+
+/* White space at top - end of current page (normal width, blends with page) */
+.page-break-top {
+  width: 100%;
+  background: white;
+}
+
+/* Gray gap - visual page separation (extends to cover shadows) */
+.page-break-gap {
+  width: calc(100% + 220px);
+  margin-left: -110px;
+  margin-right: -110px;
+  background: #f3f4f6; /* Same as editor background */
+}
+
+/* White space at bottom - start of next page (normal width, blends with page) */
+.page-break-bottom {
+  width: 100%;
+  background: white;
+}
+
+/* Footer - end of current page */
+.page-break-footer {
+  width: 100%;
+  background: white;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: auto;
+  font-size: 10pt;
+  color: #6b7280;
+  font-family: 'Times New Roman', serif;
+  border-top: none; /* No border by default */
+  border-bottom: none;
+  padding: 0;
+  padding-bottom: 48px; /* 0.5 inch from bottom of page */
+  cursor: default;
+  overflow: visible;
+}
+
+.page-break-footer.editing {
+  position: relative;
+}
+
+.page-break-footer.editing::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -110px;
+  right: -110px;
+  height: 1px;
+  background: #c5d1de;
+}
+
+/* Header - start of next page */
+.page-break-header {
+  width: 100%;
+  background: white;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: auto;
+  font-size: 10pt;
+  color: #6b7280;
+  font-family: 'Times New Roman', serif;
+  border-top: none; /* No border by default */
+  border-bottom: none;
+  padding: 0;
+  padding-top: 48px; /* 0.5 inch from top of header area */
+  cursor: default;
+  overflow: visible;
+}
+
+.page-break-header.editing {
+  position: relative;
+}
+
+.page-break-header.editing::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: -110px;
+  right: -110px;
+  height: 1px;
+  background: #c5d1de;
+}
+
+/* Display text (non-editing state) */
+.page-footer-display,
+.page-header-display {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Editable content areas (editing state) */
+.page-footer-content.editing,
+.page-header-content.editing {
+  text-align: center;
+  min-width: 150px;
+  padding: 2px 4px;
+  outline: none;
+  cursor: text;
+  color: #374151;
+}
+
+/* Legacy selectors for page numbers */
+.page-number-text,
+.page-header-text {
+  text-align: center;
+  user-select: none;
+}
+
+/* Overlay headers and footers for every page */
+.page-headers-footers-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.page-header-overlay,
+.page-footer-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.page-header-overlay {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.page-footer-overlay {
+  border-top: 1px solid #e5e7eb;
+}
+
+.page-header-content-editable,
+.page-footer-content-editable {
+  font-size: 10pt;
+  color: #6b7280;
+  font-family: 'Times New Roman', serif;
+  text-align: center;
+  min-width: 100px;
+  padding: 4px 12px;
+  border-radius: 3px;
+  outline: none;
+  cursor: text;
+  transition: background-color 0.2s;
+  background: white;
+}
+
+.page-header-content-editable:hover,
+.page-footer-content-editable:hover {
+  background-color: #f9fafb;
+}
+
+.page-header-content-editable:focus,
+.page-footer-content-editable:focus {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+/* Legacy support */
+.page-break-marker,
+.page-break-separator,
+.page-break-visual,
 .page-break {
   display: block;
   width: 100%;
@@ -979,6 +1376,20 @@ body {
 
 .document-text-underline {
   text-decoration: underline;
+}
+
+.document-text-strikethrough {
+  text-decoration: line-through;
+}
+
+.document-text-subscript {
+  font-size: 0.75em;
+  vertical-align: sub;
+}
+
+.document-text-superscript {
+  font-size: 0.75em;
+  vertical-align: super;
 }
 
 /* Lists */
@@ -1050,9 +1461,9 @@ body {
   position: relative;
 }
 
-/* Print Styles */
+/* Print Styles — @page size is injected dynamically by JS before window.print()
+   because CSS custom properties (var()) don't resolve inside @page rules. */
 @page {
-  size: letter;
   margin: 0;
 }
 
@@ -1064,55 +1475,177 @@ body {
   .formatting-toolbar,
   .ai-sidebar,
   .ai-sidebar-shell,
-  .document-header {
+  .document-header,
+  .hf-separator,
+  .hf-badge,
+  .autocomplete-ghost-text,
+  .image-toolbar,
+  .image-resize-handles,
+  .spell-check-overlay,
+  .spell-check-menu {
     display: none !important;
   }
 
-  /* Reset body and container */
+  /* Remove header/footer editing dimming */
+  .document-page-content.hf-body-dimmed {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  /* Reset ALL containers — remove overflow:hidden and fixed heights
+     so content flows across print pages */
+  html {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
   body {
     background: white;
     margin: 0;
     padding: 0;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .app-shell {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
   }
 
   .document-editor-container {
     background: white;
     margin: 0;
     padding: 0;
+    overflow: visible !important;
+    height: auto !important;
   }
 
   .document-editor-body {
     display: block;
     width: 100%;
+    overflow: visible !important;
+    height: auto !important;
   }
 
   .document-main-column {
     width: 100%;
     max-width: none;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .document-main-stack {
+    height: auto !important;
+    overflow: visible !important;
   }
 
   .document-editor-wrapper {
     padding: 0;
     margin: 0;
+    overflow: visible !important;
+    min-height: 0 !important;
   }
 
-  .page-break {
-    height: 0 !important;
-    break-after: page;
+  .document-editor-scroll {
+    overflow: visible !important;
+    height: auto !important;
   }
 
-  /* Page styling */
+  /* Page container — shrink to content, no forced height */
   .document-page {
+    width: var(--page-width);
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0;
     box-shadow: none;
     border-radius: 0;
-    width: 100%;
-    max-width: none;
+    position: relative;
+    display: block !important;
   }
 
-  /* Content styling */
+  /* Page break handling:
+     Switch from flex to block layout so CSS fragmentation works correctly.
+     When the container is display:flex, browsers refuse to break inside it
+     and move the entire container (including the footer) to the next page.
+     With display:block, break-before:page on the header fires correctly —
+     the footer stays at the bottom of the current page, header goes to the
+     next page. height:auto overrides the inline height set by PaginationPlugin
+     (which includes the gap) so only visible children determine the height. */
+  .page-break-container {
+    display: block !important;
+    height: auto !important;
+  }
+
+  /* Hide the visual gap between pages */
+  .page-break-gap {
+    display: none !important;
+  }
+
+  /* Footer: keep visible, fix sizing so padding fits inside 96px.
+     box-sizing:border-box ensures height:96px includes the padding-bottom:48px,
+     keeping the footer at exactly 96px (not 144px with content-box).
+     break-inside:avoid prevents the browser from splitting the 96px footer. */
+  .page-break-footer {
+    display: block !important;
+    box-sizing: border-box !important;
+    break-inside: avoid;
+    color: #000 !important;
+  }
+
+  /* Header: triggers new print page, fix sizing.
+     break-before:page fires correctly on a block child of a block container. */
+  .page-break-header {
+    display: block !important;
+    box-sizing: border-box !important;
+    break-before: page;
+    color: #000 !important;
+  }
+
+  /* Whitespace: pure block spacer.
+     --corrected-whitespace is set on the parent .page-break-container by JS
+     before printing (accounts for the 48px header height delta in print vs
+     screen layout). Using a CSS variable on the parent means React/Lexical
+     re-renders of the child (.page-break-top) cannot override it.
+     break-after:auto allows the browser to avoid orphaning the footer when
+     there is a tiny rounding overflow at the page boundary. */
+  .page-break-top {
+    display: block !important;
+    height: var(--corrected-whitespace) !important;
+    break-after: auto;
+  }
+
+  /* SimpleHeaderEditor / SimpleFooterEditor: fix box-sizing so their total
+     height is exactly 96px in print, matching PaginationPlugin's assumption.
+     With content-box (default) + height:96px + padding-top:48px the box is
+     144px tall, which shifts the content editable down by 48px extra and
+     causes the footer to overflow the page by exactly that amount. */
+  .document-header-editor,
+  .document-footer-editor {
+    box-sizing: border-box !important;
+    color: #000 !important;
+  }
+
+  .hf-content-editable,
+  .hf-editor-root {
+    color: #000 !important;
+  }
+
+  /* Content area — convert from flex to block so CSS fragmentation works.
+     display:flex on this container (even with flex:none as a flex item) blocks
+     Chrome from honoring break-before:page inside it. Block layout is required
+     for predictable page breaks throughout the content tree. */
+  .document-page-content {
+    display: block !important;
+    flex: none !important;
+  }
+
+  .document-editor-surface {
+    display: block !important;
+  }
   .document-content-editable {
     width: 100%;
-    min-height: auto;
+    min-height: auto !important;
   }
 
   /* Ensure proper text rendering */
@@ -3124,9 +3657,14 @@ body {
   }
 
   .menu-bar-profile-slot {
-    width: 100%;
     justify-content: flex-start;
-    margin-left: 0;
+  }
+
+  .menu-bar-actions {
+    width: auto;
+    margin-left: auto;
+    justify-content: flex-end;
+    align-self: flex-end;
   }
 
   .menu-bar-title-text,
@@ -4268,6 +4806,311 @@ body {
   text-align: left;
 }
 
+
+/* ========================================
+   HEADER/FOOTER RICH EDITOR (nested Lexical)
+   Google Docs style: full-width, left-aligned,
+   blue separator line + badge when editing
+   ======================================== */
+
+.hf-rich-editor-wrapper {
+  width: 100%;
+  position: relative;
+  cursor: default;
+}
+
+.hf-editor-area {
+  position: relative;
+}
+
+.hf-rich-editor-wrapper .hf-editor-root {
+  position: relative;
+  font-size: 12pt;
+  font-family: 'Times New Roman', serif;
+  color: #9ca3af;
+  text-align: left;
+  outline: none;
+}
+
+.hf-rich-editor-wrapper .hf-paragraph {
+  margin: 0;
+}
+
+.hf-rich-editor-wrapper .hf-content-editable {
+  outline: none;
+  min-height: 1.4em;
+  font-size: 12pt;
+  font-family: 'Times New Roman', serif;
+  color: #9ca3af;
+}
+
+/* When not editing, disable pointer events on editor content */
+.hf-rich-editor-wrapper:not(.hf-editing) .hf-content-editable {
+  pointer-events: none;
+}
+
+/* When editing, allow interaction and darken text */
+.hf-rich-editor-wrapper.hf-editing .hf-content-editable {
+  pointer-events: auto;
+  cursor: text;
+  color: #1f2937;
+}
+
+.hf-rich-editor-wrapper.hf-editing .hf-editor-root {
+  color: #1f2937;
+}
+
+/* Placeholder styling */
+.hf-placeholder {
+  color: #c0c5cc;
+  font-size: 12pt;
+  font-family: 'Times New Roman', serif;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Google Docs-style separator line + badge */
+.hf-separator {
+  position: relative;
+  margin-top: 6px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+}
+
+.hf-separator-line {
+  position: absolute;
+  left: -72pt;
+  right: -72pt;
+  top: 50%;
+  height: 1px;
+  background: #4285f4;
+}
+
+.hf-badge {
+  position: absolute;
+  left: calc(-72pt + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  background: white;
+  font-size: 9px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #4285f4;
+  padding: 1px 6px;
+  border: 1px solid #4285f4;
+  border-radius: 2px;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* Body content dimming when editing header/footer */
+.document-page-content.hf-body-dimmed {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.homepage-document-menu:hover {
+  background: #f3f4f6;
+  color: #374151;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  text-align: left;
+  padding: 64px 72px;
+  box-sizing: border-box;
+  mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  font-family: Arial, sans-serif;
+}
+
+.homepage-document-info-bottom {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.homepage-document-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  margin: 0 0 6px 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.homepage-document-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.homepage-document-icon-small {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.homepage-document-meta {
+  font-size: 12px;
+  color: #6b7280;
+  flex: 1;
+  text-align: left;
+}
+
+
+/* ========================================
+   HEADER/FOOTER RICH EDITOR (nested Lexical)
+   Google Docs style: full-width, left-aligned,
+   blue separator line + badge when editing
+   ======================================== */
+
+.hf-rich-editor-wrapper {
+  width: 100%;
+  position: relative;
+  cursor: default;
+}
+
+.hf-editor-area {
+  position: relative;
+}
+
+.hf-rich-editor-wrapper .hf-editor-root {
+  position: relative;
+  font-size: 12pt;
+  font-family: 'Times New Roman', serif;
+  color: #9ca3af;
+  text-align: left;
+  outline: none;
+}
+
+.hf-rich-editor-wrapper .hf-paragraph {
+  margin: 0;
+}
+
+.hf-rich-editor-wrapper .hf-content-editable {
+  outline: none;
+  min-height: 1.4em;
+  font-size: 12pt;
+  font-family: 'Times New Roman', serif;
+  color: #9ca3af;
+}
+
+/* When not editing, disable pointer events on editor content */
+.hf-rich-editor-wrapper:not(.hf-editing) .hf-content-editable {
+  pointer-events: none;
+}
+
+/* When editing, allow interaction and darken text */
+.hf-rich-editor-wrapper.hf-editing .hf-content-editable {
+  pointer-events: auto;
+  cursor: text;
+  color: #1f2937;
+}
+
+.hf-rich-editor-wrapper.hf-editing .hf-editor-root {
+  color: #1f2937;
+}
+
+/* Placeholder styling */
+.hf-placeholder {
+  color: #c0c5cc;
+  font-size: 12pt;
+  font-family: 'Times New Roman', serif;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Google Docs-style separator line + badge */
+.hf-separator {
+  position: relative;
+  margin-top: 6px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+}
+
+.hf-separator-line {
+  position: absolute;
+  left: -72pt;
+  right: -72pt;
+  top: 50%;
+  height: 1px;
+  background: #4285f4;
+}
+
+.hf-badge {
+  position: absolute;
+  left: calc(-72pt + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  background: white;
+  font-size: 9px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #4285f4;
+  padding: 1px 6px;
+  border: 1px solid #4285f4;
+  border-radius: 2px;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* Body content dimming when editing header/footer */
+.document-page-content.hf-body-dimmed {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* Document header editor - full-width, left-aligned (Google Docs style) */
+.document-header-editor .hf-rich-editor-wrapper {
+  padding-bottom: 0;
+}
+
+/* Document footer editor - full-width, left-aligned */
+.document-footer-editor .hf-rich-editor-wrapper {
+  padding-top: 8px;
+}
+
+/* Page break header/footer adjustments */
+/* No horizontal padding — content editable already provides 72pt left/right */
+.page-break-footer .hf-rich-editor-wrapper {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.page-break-header .hf-rich-editor-wrapper {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Editing indicators for page break areas */
+.page-break-footer:has(.hf-editing) {
+  position: relative;
+}
+
+.page-break-header:has(.hf-editing) {
+  position: relative;
+}
 
 /* Menu bar brand button */
 .menu-bar-brand-button {

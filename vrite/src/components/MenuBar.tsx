@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { usePostHog } from 'posthog-js/react';
 import {
   File,
   Save,
@@ -12,6 +13,8 @@ import {
   Table,
   Layout,
   Trash2,
+  MessageSquare,
+  Upload,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
@@ -35,6 +38,8 @@ interface MenuBarProps {
   onInsertEquation?: () => void;
   onApplyFormat?: (formatKey: string) => void;
   activeFormatKey?: string;
+  onImportDocument?: (file: File) => void;
+  isImporting?: boolean;
 }
 
 export default function MenuBar({
@@ -54,9 +59,13 @@ export default function MenuBar({
   onInsertEquation,
   onApplyFormat,
   activeFormatKey,
+  onImportDocument,
+  isImporting,
 }: MenuBarProps) {
-  type DropdownKey = 'file' | 'export' | 'insert' | 'table' | 'format';
+  type DropdownKey = 'file' | 'export' | 'import' | 'insert' | 'table' | 'format' | 'feedback';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
+  const posthog = usePostHog();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(documentTitle);
   const menuBarRef = useRef<HTMLDivElement>(null);
@@ -64,7 +73,15 @@ export default function MenuBar({
   const [hoveredCell, setHoveredCell] = useState<{ row: number; col: number } | null>(null);
 
   const toggleDropdown = (key: DropdownKey) => {
-    setOpenDropdown((prev) => (prev === key ? null : key));
+    setOpenDropdown((prev) => {
+      const nextOpen = prev === key ? null : key;
+      if (nextOpen === 'feedback') {
+        window.dispatchEvent(
+          new CustomEvent('topbar-dropdown-opened', { detail: { source: 'feedback' } })
+        );
+      }
+      return nextOpen;
+    });
   };
 
   useEffect(() => {
@@ -91,6 +108,20 @@ export default function MenuBar({
       document.removeEventListener('mousedown', handleClickOutside, true);
     };
   }, []);
+
+  useEffect(() => {
+    const handleOtherDropdownOpened = (event: Event) => {
+      const customEvent = event as CustomEvent<{ source?: string }>;
+      if (customEvent.detail?.source !== 'feedback' && openDropdown === 'feedback') {
+        setOpenDropdown(null);
+      }
+    };
+
+    window.addEventListener('topbar-dropdown-opened', handleOtherDropdownOpened);
+    return () => {
+      window.removeEventListener('topbar-dropdown-opened', handleOtherDropdownOpened);
+    };
+  }, [openDropdown]);
 
   const commitTitleChange = () => {
     const trimmed = draftTitle.trim();
@@ -186,19 +217,76 @@ export default function MenuBar({
               >
                 File
               </button>
-              {(openDropdown === 'file' || openDropdown === 'export') && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".docx,.pdf"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file && onImportDocument) {
+                    onImportDocument(file);
+                  }
+                  // Reset so the same file can be re-selected
+                  e.target.value = '';
+                  setOpenDropdown(null);
+                }}
+              />
+              {(openDropdown === 'file' || openDropdown === 'export' || openDropdown === 'import') && (
                 <div className="menu-dropdown">
                   <button className="menu-dropdown-item" onClick={onNewDocument}>
                     <File size={16} />
                     New Document
                     <span className="menu-shortcut">Ctrl+N</span>
                   </button>
-                  <button className="menu-dropdown-item" onClick={onSaveDocument}>
+                  <button className="menu-dropdown-item" onClick={() => {
+                    posthog.capture('document_saved', { is_autosave: false });
+                    onSaveDocument();
+                  }}>
                     <Save size={16} />
                     Save
                     <span className="menu-shortcut">Ctrl+S</span>
                   </button>
-                  <div className="menu-dropdown-divider" />
+                  {onImportDocument && (
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        className="menu-dropdown-item"
+                        onClick={() => toggleDropdown('import')}
+                      >
+                        <Upload size={16} />
+                        Import from...
+                        <ChevronDown size={14} style={{ marginLeft: 'auto', transform: 'rotate(-90deg)' }} />
+                      </button>
+                      {openDropdown === 'import' && (
+                        <div className="menu-dropdown-submenu import-dropdown-submenu">
+                          <button
+                            className="menu-dropdown-item"
+                            onClick={() => {
+                              if (fileInputRef.current) {
+                                fileInputRef.current.accept = '.docx';
+                                fileInputRef.current.click();
+                              }
+                            }}
+                            disabled={isImporting}
+                          >
+                            Word Document (.docx)
+                          </button>
+                          <button
+                            className="menu-dropdown-item"
+                            onClick={() => {
+                              if (fileInputRef.current) {
+                                fileInputRef.current.accept = '.pdf';
+                                fileInputRef.current.click();
+                              }
+                            }}
+                            disabled={isImporting}
+                          >
+                            PDF Document (.pdf)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     className="menu-dropdown-item"
                     onClick={() => toggleDropdown('export')}
@@ -210,25 +298,24 @@ export default function MenuBar({
                     <div className="menu-dropdown-submenu">
                       <button
                         className="menu-dropdown-item"
-                        onClick={() => onExportDocument('pdf')}
+                        onClick={() => { posthog.capture('document_exported', { format: 'pdf' }); onExportDocument('pdf'); }}
                       >
                         PDF Document
                       </button>
                       <button
                         className="menu-dropdown-item"
-                        onClick={() => onExportDocument('docx')}
+                        onClick={() => { posthog.capture('document_exported', { format: 'docx' }); onExportDocument('docx'); }}
                       >
                         Word Document
                       </button>
                       <button
                         className="menu-dropdown-item"
-                        onClick={() => onExportDocument('txt')}
+                        onClick={() => { posthog.capture('document_exported', { format: 'txt' }); onExportDocument('txt'); }}
                       >
                         Text File
                       </button>
                     </div>
                   )}
-                  <div className="menu-dropdown-divider" />
                   <button className="menu-dropdown-item" onClick={onPrint}>
                     <Printer size={16} />
                     Print
@@ -366,8 +453,47 @@ export default function MenuBar({
         </div>
       </div>
 
-      <div className="menu-bar-profile-slot">
-        <UserProfile />
+      <div className="menu-bar-actions">
+        <div className="menu-item menu-feedback-item">
+          <button
+            className="menu-button menu-feedback-button"
+            onClick={() => toggleDropdown('feedback')}
+            aria-haspopup="menu"
+            aria-expanded={openDropdown === 'feedback'}
+          >
+            <MessageSquare size={14} />
+            Feedback
+          </button>
+          {openDropdown === 'feedback' && (
+            <div className="menu-dropdown menu-feedback-dropdown" role="menu">
+              <div className="menu-feedback-title">Share Feedback</div>
+              <a
+                className="menu-dropdown-item menu-feedback-link"
+                href="mailto:fabian@vibewrite.work"
+              >
+                fabian@vibewrite.work
+              </a>
+              <a
+                className="menu-dropdown-item menu-feedback-link"
+                href="mailto:carlos@vibewrite.work"
+              >
+                carlos@vibewrite.work
+              </a>
+              <a
+                className="menu-dropdown-item menu-feedback-link"
+                href="https://calendly.com/fabiareor/30min"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Book a call
+              </a>
+            </div>
+          )}
+        </div>
+
+        <div className="menu-bar-profile-slot">
+          <UserProfile />
+        </div>
       </div>
     </div>
   );

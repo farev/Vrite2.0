@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Plus, Search, Trash2 } from 'lucide-react';
+import { FileText, Plus, Search, MoreVertical, Trash2, Clock, Upload } from 'lucide-react';
 import { listAllDocuments, loadDocumentById, getLastModifiedString, deleteDocument, type DocumentData } from '@/lib/storage';
 import { createClient } from '@/lib/supabase/client';
 import { DOCUMENT_FORMATS } from '@/lib/document-formats';
+
+import { usePostHog } from 'posthog-js/react';
 
 import React from 'react';
 
@@ -148,8 +150,11 @@ export default function HomePage() {
   const [isLoadingRef, setIsLoadingRef] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const supabase = createClient();
+  const posthog = usePostHog();
 
   useEffect(() => {
     loadDocuments();
@@ -198,11 +203,41 @@ export default function HomePage() {
   };
 
   const handleCreateDocument = (format?: string) => {
+    posthog.capture('document_created', { type: 'blank' });
     const query = format ? `?format=${format}` : '';
     router.push(`/document/new${query}`);
   };
 
+  const handleImportFile = async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    setIsImporting(true);
+    try {
+      let result: { html: string; title: string; warnings: string[] };
+      if (ext === 'docx') {
+        const { importDocx } = await import('@/lib/import-docx');
+        result = await importDocx(file);
+      } else if (ext === 'pdf') {
+        const { importPdf } = await import('@/lib/import-pdf');
+        result = await importPdf(file);
+      } else {
+        alert('Unsupported file format. Please select a .docx or .pdf file.');
+        return;
+      }
+      posthog.capture('document_created', { type: 'imported', import_format: ext });
+      sessionStorage.setItem('vrite_import_pending', JSON.stringify({ html: result.html, title: result.title }));
+      router.push('/document/new');
+    } catch (error) {
+      console.error('[Import] Error:', error);
+      alert('Failed to import file. The file may be corrupted or unsupported.');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleOpenDocument = (documentId: string) => {
+    posthog.capture('document_opened', {
+      storage_provider: documentId.startsWith('temp-') ? 'local' : 'google_drive',
+    });
     router.push(`/document/${documentId}`);
   };
 
@@ -325,6 +360,33 @@ export default function HomePage() {
               </div>
               <span className="homepage-template-label">MLA Format</span>
             </button>
+            <button
+              className="homepage-template-card"
+              onClick={() => importFileInputRef.current?.click()}
+              disabled={isImporting}
+            >
+              <div className="homepage-template-preview">
+                {isImporting ? (
+                  <div className="homepage-loading-spinner" />
+                ) : (
+                  <Upload size={48} />
+                )}
+              </div>
+              <span className="homepage-template-label">
+                {isImporting ? 'Importing...' : 'Import'}
+              </span>
+            </button>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".docx,.pdf"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleImportFile(file);
+                e.target.value = '';
+              }}
+            />
           </div>
         </section>
 

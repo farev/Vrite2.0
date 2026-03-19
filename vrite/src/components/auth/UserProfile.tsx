@@ -44,6 +44,20 @@ export default function UserProfile() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    const handleOtherDropdownOpened = (event: Event) => {
+      const customEvent = event as CustomEvent<{ source?: string }>;
+      if (customEvent.detail?.source !== 'profile') {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener('topbar-dropdown-opened', handleOtherDropdownOpened);
+    return () => {
+      window.removeEventListener('topbar-dropdown-opened', handleOtherDropdownOpened);
+    };
+  }, []);
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.push('/login');
@@ -77,7 +91,15 @@ export default function UserProfile() {
   return (
     <div className="relative" ref={dropdownRef}>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          const nextOpen = !isOpen;
+          setIsOpen(nextOpen);
+          if (nextOpen) {
+            window.dispatchEvent(
+              new CustomEvent('topbar-dropdown-opened', { detail: { source: 'profile' } })
+            );
+          }
+        }}
         className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#e9f6fe] transition-colors"
       >
         {avatarUrl ? (

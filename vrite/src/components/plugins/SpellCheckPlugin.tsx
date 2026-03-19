@@ -385,6 +385,7 @@ function SpellCheckOverlay({
 
   const overlayContent = (
     <div
+      className="spell-check-overlay"
       style={{
         position: 'fixed',
         top: 0,

@@ -21,12 +21,14 @@ export default function DocumentPage() {
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const saveCallbackRef = useRef<(() => void) | null>(null);
   const insertImageCallbackRef = useRef<(() => void) | null>(null);
   const insertTableCallbackRef = useRef<((rows: number, columns: number) => void) | null>(null);
   const insertEquationCallbackRef = useRef<(() => void) | null>(null);
   const applyFormatCallbackRef = useRef<((formatKey: string) => void) | null>(null);
   const [activeFormatKey, setActiveFormatKey] = useState<string>('default');
+  const importCallbackRef = useRef<((html: string, title: string) => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
@@ -100,6 +102,45 @@ export default function DocumentPage() {
     }
   }, []);
 
+  const handleImportCallbackReady = useCallback((callback: (html: string, title: string) => void) => {
+    importCallbackRef.current = callback;
+  }, []);
+
+  const handleImportDocument = useCallback(async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    setIsImporting(true);
+    try {
+      let result: { html: string; title: string; warnings: string[] };
+      if (ext === 'docx') {
+        const { importDocx } = await import('@/lib/import-docx');
+        result = await importDocx(file);
+      } else if (ext === 'pdf') {
+        const { importPdf } = await import('@/lib/import-pdf');
+        result = await importPdf(file);
+      } else {
+        alert('Unsupported file format. Please select a .docx or .pdf file.');
+        return;
+      }
+
+      if (result.warnings.length > 0) {
+        console.warn('[Import] Warnings:', result.warnings);
+      }
+
+      // If the editor import handler is ready (same page), use it directly
+      if (importCallbackRef.current) {
+        importCallbackRef.current(result.html, result.title);
+      } else {
+        // Otherwise hand off via sessionStorage and navigate to new doc
+        sessionStorage.setItem('vrite_import_pending', JSON.stringify({ html: result.html, title: result.title }));
+        router.push('/document/new');
+      }
+    } catch (error) {
+      console.error('[Import] Error:', error);
+      alert('Failed to import file. The file may be corrupted or unsupported.');
+    } finally {
+      setIsImporting(false);
+    }
+  }, [router]);
   useEffect(() => {
     const id = params.id as string;
     const isTempDoc = id.startsWith('temp-');
@@ -151,7 +192,22 @@ export default function DocumentPage() {
       const isTempDoc = id.startsWith('temp-');
 
       if (id === 'new') {
-        // New document
+        // New document — check for a pending import
+        const pending = sessionStorage.getItem('vrite_import_pending');
+        if (pending) {
+          sessionStorage.removeItem('vrite_import_pending');
+          try {
+            const { html, title } = JSON.parse(pending) as { html: string; title: string };
+            // Wait briefly for the editor to mount and register its import handler
+            setTimeout(() => {
+              if (importCallbackRef.current) {
+                importCallbackRef.current(html, title);
+              }
+            }, 500);
+          } catch {
+            console.warn('[DocumentPage] Failed to parse pending import data');
+          }
+        }
         setDocumentId(null);
         setIsLoading(false);
         return;
@@ -257,12 +313,6 @@ export default function DocumentPage() {
     }
   };
 
-  const getCurrentPageSize = () => {
-    const wrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
-    const size = wrapper?.dataset.pageSize;
-    return size === 'a4' ? 'a4' : 'letter';
-  };
-
   const handleExportDocument = async (format: 'pdf' | 'docx' | 'txt') => {
     try {
       if (format === 'txt') {
@@ -311,89 +361,109 @@ export default function DocumentPage() {
       }
 
       if (format === 'pdf') {
-        // Get HTML content from editor (clean version without UI elements)
-        const contentElement = document.querySelector('.document-content-editable');
-        if (!contentElement) {
-          throw new Error('Document content not found');
-        }
-
         setIsExporting(true);
-
-        const pageWrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
-        const pageContentElement = document.querySelector('.document-page-content') as HTMLElement | null;
-        const pageWidth = pageWrapper
-          ? getComputedStyle(pageWrapper).getPropertyValue('--page-width').trim()
-          : '';
-        const pageSize = getCurrentPageSize();
-        const pageContentStyles = pageContentElement ? getComputedStyle(pageContentElement) : null;
-
-        const exportRoot = document.createElement('div');
-        exportRoot.className = 'pdf-export-root';
-        exportRoot.style.position = 'fixed';
-        exportRoot.style.left = '-99999px';
-        exportRoot.style.top = '0';
-        exportRoot.style.background = '#ffffff';
-        exportRoot.style.color = '#0f172a';
-        if (pageWidth) {
-          exportRoot.style.width = pageWidth;
-        }
-
-        const exportPage = document.createElement('div');
-        exportPage.className = 'document-page';
-        if (pageWidth) {
-          exportPage.style.width = pageWidth;
-        }
-
-        const exportPageContent = document.createElement('div');
-        exportPageContent.className = 'document-page-content';
-        exportPageContent.style.boxSizing = 'border-box';
-        if (pageContentStyles) {
-          exportPageContent.style.paddingTop = pageContentStyles.paddingTop;
-          exportPageContent.style.paddingRight = pageContentStyles.paddingRight;
-          exportPageContent.style.paddingBottom = pageContentStyles.paddingBottom;
-          exportPageContent.style.paddingLeft = pageContentStyles.paddingLeft;
-        }
-
-        const exportContent = document.createElement('div');
-        exportContent.className = 'document-content-editable';
-        exportContent.innerHTML = contentElement.innerHTML;
-        exportContent.style.width = '100%';
-
-        exportPageContent.appendChild(exportContent);
-        exportPage.appendChild(exportPageContent);
-        exportRoot.appendChild(exportPage);
-        document.body.appendChild(exportRoot);
-
         try {
-          const html2pdfModule = await import('html2pdf.js');
-          const html2pdf =
-            (html2pdfModule as { default?: typeof import('html2pdf.js') }).default ??
-            html2pdfModule;
+          // 1. Read page settings from data attributes (set by DocumentEditor)
+          const wrapper = document.querySelector('.document-editor-wrapper') as HTMLElement | null;
+          const pageSize = wrapper?.dataset.pageSize || 'letter';
+          const margins = {
+            top:    parseFloat(wrapper?.dataset.marginTop    || '72'),
+            right:  parseFloat(wrapper?.dataset.marginRight  || '72'),
+            bottom: parseFloat(wrapper?.dataset.marginBottom || '72'),
+            left:   parseFloat(wrapper?.dataset.marginLeft   || '72'),
+          };
+          const footerShowPageNumber = wrapper?.dataset.footerShowPageNumber === 'true';
 
-          await html2pdf()
-            .set({
-              margin: 0,
-              filename: `${documentTitle}.pdf`,
-              pagebreak: { mode: ['css', 'legacy'] },
-              image: { type: 'jpeg', quality: 0.98 },
-              html2canvas: {
-                scale: 3,
-                useCORS: true,
-                backgroundColor: '#ffffff',
-                letterRendering: true,
-              },
-              jsPDF: {
-                unit: 'pt',
-                format: pageSize,
-                orientation: 'portrait',
-              },
-            })
-            .from(exportPage)
-            .save();
+          // 2. Clone the editor content
+          const contentEl = document.querySelector('.document-content-editable');
+          if (!contentEl) throw new Error('Editor content not found');
+          const clone = contentEl.cloneNode(true) as HTMLElement;
+
+          // 3. Extract per-page header/footer HTML from the live DOM and the clone.
+          //    Each item's .html is the full Lexical innerHTML — all inline styles
+          //    (font-family, font-size, text-align, color, bold, italic, etc.) are
+          //    already embedded so Puppeteer renders them pixel-for-pixel as in the editor.
+          const getHFHtml = (el: Element | null): string =>
+            el?.textContent?.trim() ? (el.innerHTML || '') : '';
+
+          const globalHeaderEl = document.querySelector('.document-header-editor .hf-content-editable');
+          const globalFooterEl = document.querySelector('.document-footer-editor .hf-content-editable');
+
+          // Page count is known here: one page per break + 1
+          const pageBreakContainers = Array.from(clone.querySelectorAll('.page-break-container'));
+          const totalPages = pageBreakContainers.length + 1;
+
+          // Helper: wrap footer HTML with a right-aligned "Page X of Y" if enabled.
+          // We bake the page number into the HTML on the client so the server can
+          // render it as part of the footer mini-PDF — no separate pdf-lib text overlay needed.
+          const withPageNum = (html: string, pageNum: number): string => {
+            if (!footerShowPageNumber) return html;
+            const numSpan = `<span style="font-size:9pt;color:#9ca3af;white-space:nowrap;` +
+              `font-family:'Times New Roman',serif;flex-shrink:0;">` +
+              `Page ${pageNum} of ${totalPages}</span>`;
+            return `<div style="display:flex;justify-content:space-between;` +
+              `align-items:flex-end;width:100%;">` +
+              `<div style="flex:1;">${html}</div>` +
+              `<div style="padding-left:12pt;">${numSpan}</div></div>`;
+          };
+
+          //    Array layout (N pages total):
+          //      headerItems[0]   = global header   (page 1)
+          //      headerItems[1..] = page-break headers (pages 2..N)
+          //      footerItems[0..N-2] = page-break footers (pages 1..N-1)
+          //      footerItems[N-1] = global footer    (page N)
+          const headerItems: { html: string }[] = [{ html: getHFHtml(globalHeaderEl) }];
+          const footerItems: { html: string }[] = [];
+
+          // 4. Replace page-break-containers with simple break divs; collect per-page HTML.
+          let pageNum = 1;
+          pageBreakContainers.forEach((container) => {
+            const breakFooterEl = container.querySelector('.page-break-footer .hf-content-editable');
+            const breakHeaderEl = container.querySelector('.page-break-header .hf-content-editable');
+            footerItems.push({ html: withPageNum(getHFHtml(breakFooterEl), pageNum) });
+            headerItems.push({ html: getHFHtml(breakHeaderEl) });
+            pageNum++;
+
+            const breakDiv = document.createElement('div');
+            breakDiv.className = 'pdf-page-break';
+            container.parentNode!.replaceChild(breakDiv, container);
+          });
+          footerItems.push({ html: withPageNum(getHFHtml(globalFooterEl), totalPages) });
+
+          // 5. POST to Puppeteer API. The server renders each header/footer HTML as a
+          //    mini vector PDF and overlays it on the correct page via pdf-lib.
+          const response = await fetch('/api/export/pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              html: clone.innerHTML,
+              title: documentTitle,
+              pageSize,
+              margins,
+              headerItems,
+              footerItems,
+            }),
+          });
+
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error((err as { error?: string }).error || 'PDF export failed');
+          }
+
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${documentTitle || 'document'}.pdf`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch (error) {
+          console.error('[PDF Export] Error:', error);
+          alert('Failed to export PDF. Please try again.');
         } finally {
-          document.body.removeChild(exportRoot);
           setIsExporting(false);
         }
+        return;
       }
     } catch (error) {
       setIsExporting(false);
@@ -455,6 +525,8 @@ export default function DocumentPage() {
         }}
         onApplyFormat={handleApplyFormat}
         activeFormatKey={activeFormatKey}
+        onImportDocument={handleImportDocument}
+        isImporting={isImporting}
       />
       {deleteTarget && (
         <div className="delete-modal-backdrop" onClick={() => setDeleteTarget(null)}>
@@ -474,6 +546,16 @@ export default function DocumentPage() {
           </div>
         </div>
       )}
+      {isImporting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30">
+          <div className="rounded-lg bg-white px-4 py-3 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600"></div>
+              <span className="text-sm text-slate-700">Importing document...</span>
+            </div>
+          </div>
+        </div>
+      )}
       <DocumentEditor
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}
@@ -483,6 +565,7 @@ export default function DocumentPage() {
         onInsertTableReady={handleInsertTableReady}
         onInsertEquationReady={handleInsertEquationReady}
         onApplyFormatReady={handleApplyFormatReady}
+        onImportReady={handleImportCallbackReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
         isAuthenticated={isAuthenticated}

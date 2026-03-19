@@ -17,6 +17,7 @@ import {
   $isNodeSelection,
   SELECTION_CHANGE_COMMAND,
   COMMAND_PRIORITY_LOW,
+  $insertNodes,
 } from 'lexical';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
@@ -30,7 +31,8 @@ import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin';
 import { TablePlugin } from '@lexical/react/LexicalTablePlugin';
 import { TabIndentationPlugin } from '@lexical/react/LexicalTabIndentationPlugin';
 import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPlugin';
-import { $convertToMarkdownString, $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
+import { $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
+import { $generateNodesFromDOM } from '@lexical/html';
 import { ListItemNode, ListNode } from '@lexical/list';
 import { LinkNode } from '@lexical/link';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
@@ -56,6 +58,7 @@ import { SpellCheckPlugin } from './plugins/SpellCheckPlugin';
 import TableActionMenuPlugin from './plugins/TableActionMenuPlugin';
 import TableNavigationPlugin from './plugins/TableNavigationPlugin';
 import InactiveSelectionPlugin from './plugins/InactiveSelectionPlugin';
+import FormattingKeyboardShortcutsPlugin from './plugins/FormattingKeyboardShortcutsPlugin';
 import { DiffNode, $isDiffNode } from './nodes/DiffNode';
 import { EquationNode, $createEquationNode } from './nodes/EquationNode';
 import { AutocompleteNode } from './nodes/AutocompleteNode';
@@ -63,6 +66,8 @@ import { PageBreakNode } from './nodes/PageBreakNode';
 import { ImageNode, $isImageNode, $createImageNode } from './nodes/ImageNode';
 import ImagePlugin, { INSERT_IMAGE_COMMAND, type InsertImagePayload } from './plugins/ImagePlugin';
 import ImageInsertModal from './ImageInsertModal';
+import { SimpleHeaderEditor } from './SimpleHeaderEditor';
+import { SimpleFooterEditor } from './SimpleFooterEditor';
 import {
   saveDocument,
   loadDocument,
@@ -106,6 +111,9 @@ const theme = {
     bold: 'document-text-bold',
     italic: 'document-text-italic',
     underline: 'document-text-underline',
+    strikethrough: 'document-text-strikethrough',
+    subscript: 'document-text-subscript',
+    superscript: 'document-text-superscript',
   },
 };
 
@@ -257,18 +265,11 @@ function KeyboardShortcutPlugin({ onCommandK }: { onCommandK: () => void }) {
   return null;
 }
 
-function MyOnChangePlugin({ onChange }: { onChange: (editorState: EditorState, content: string) => void }) {
+function MyOnChangePlugin({ onChange }: { onChange: (editorState: EditorState) => void }) {
   return (
     <OnChangePlugin
-      onChange={(editorState, editor) => {
-        // Convert editor content to markdown (preserves formatting)
-        let markdownContent = '';
-
-        editor.read(() => {
-          markdownContent = $convertToMarkdownString(TRANSFORMERS);
-        });
-
-        onChange(editorState, markdownContent);
+      onChange={(editorState) => {
+        onChange(editorState);
       }}
     />
   );
@@ -408,7 +409,7 @@ const PAGE_SIZES = {
 // Constants for pagination
 const PAGE_GAP = 24; // Gap between pages in pixels
 const PT_TO_PX = 1.333; // Convert points to pixels (1pt = 1.333px at 96 DPI)
-const PAGE_FOOTER_HEIGHT_PX = 40; // Footer height in pixels
+const PAGE_FOOTER_HEIGHT_PX = 96; // Footer height in pixels (matches margin = 1 inch)
 const AUTO_TITLE_STORAGE_PREFIX = 'vrite_auto_title_generated';
 const AUTO_TITLE_SESSION_KEY = 'vrite_auto_title_session_id';
 const AUTO_TITLE_TRIGGER_RATIO = 0.25;
@@ -427,6 +428,7 @@ interface DocumentEditorProps {
   onInsertTableReady?: (handler: (rows: number, columns: number) => void) => void;
   onInsertEquationReady?: (handler: () => void) => void;
   onApplyFormatReady?: (handler: (formatKey: string) => void) => void;
+  onImportReady?: (handler: (html: string, title: string) => void) => void;
 }
 
 // Track previous title to detect changes
@@ -448,10 +450,10 @@ export default function DocumentEditor({
   onInsertTableReady,
   onInsertEquationReady,
   onApplyFormatReady,
+  onImportReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
   const supabase = useMemo(() => createClient(), []);
-  const [documentContent, setDocumentContent] = useState('');
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
 
   // User can save to cloud if they're authenticated OR anonymous (both have Supabase sessions)
@@ -463,7 +465,6 @@ export default function DocumentEditor({
     isAuthenticated,
     onDocumentUpdated: (newContent, newTitle) => {
       console.log('[Editor] Reloading document from another tab');
-      setDocumentContent(newContent);
       onTitleChange(newTitle);
 
       // Update the Lexical editor with the new content
@@ -500,8 +501,26 @@ export default function DocumentEditor({
   const [pendingChanges, setPendingChanges] = useState<LexicalChange[] | null>(null);
   const pendingContextImagesRef = useRef<Array<{ filename: string; data: string; width: number; height: number }>>([]);
   const [pageCount, setPageCount] = useState(1);
+  const [headerFooterSettings, setHeaderFooterSettings] = useState({
+    headerEnabled: false,
+    headerEditorState: null as string | null,
+    footerEnabled: false,
+    footerShowPageNumber: false,
+    footerEditorState: null as string | null,
+  });
+  const [activeHFEditor, setActiveHFEditor] = useState<LexicalEditor | null>(null);
+  const [isEditingHF, setIsEditingHF] = useState(false);
   const [editorRef, setEditorRef] = useState<LexicalEditor | null>(null);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
+  // Helper to get plain text from editor (used for auto-title, format-document)
+  const getEditorPlainText = useCallback(() => {
+    if (!editorRef) return '';
+    let text = '';
+    editorRef.getEditorState().read(() => {
+      text = $getRoot().getTextContent();
+    });
+    return text;
+  }, [editorRef]);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo>({ text: '', rect: null });
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
   const [selectedContextImages, setSelectedContextImages] = useState<Array<{ filename: string; data: string; width: number; height: number }>>([]);
@@ -511,7 +530,14 @@ export default function DocumentEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [showDrivePermissionsToast, setShowDrivePermissionsToast] = useState(false);
-  const isDocumentEmpty = documentContent.trim().length === 0;
+  const isDocumentEmpty = useMemo(() => {
+    if (!editorState) return true;
+    let empty = true;
+    editorState.read(() => {
+      empty = $getRoot().getTextContent().trim().length === 0;
+    });
+    return empty;
+  }, [editorState]);
   const historyStateRef = useRef(createEmptyHistoryState());
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
@@ -557,18 +583,18 @@ export default function DocumentEditor({
   );
 
   const editorSurfaceStyle = useMemo(
-    () =>
-      ({
-        paddingTop: `${documentMargins.top}pt`,
-        paddingRight: `${documentMargins.right}pt`,
-        paddingBottom: `${documentMargins.bottom}pt`,
-        paddingLeft: `${documentMargins.left}pt`,
-        '--doc-column-count': columnCount,
-        '--doc-column-gap': documentColumnGap,
-        '--doc-font-family': documentDefaultFont,
-        '--doc-font-size': documentDefaultFontSize,
-        '--doc-line-height': documentDefaultLineSpacing,
-      }) as CSSProperties,
+    () => ({
+      // No top/bottom padding - SimpleHeaderEditor and SimpleFooterEditor provide that space
+      paddingTop: '0',
+      paddingRight: `${documentMargins.right}pt`,
+      paddingBottom: '0',
+      paddingLeft: `${documentMargins.left}pt`,
+      '--doc-column-count': columnCount,
+      '--doc-column-gap': documentColumnGap,
+      '--doc-font-family': documentDefaultFont,
+      '--doc-font-size': documentDefaultFontSize,
+      '--doc-line-height': documentDefaultLineSpacing,
+    }) as CSSProperties,
     [documentMargins, columnCount, documentColumnGap, documentDefaultFont, documentDefaultFontSize, documentDefaultLineSpacing]
   );
 
@@ -610,7 +636,7 @@ export default function DocumentEditor({
   const requestAutoTitle = useCallback(
     async (reason: string, contentOverride?: string) => {
       const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
-      const sourceContent = (contentOverride ?? documentContent).trim();
+      const sourceContent = (contentOverride ?? getEditorPlainText()).trim();
 
       console.log('[Editor] Auto-title request start', {
         reason,
@@ -692,7 +718,7 @@ export default function DocumentEditor({
         autoTitleInFlightRef.current = false;
       }
     },
-    [documentId, initialDocumentId, documentContent, documentTitle, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, supabase]
+    [documentId, initialDocumentId, getEditorPlainText, documentTitle, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, supabase]
   );
 
   const triggerAutoTitleIfEligible = useCallback(
@@ -759,8 +785,7 @@ export default function DocumentEditor({
     previousTitle = documentTitle;
   }, [documentTitle]);
   
-  const handleEditorChange = (editorState: EditorState, content: string) => {
-    setDocumentContent(content);
+  const handleEditorChange = (editorState: EditorState) => {
     setEditorState(editorState);
     setHasUnsavedChanges(true); // Mark document as having unsaved changes
   };
@@ -809,25 +834,37 @@ export default function DocumentEditor({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [documentTitle, documentContent, isDocumentEmpty, isContentPastQuarterPage, isTitleUnnamed, triggerAutoTitleIfEligible]);
+  }, [documentTitle, editorState, isDocumentEmpty, isContentPastQuarterPage, isTitleUnnamed, triggerAutoTitleIfEligible]);
 
-  // Fast local heading-extraction: if the first non-empty line is an H1, use it as the title
+  // Fast local heading-extraction: if the first non-empty node is an H1, use it as the title
   // immediately without waiting for the AI edge function or the 25% page-fill threshold.
   useEffect(() => {
     if (isDocumentEmpty || !isTitleUnnamed(documentTitle)) return;
     if (autoTitleTriggeredRef.current || autoTitleInFlightRef.current) return;
+    if (!editorState) return;
 
-    const firstLine = documentContent.split('\n').find((l) => l.trim().length > 0) ?? '';
-    if (firstLine.startsWith('# ')) {
-      const headingTitle = firstLine.slice(2).trim();
-      if (headingTitle && !isTitleUnnamed(headingTitle)) {
-        console.log('[Editor] Auto-title from H1 heading:', headingTitle);
-        const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
-        onTitleChange(headingTitle);
-        markAutoTitleTriggered(docIdentity);
+    let headingTitle = '';
+    editorState.read(() => {
+      const root = $getRoot();
+      const children = root.getChildren();
+      for (const child of children) {
+        const text = child.getTextContent().trim();
+        if (!text) continue;
+        // Check if first non-empty node is an H1 heading
+        if (child.getType() === 'heading' && 'getTag' in child && (child as any).getTag() === 'h1') {
+          headingTitle = text;
+        }
+        break; // Only check the first non-empty node
       }
+    });
+
+    if (headingTitle && !isTitleUnnamed(headingTitle)) {
+      console.log('[Editor] Auto-title from H1 heading:', headingTitle);
+      const docIdentity = documentId || initialDocumentId || autoTitleLocalIdRef.current;
+      onTitleChange(headingTitle);
+      markAutoTitleTriggered(docIdentity);
     }
-  }, [documentContent, documentTitle, isDocumentEmpty, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, documentId, initialDocumentId]);
+  }, [editorState, documentTitle, isDocumentEmpty, isTitleUnnamed, markAutoTitleTriggered, onTitleChange, documentId, initialDocumentId]);
 
   // Manual save function with debouncing and deduplication
   const handleManualSave = useCallback(async (isManualTrigger = true) => {
@@ -859,13 +896,13 @@ export default function DocumentEditor({
             // Update existing temporary document
             updateTemporaryDocument(tempId, {
               title: documentTitle,
-              editorState: JSON.stringify(editorState.toJSON()),
+              editorState: JSON.stringify({ ...editorState.toJSON(), __hf__: headerFooterSettings }),
             });
           } else {
             // Create new temporary document
             const newTempId = saveTemporaryDocument({
               title: documentTitle,
-              editorState: JSON.stringify(editorState.toJSON()),
+              editorState: JSON.stringify({ ...editorState.toJSON(), __hf__: headerFooterSettings }),
             });
 
             setDocumentId(newTempId);
@@ -901,7 +938,7 @@ export default function DocumentEditor({
       const documentData: DocumentData = {
         id: documentId,
         title: documentTitle,
-        editorState: JSON.stringify(editorState.toJSON()),
+        editorState: JSON.stringify({ ...editorState.toJSON(), __hf__: headerFooterSettings }),
         formatKey: activeFormatKey !== DEFAULT_FORMAT_KEY ? activeFormatKey : undefined,
         lastModified: Date.now(),
       };
@@ -957,7 +994,19 @@ export default function DocumentEditor({
       saveInProgress = false;
       setIsSaving(false);
     }
-  }, [documentId, documentTitle, documentContent, editorState, activeFormatKey, onLastSavedChange, onDocumentIdChange, isAuthenticated, showSignupModal, initialDocumentId]);
+  }, [
+    documentId,
+    documentTitle,
+    editorState,
+    activeFormatKey,
+    headerFooterSettings,
+    onLastSavedChange,
+    onDocumentIdChange,
+    isAuthenticated,
+    isAnonymous,
+    showSignupModal,
+    initialDocumentId,
+  ]);
 
   // Expose save callback to parent
   useEffect(() => {
@@ -1028,6 +1077,22 @@ export default function DocumentEditor({
       onApplyFormatReady(handleApplyFormat);
     }
   }, [onApplyFormatReady, handleApplyFormat]);
+  // Expose import handler to parent
+  useEffect(() => {
+    if (onImportReady && editorRef) {
+      onImportReady((html: string, title: string) => {
+        editorRef.update(() => {
+          const parser = new DOMParser();
+          const dom = parser.parseFromString(html, 'text/html');
+          const nodes = $generateNodesFromDOM(editorRef, dom);
+          $getRoot().clear();
+          $insertNodes(nodes);
+        });
+        onTitleChange(title);
+        setHasUnsavedChanges(true);
+      });
+    }
+  }, [onImportReady, editorRef, onTitleChange]);
 
   // Reset the loaded flag when document ID changes
   useEffect(() => {
@@ -1072,7 +1137,13 @@ export default function DocumentEditor({
             if (savedDoc.editorState) {
               // Update the Lexical editor with the loaded editor state
               console.log('[Editor] Loading from Lexical JSON');
-              const parsedState = editorRef.parseEditorState(savedDoc.editorState);
+              const stateObj = JSON.parse(savedDoc.editorState);
+              // Extract and restore header/footer settings if present
+              if (stateObj.__hf__) {
+                setHeaderFooterSettings(stateObj.__hf__);
+                delete stateObj.__hf__;
+              }
+              const parsedState = editorRef.parseEditorState(JSON.stringify(stateObj));
               editorRef.setEditorState(parsedState);
               // Clear undo history so pressing Ctrl+Z can't undo back to the
               // empty initial editor state before the document was loaded.
@@ -1172,7 +1243,7 @@ export default function DocumentEditor({
         clearTimeout(pendingSaveTimeout);
       }
     };
-  }, [hasUnsavedChanges, documentContent, documentTitle, handleManualSave, isAuthenticated, documentId, initialDocumentId, onDocumentIdChange, onLastSavedChange]);
+  }, [hasUnsavedChanges, documentTitle, handleManualSave, isAuthenticated, documentId, initialDocumentId, onDocumentIdChange, onLastSavedChange]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -1256,7 +1327,7 @@ export default function DocumentEditor({
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges, documentContent, documentId, documentTitle, editorState, isAuthenticated, initialDocumentId]);
+  }, [hasUnsavedChanges, documentId, documentTitle, editorState, isAuthenticated, initialDocumentId]);
 
   const handleCommandK = useCallback(() => {
     setIsAISidebarOpen(true);
@@ -1304,7 +1375,7 @@ export default function DocumentEditor({
   const handleApplyChanges = (content: string, changes?: Array<{old_text: string, new_text: string}>) => {
     // Store the current and suggested content to trigger inline diff in editor
     // Content is markdown format
-    setOriginalContent(documentContent);
+    setOriginalContent(getEditorPlainText());
     setSuggestedContent(content);
     setIsDiffModeActive(true);
 
@@ -1434,10 +1505,7 @@ export default function DocumentEditor({
         });
       }
 
-      // Update document content state
-      if (suggestedContent) {
-        setDocumentContent(suggestedContent);
-      }
+      // Editor state is updated by the editor.update() above; no separate content state needed
     }
     setIsDiffModeActive(false);
     setOriginalContent(null);
@@ -1494,10 +1562,7 @@ export default function DocumentEditor({
         });
       });
 
-      // Update document content state
-      if (originalContent) {
-        setDocumentContent(originalContent);
-      }
+      // Editor state is updated by the editor.update() above; no separate content state needed
     }
     setIsDiffModeActive(false);
     setOriginalContent(null);
@@ -1541,7 +1606,7 @@ export default function DocumentEditor({
 
       const { data, error } = await supabase.functions.invoke('format-document', {
         body: {
-          content: documentContent,
+          content: getEditorPlainText(),
           format_type: formatType,
         },
       });
@@ -1554,7 +1619,7 @@ export default function DocumentEditor({
       if (data.type === 'tool_based' && data.changes) {
         // Apply markdown changes using DeltaApplicator
         const { DeltaApplicator } = await import('@/lib/deltaApplicator');
-        const suggestedContent = DeltaApplicator.applyDeltas(documentContent, data.changes);
+        const suggestedContent = DeltaApplicator.applyDeltas(getEditorPlainText(), data.changes);
 
         // Use the same inline diff UI as regular edits
         handleApplyChanges(suggestedContent);
@@ -1655,6 +1720,26 @@ export default function DocumentEditor({
     }
   }, [selectionInfo, editorRef]);
 
+  // Listen for header/footer editor focus/blur events from PageBreakNode rich editors
+  useEffect(() => {
+    const handleHFEditorFocus = (e: Event) => {
+      const customEvent = e as CustomEvent<{ editor: LexicalEditor }>;
+      setActiveHFEditor(customEvent.detail.editor);
+    };
+
+    const handleHFEditorBlur = () => {
+      setActiveHFEditor(null);
+    };
+
+    document.addEventListener('hf-editor-focus', handleHFEditorFocus);
+    document.addEventListener('hf-editor-blur', handleHFEditorBlur);
+
+    return () => {
+      document.removeEventListener('hf-editor-focus', handleHFEditorFocus);
+      document.removeEventListener('hf-editor-blur', handleHFEditorBlur);
+    };
+  }, []);
+
   const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
   const lexicalComposerKey = useMemo(
@@ -1683,6 +1768,7 @@ export default function DocumentEditor({
                 onFormatDocument={handleFormatDocument}
                 pageSize={pageSize}
                 onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
+                activeEditor={activeHFEditor}
               />
               
               <div
@@ -1693,9 +1779,36 @@ export default function DocumentEditor({
                 className="document-editor-wrapper"
                 style={editorWrapperStyle}
                 data-page-size={pageSize}
+                data-margin-top={documentMargins.top}
+                data-margin-right={documentMargins.right}
+                data-margin-bottom={documentMargins.bottom}
+                data-margin-left={documentMargins.left}
+                data-header-enabled={headerFooterSettings.headerEnabled ? 'true' : 'false'}
+                data-footer-enabled={headerFooterSettings.footerEnabled ? 'true' : 'false'}
+                data-footer-show-page-number={headerFooterSettings.footerShowPageNumber ? 'true' : 'false'}
               >
-                  <div className="document-page">
-                    <div className="document-page-content" style={editorSurfaceStyle}>
+                  <div className="document-page" style={{ minHeight: `${pageStackHeight}px` }}>
+                    {/* Header - for page 1 */}
+                    <SimpleHeaderEditor
+                      documentTitle={documentTitle}
+                      headerEnabled={headerFooterSettings.headerEnabled}
+                      headerEditorState={headerFooterSettings.headerEditorState}
+                      onHeaderChange={(stateJSON) =>
+                        setHeaderFooterSettings({ ...headerFooterSettings, headerEditorState: stateJSON })
+                      }
+                      onHeaderToggle={() =>
+                        setHeaderFooterSettings({
+                          ...headerFooterSettings,
+                          headerEnabled: !headerFooterSettings.headerEnabled,
+                        })
+                      }
+                      onEditorFocus={(editor) => setActiveHFEditor(editor)}
+                      onEditorBlur={() => setActiveHFEditor(null)}
+                      onEditingChange={setIsEditingHF}
+                    />
+
+                    {/* Main content area */}
+                    <div className={`document-page-content${isEditingHF ? ' hf-body-dimmed' : ''}`} style={editorSurfaceStyle}>
                       <div className="document-editor-surface">
                         <RichTextPlugin
                           contentEditable={
@@ -1711,6 +1824,26 @@ export default function DocumentEditor({
                         />
                       </div>
                     </div>
+
+                    {/* Footer - for last page */}
+                    <SimpleFooterEditor
+                      pageCount={pageCount}
+                      footerEnabled={headerFooterSettings.footerEnabled}
+                      footerShowPageNumber={headerFooterSettings.footerShowPageNumber}
+                      footerEditorState={headerFooterSettings.footerEditorState}
+                      onFooterChange={(stateJSON) =>
+                        setHeaderFooterSettings({ ...headerFooterSettings, footerEditorState: stateJSON })
+                      }
+                      onFooterToggle={() =>
+                        setHeaderFooterSettings({
+                          ...headerFooterSettings,
+                          footerEnabled: !headerFooterSettings.footerEnabled,
+                        })
+                      }
+                      onEditorFocus={(editor) => setActiveHFEditor(editor)}
+                      onEditorBlur={() => setActiveHFEditor(null)}
+                      onEditingChange={setIsEditingHF}
+                    />
                   </div>
 
                   <MyOnChangePlugin onChange={handleEditorChange} />
@@ -1723,6 +1856,7 @@ export default function DocumentEditor({
                   <TableNavigationPlugin />
                   <TabIndentationPlugin />
                   <KeyboardShortcutPlugin onCommandK={handleCommandK} />
+                  <FormattingKeyboardShortcutsPlugin />
                   <ClipboardPlugin />
                   <InactiveSelectionPlugin isChatFocused={isChatFocused} />
                   <ImagePlugin />
@@ -1736,6 +1870,7 @@ export default function DocumentEditor({
                     footerHeight={PAGE_FOOTER_HEIGHT_PX}
                     onPageCountChange={setPageCount}
                     disabled={columnCount > 1}
+                    headerContent={headerFooterSettings.headerEditorState || ''}
                   />
 
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}
@@ -1761,7 +1896,7 @@ export default function DocumentEditor({
           getSimplifiedDocument={getSimplifiedDocument}
           onApplyLexicalChanges={handleApplyLexicalChanges}
           onApplyChanges={handleApplyChanges}
-          documentContent={documentContent}
+          documentContent=""
           contextSnippets={contextSnippets}
           selectedContextImages={selectedContextImages}
           onRemoveContextSnippet={handleRemoveContextSnippet}

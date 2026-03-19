@@ -28,6 +28,7 @@ import {
   REMOVE_LIST_COMMAND,
   $isListNode,
 } from '@lexical/list';
+import type { LexicalEditor } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
   Bold,
@@ -69,6 +70,7 @@ interface FormattingToolbarProps {
   onFormatDocument?: (formatType: string) => void;
   pageSize?: string;
   onPageSizeChange?: (size: string) => void;
+  activeEditor?: LexicalEditor | null;
 }
 
 const TEXT_COLOR_SWATCHES = [
@@ -197,9 +199,11 @@ export default function FormattingToolbar({
   onMarginsChange,
   onFormatDocument,
   pageSize = 'letter',
-  onPageSizeChange
+  onPageSizeChange,
+  activeEditor: activeEditorProp,
 }: FormattingToolbarProps) {
-  const [editor] = useLexicalComposerContext();
+  const [mainEditor] = useLexicalComposerContext();
+  const editor = activeEditorProp || mainEditor;
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
   const [isUnderline, setIsUnderline] = useState(false);
@@ -273,34 +277,35 @@ export default function FormattingToolbar({
   ];
 
   const updateToolbar = useCallback(() => {
-    const selection = $getSelection();
-    if ($isRangeSelection(selection)) {
-      setIsBold(selection.hasFormat('bold'));
-      setIsItalic(selection.hasFormat('italic'));
-      setIsUnderline(selection.hasFormat('underline'));
-      setIsStrikethrough(selection.hasFormat('strikethrough'));
-      setIsSubscript(selection.hasFormat('subscript'));
-      setIsSuperscript(selection.hasFormat('superscript'));
+    editor.getEditorState().read(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        setIsBold(selection.hasFormat('bold'));
+        setIsItalic(selection.hasFormat('italic'));
+        setIsUnderline(selection.hasFormat('underline'));
+        setIsStrikethrough(selection.hasFormat('strikethrough'));
+        setIsSubscript(selection.hasFormat('subscript'));
+        setIsSuperscript(selection.hasFormat('superscript'));
 
-      // Get block type and alignment
-      const anchorNode = selection.anchor.getNode();
-      const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
+        // Get block type and alignment
+        const anchorNode = selection.anchor.getNode();
+        const element = anchorNode.getKey() === 'root' ? anchorNode : anchorNode.getTopLevelElementOrThrow();
 
-      // Check if we're in a list
-      let parent = anchorNode.getParent();
-      let isInBulletList = false;
-      let isInNumberedList = false;
-      while (parent) {
-        if ($isListNode(parent)) {
-          const listType = parent.getListType();
-          isInBulletList = listType === 'bullet';
-          isInNumberedList = listType === 'number';
-          break;
+        // Check if we're in a list
+        let parent = anchorNode.getParent();
+        let isInBulletList = false;
+        let isInNumberedList = false;
+        while (parent) {
+          if ($isListNode(parent)) {
+            const listType = parent.getListType();
+            isInBulletList = listType === 'bullet';
+            isInNumberedList = listType === 'number';
+            break;
+          }
+          parent = parent.getParent();
         }
-        parent = parent.getParent();
-      }
-      setIsBulletList(isInBulletList);
-      setIsNumberedList(isInNumberedList);
+        setIsBulletList(isInBulletList);
+        setIsNumberedList(isInNumberedList);
 
       if ($isHeadingNode(element)) {
         setBlockType(element.getTag());
@@ -357,9 +362,9 @@ export default function FormattingToolbar({
             } else {
               setHighlightColor(normalizeColorToHex(rawHighlight) || 'transparent');
             }
-          } else {
-            setHighlightColor('transparent');
-          }
+        } else {
+          setHighlightColor('transparent');
+        }
         } else {
           // No style, use defaults
           setFontFamily('Times New Roman');
@@ -368,7 +373,8 @@ export default function FormattingToolbar({
           setHighlightColor('transparent');
         }
       }
-    }
+      }
+    });
   }, [editor]);
 
   useEffect(() => {
@@ -1105,6 +1111,10 @@ export default function FormattingToolbar({
     <div
       className="formatting-toolbar"
       ref={toolbarRef}
+      onMouseDown={(e) => {
+        // Prevent toolbar clicks from stealing focus from header/footer editors
+        e.preventDefault();
+      }}
       style={toolbarWidth !== null ? { width: `${toolbarWidth}px` } : undefined}
     >
       <div className="formatting-toolbar-main" ref={mainToolbarRef}>
@@ -1685,28 +1695,28 @@ export default function FormattingToolbar({
                 <div className="toolbar-section">
                 <button
                   className={`toolbar-button ${isStrikethrough ? 'active' : ''}`}
-                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough')}
+                  onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'strikethrough'); }}
                   title="Strikethrough"
                 >
                   <Strikethrough size={18} />
                 </button>
                 <button
                   className={`toolbar-button ${isSubscript ? 'active' : ''}`}
-                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'subscript')}
+                  onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'subscript'); }}
                   title="Subscript"
                 >
                   <Subscript size={18} />
                 </button>
                 <button
                   className={`toolbar-button ${isSuperscript ? 'active' : ''}`}
-                  onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'superscript')}
+                  onMouseDown={(e) => { e.preventDefault(); editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'superscript'); }}
                   title="Superscript"
                 >
                   <Superscript size={18} />
                 </button>
                 <button
                   className="toolbar-button"
-                  onClick={clearFormatting}
+                  onMouseDown={(e) => { e.preventDefault(); clearFormatting(); }}
                   title="Clear Formatting"
                 >
                   <RemoveFormatting size={18} />

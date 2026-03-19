@@ -18,6 +18,7 @@ import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePostHog } from 'posthog-js/react';
 import { compressImageToBase64 } from './nodes/ImageNode';
 
 interface Message {
@@ -166,6 +167,7 @@ export default function AIAssistantSidebar({
   onChatFocusChange
 }: AIAssistantSidebarProps) {
   const { isAuthenticated, isAnonymous, sessionToken, showSignupModal } = useAuth();
+  const posthog = usePostHog();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -199,6 +201,7 @@ export default function AIAssistantSidebar({
   const addMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageIdCounterRef = useRef(0);
+  const lastResponseIdRef = useRef<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -303,8 +306,11 @@ export default function AIAssistantSidebar({
                 break;
 
               case 'changes':
-                // Buffer changes - don't apply yet
                 changes = event.changes;
+                // Apply changes immediately — don't wait for complete
+                if (event.changes.length > 0 && onApplyLexicalChanges) {
+                  onApplyLexicalChanges(event.changes, [...contextImages, ...selectedContextImages]);
+                }
                 // Add tool usage indicator to the content
                 if (accumulatedContent && !accumulatedContent.includes('\n\nUsing edit_document tool...')) {
                   accumulatedContent += '\n\nUsing edit_document tool...';
@@ -321,12 +327,12 @@ export default function AIAssistantSidebar({
                 break;
 
               case 'summary':
+                // Fallback: full summary text arrived before complete (non-streaming path)
                 summary = event.summary;
                 if (event.sources && Array.isArray(event.sources) && event.sources.length > 0) {
                   sources = event.sources;
                 }
-                // Append summary to the accumulated content
-                if (summary && !accumulatedContent.includes(summary)) {
+                if (summary && !streamFinalized && !accumulatedContent.includes(summary)) {
                   accumulatedContent += `\n\n${summary}`;
                   setMessages(prev => prev.map(msg =>
                     msg.id === messageId
@@ -336,34 +342,50 @@ export default function AIAssistantSidebar({
                 }
                 break;
 
+              case 'summary_token':
+                // Stream summary text token by token after complete
+                setMessages(prev => prev.map(msg =>
+                  msg.id === messageId
+                    ? { ...msg, content: msg.content + event.content, isStreaming: true }
+                    : msg
+                ));
+                break;
+
+              case 'summary_done':
+                // Summary streaming finished — finalize the message
+                setMessages(prev => prev.map(msg =>
+                  msg.id === messageId
+                    ? { ...msg, isStreaming: false }
+                    : msg
+                ));
+                break;
+
               case 'complete':
                 streamFinalized = true;
                 if (event.sources && Array.isArray(event.sources) && event.sources.length > 0) {
                   sources = event.sources;
                 }
+                // Save response ID for chaining subsequent requests
+                if (event.response_id) {
+                  lastResponseIdRef.current = event.response_id;
+                }
                 console.log('[AIAssistant] Stream complete. Changes:', changes.length, 'Sources:', sources.length);
-                console.log('[AIAssistant] Final accumulated content:', accumulatedContent);
 
                 const finalizedContent = accumulatedContent.replace(
                   /Using edit_document tool\.\.\./g,
                   'Edited document'
                 ).replace(/Searching the web\.\.\./g, 'Using search tool...');
 
-                // Apply all buffered changes with diff highlighting
-                if (changes.length > 0 && onApplyLexicalChanges) {
-                  onApplyLexicalChanges(changes, [...contextImages, ...selectedContextImages]);
-                }
-
-                // Use accumulated content (reasoning + tool indicator + summary)
-                // Fallback only if nothing was captured
                 const finalContent = finalizedContent.trim() || summary || 'Changes applied successfully.';
 
                 setMessages(prev => prev.map(msg =>
                   msg.id === messageId
                     ? {
                         ...msg,
-                        content: finalContent,
-                        isStreaming: false,
+                        // Add separator so summary tokens stream in after a blank line
+                        content: changes.length > 0 ? finalContent + '\n\n' : finalContent,
+                        // Stay in streaming mode if summary tokens are expected
+                        isStreaming: changes.length > 0,
                         isLoading: false,
                         sources: sources.length > 0 ? sources : undefined,
                       }
@@ -392,9 +414,7 @@ export default function AIAssistantSidebar({
           .replace(/Using edit_document tool\.\.\./g, 'Edited document')
           .replace(/Searching the web\.\.\./g, 'Using search tool...')
           .trim() || 'Response received.';
-        if (changes.length > 0 && onApplyLexicalChanges) {
-          onApplyLexicalChanges(changes, [...contextImages, ...selectedContextImages]);
-        }
+        // Changes were already applied on the 'changes' event — no need to re-apply
         setMessages(prev => prev.map(msg =>
           msg.id === messageId
             ? {
@@ -498,6 +518,7 @@ export default function AIAssistantSidebar({
             )
           );
           setIsLoading(false);
+          posthog.capture('ai_rate_limit_hit');
           showSignupModal('ai-limit-reached');
           return;
         }
@@ -536,6 +557,7 @@ export default function AIAssistantSidebar({
           : undefined,
         context_images: [...contextImages, ...selectedContextImages].length > 0 ? [...contextImages, ...selectedContextImages] : undefined,
         stream: true, // Enable streaming by default
+        ...(lastResponseIdRef.current && { previous_response_id: lastResponseIdRef.current }),
       };
 
 
@@ -691,6 +713,11 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
     const hasTypedMessage = inputMessage.trim().length > 0;
     const hasAddedContext = attachmentNames.length > 0 || addedLinks.length > 0 || contextSnippets.length > 0 || contextImages.length > 0 || selectedContextImages.length > 0;
     if ((!hasTypedMessage && !hasAddedContext) || isLoading) return;
+
+    posthog.capture('ai_command_submitted', {
+      has_context_snippet: contextSnippets.length > 0,
+      has_image: contextImages.length > 0 || selectedContextImages.length > 0,
+    });
 
     const composedMessage = hasTypedMessage ? inputMessage : 'Use the added context to help with this request.';
 
@@ -1013,7 +1040,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
             <div className="ai-diff-actions">
               <div className="diff-mode-actions">
                 <button
-                  onClick={() => onRejectAllChanges?.()}
+                  onClick={() => { posthog.capture('ai_diff_rejected'); onRejectAllChanges?.(); }}
                   className="diff-mode-btn diff-mode-reject-all"
                   title="Reject all changes"
                 >
@@ -1021,7 +1048,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                   Reject All
                 </button>
                 <button
-                  onClick={() => onAcceptAllChanges?.()}
+                  onClick={() => { posthog.capture('ai_diff_accepted'); onAcceptAllChanges?.(); }}
                   className="diff-mode-btn diff-mode-accept-all"
                   title="Accept all changes"
                 >
