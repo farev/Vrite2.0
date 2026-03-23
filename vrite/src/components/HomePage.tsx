@@ -6,7 +6,6 @@ import { FileText, Plus, Search, MoreVertical, Trash2, Clock, Upload } from 'luc
 import { listAllDocuments, loadDocumentById, getLastModifiedString, deleteDocument, type DocumentData } from '@/lib/storage';
 import { createClient } from '@/lib/supabase/client';
 import { DOCUMENT_FORMATS } from '@/lib/document-formats';
-
 import { usePostHog } from 'posthog-js/react';
 
 import React from 'react';
@@ -92,7 +91,7 @@ function DocumentPreviewContent({ doc }: { doc: DocumentData }) {
       let isMounted = true;
       loadDocumentById(doc.id).then(fullDoc => {
         if (isMounted) {
-          setPreviewFormatKey(fullDoc?.formatKey || doc.formatKey);
+          setPreviewFormatKey(fullDoc?.formatKey ?? doc.formatKey);
           if (fullDoc && fullDoc.editorState && fullDoc.editorState !== emptyState) {
             setContent(renderLexicalNodes(fullDoc.editorState));
           } else {
@@ -104,7 +103,6 @@ function DocumentPreviewContent({ doc }: { doc: DocumentData }) {
         if (isMounted) setIsLoading(false);
       });
       return () => { isMounted = false; };
-
     } else {
       setContent([]);
       setIsLoading(false);
@@ -121,13 +119,17 @@ function DocumentPreviewContent({ doc }: { doc: DocumentData }) {
     );
   }
 
+  const formatPreset = previewFormatKey ? DOCUMENT_FORMATS[previewFormatKey] : undefined;
+  const useTwoColumns = formatPreset?.columns === 2;
+
   return (
     <div className="doc-preview-text-container">
       <div
         className="doc-preview-text"
         style={{
-          columnCount: previewFormatKey && DOCUMENT_FORMATS[previewFormatKey]?.columns === 2 ? 2 : 1,
-          columnGap: previewFormatKey ? DOCUMENT_FORMATS[previewFormatKey]?.columnGap : '0in',
+          columnCount: useTwoColumns ? 2 : 1,
+          columnGap: formatPreset?.columnGap ?? '0in',
+          ...(useTwoColumns ? { columnFill: 'auto' as const } : {}),
         }}
       >
         {content.length > 0 ? content : (

@@ -428,6 +428,8 @@ interface DocumentEditorProps {
   onInsertTableReady?: (handler: (rows: number, columns: number) => void) => void;
   onInsertEquationReady?: (handler: () => void) => void;
   onApplyFormatReady?: (handler: (formatKey: string) => void) => void;
+  /** Sync parent UI (e.g. MenuBar format dropdown) when preset is applied from load or user action */
+  onActiveFormatKeyChange?: (formatKey: string) => void;
   onImportReady?: (handler: (html: string, title: string) => void) => void;
 }
 
@@ -450,6 +452,7 @@ export default function DocumentEditor({
   onInsertTableReady,
   onInsertEquationReady,
   onApplyFormatReady,
+  onActiveFormatKeyChange,
   onImportReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
@@ -1053,18 +1056,22 @@ export default function DocumentEditor({
     }
   }, [onInsertEquationReady, editorRef]);
 
-  const applyFormatPreset = useCallback((formatKey: string) => {
-    const preset: DocumentFormatPreset | undefined = DOCUMENT_FORMATS[formatKey];
-    if (!preset) return;
-    setActiveFormatKey(formatKey);
-    setPageSize(preset.pageSize as keyof typeof PAGE_SIZES);
-    setDocumentMargins(preset.margins);
-    setColumnCount(preset.columns);
-    setDocumentColumnGap(preset.columnGap);
-    setDocumentDefaultFont(preset.fontFamily);
-    setDocumentDefaultFontSize(preset.fontSize);
-    setDocumentDefaultLineSpacing(preset.lineSpacing);
-  }, []);
+  const applyFormatPreset = useCallback(
+    (formatKey: string) => {
+      const preset: DocumentFormatPreset | undefined = DOCUMENT_FORMATS[formatKey];
+      if (!preset) return;
+      setActiveFormatKey(formatKey);
+      setPageSize(preset.pageSize as keyof typeof PAGE_SIZES);
+      setDocumentMargins(preset.margins);
+      setColumnCount(preset.columns);
+      setDocumentColumnGap(preset.columnGap);
+      setDocumentDefaultFont(preset.fontFamily);
+      setDocumentDefaultFontSize(preset.fontSize);
+      setDocumentDefaultLineSpacing(preset.lineSpacing);
+      onActiveFormatKeyChange?.(formatKey);
+    },
+    [onActiveFormatKeyChange],
+  );
 
   const handleApplyFormat = useCallback((formatKey: string) => {
     applyFormatPreset(formatKey);
@@ -1158,10 +1165,8 @@ export default function DocumentEditor({
               });
             }
 
-            // Restore document format preset if saved
-            if (savedDoc.formatKey) {
-              applyFormatPreset(savedDoc.formatKey);
-            }
+            // Restore document format preset (sync MenuBar + layout); default if none stored
+            applyFormatPreset(savedDoc.formatKey || DEFAULT_FORMAT_KEY);
 
             // Update sync timestamp for temp docs
             if (isTempDoc) {
@@ -1865,11 +1870,12 @@ export default function DocumentEditor({
                   <PaginationPlugin
                     pageHeight={currentPageSize.height}
                     pageWidth={currentPageSize.width}
+                    columnCount={columnCount}
                     margins={marginsInPx}
                     pageGap={PAGE_GAP}
                     footerHeight={PAGE_FOOTER_HEIGHT_PX}
                     onPageCountChange={setPageCount}
-                    disabled={columnCount > 1}
+                    disabled={false}
                     headerContent={headerFooterSettings.headerEditorState || ''}
                   />
 

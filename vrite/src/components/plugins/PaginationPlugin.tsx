@@ -8,6 +8,7 @@ import { $createPageBreakNode, $isPageBreakNode } from '../nodes/PageBreakNode';
 interface PaginationPluginProps {
   pageHeight: number; // in pixels
   pageWidth: number; // in pixels
+  columnCount?: number;
   margins: {
     top: number;
     right: number;
@@ -38,6 +39,7 @@ function debugLog(...args: unknown[]) {
 export default function PaginationPlugin({
   pageHeight,
   pageWidth,
+  columnCount = 1,
   margins,
   pageGap,
   footerHeight,
@@ -157,51 +159,109 @@ export default function PaginationPlugin({
 
       // Calculate where page breaks should be inserted
       const breaks: Array<{ key: string; height: number; pageNumber: number }> = [];
-      let currentPageEnd = pageContentHeight;
-      let accumulatedBreakHeight = 0;
-      let lastBlockBottom = 0;
-      let currentPageNumber = 1; // Track which page we're on
+      const isMultiColumn = columnCount > 1;
 
-      for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
+      if (isMultiColumn) {
+        // Dedicated path for multi-column documents.
+        // In CSS columns, block "top" coordinates are not monotonic, so the
+        // single-column geometry algorithm miscalculates. Instead, estimate page
+        // fill from cumulative block heights in document order.
+        const pageCapacity = Math.max(pageContentHeight * columnCount, 1);
+        let usedOnCurrentPage = 0;
+        let currentPageNumber = 1;
 
-        // Adjust position for breaks we've decided to add
-        const adjustedTop = block.top + accumulatedBreakHeight;
-        const adjustedBottom = adjustedTop + block.height;
+        debugLog('=== Multi-column pagination ===');
+        debugLog('columnCount:', columnCount);
+        debugLog('pageCapacity:', pageCapacity);
 
-        debugLog(`Block ${i}: adjustedTop=${adjustedTop.toFixed(0)}, adjustedBottom=${adjustedBottom.toFixed(0)}, currentPageEnd=${currentPageEnd.toFixed(0)}`);
+        // Re-read heights using offsetHeight for stable measurements in multi-column flow
+        const multiBlocks: Array<{ key: string; height: number }> = [];
+        editor.getEditorState().read(() => {
+          const root = $getRoot();
+          const children = root.getChildren();
 
-        // Case 1: Block starts at or past the current page boundary
-        // We need to insert a page break BEFORE advancing
-        if (adjustedTop >= currentPageEnd) {
-          // Calculate how much space is left on the current page
-          const spaceRemaining = currentPageEnd - lastBlockBottom;
+          children.forEach((node) => {
+            if ($isPageBreakNode(node)) {
+              return;
+            }
 
-          // Calculate break height: remaining space + footer + gap + header
-          // Note: margins are NOT added because footerHeight and headerHeight already represent the margin areas
-          const breakHeight = spaceRemaining + footerHeight + pageGap + headerHeight;
+            const element = editor.getElementByKey(node.getKey()) as HTMLElement | null;
+            if (!element) return;
 
-          breaks.push({
-            key: block.key,
-            height: Math.max(breakHeight, 1),
-            pageNumber: currentPageNumber, // This break ends page N and starts page N+1
+            const computed = window.getComputedStyle(element);
+            const marginTop = Number.parseFloat(computed.marginTop || '0') || 0;
+            const marginBottom = Number.parseFloat(computed.marginBottom || '0') || 0;
+            const baseHeight = Math.max(
+              element.getBoundingClientRect().height || 0,
+              element.offsetHeight || 0,
+              1
+            );
+            const measuredHeight = Math.max(1, baseHeight + marginTop + marginBottom);
+
+            multiBlocks.push({
+              key: node.getKey(),
+              height: measuredHeight,
+            });
           });
+        });
 
-          debugLog(`Page break BEFORE block ${i} (starts past page): breakHeight=${breakHeight.toFixed(0)}, page ${currentPageNumber}`);
+        for (let i = 0; i < multiBlocks.length; i++) {
+          const block = multiBlocks[i];
 
-          accumulatedBreakHeight += breakHeight;
-          currentPageEnd += pageStride;
-          currentPageNumber++; // Moving to next page
+          // If previous content exactly filled the page, next block must start on a new page.
+          if (usedOnCurrentPage >= pageCapacity) {
+            const breakHeight = footerHeight + pageGap + headerHeight;
+            breaks.push({
+              key: block.key,
+              height: Math.max(breakHeight, 1),
+              pageNumber: currentPageNumber,
+            });
+            currentPageNumber++;
+            usedOnCurrentPage = 0;
+          }
+
+          // If this block does not fit in remaining page space, break before it.
+          if (usedOnCurrentPage > 0 && usedOnCurrentPage + block.height > pageCapacity) {
+            const remainingSpace = Math.max(pageCapacity - usedOnCurrentPage, 0);
+            const breakHeight = remainingSpace + footerHeight + pageGap + headerHeight;
+
+            breaks.push({
+              key: block.key,
+              height: Math.max(breakHeight, 1),
+              pageNumber: currentPageNumber,
+            });
+
+            currentPageNumber++;
+            usedOnCurrentPage = 0;
+          }
+
+          // Advance current page fill.
+          usedOnCurrentPage += block.height;
         }
-        // Case 2: Block starts on current page but overflows to next
-        else if (adjustedBottom > currentPageEnd) {
-          // Calculate remaining space on current page
-          const spaceOnCurrentPage = currentPageEnd - adjustedTop;
+      } else {
+        let currentPageEnd = pageContentHeight;
+        let accumulatedBreakHeight = 0;
+        let lastBlockBottom = 0;
+        let currentPageNumber = 1; // Track which page we're on
 
-          // If block doesn't fit in remaining space, break before it
-          if (spaceOnCurrentPage < block.height) {
+        for (let i = 0; i < blocks.length; i++) {
+          const block = blocks[i];
+
+          // Adjust position for breaks we've decided to add
+          const adjustedTop = block.top + accumulatedBreakHeight;
+          const adjustedBottom = adjustedTop + block.height;
+
+          debugLog(`Block ${i}: adjustedTop=${adjustedTop.toFixed(0)}, adjustedBottom=${adjustedBottom.toFixed(0)}, currentPageEnd=${currentPageEnd.toFixed(0)}`);
+
+          // Case 1: Block starts at or past the current page boundary
+          // We need to insert a page break BEFORE advancing
+          if (adjustedTop >= currentPageEnd) {
+            // Calculate how much space is left on the current page
+            const spaceRemaining = currentPageEnd - lastBlockBottom;
+
+            // Calculate break height: remaining space + footer + gap + header
             // Note: margins are NOT added because footerHeight and headerHeight already represent the margin areas
-            const breakHeight = spaceOnCurrentPage + footerHeight + pageGap + headerHeight;
+            const breakHeight = spaceRemaining + footerHeight + pageGap + headerHeight;
 
             breaks.push({
               key: block.key,
@@ -209,16 +269,39 @@ export default function PaginationPlugin({
               pageNumber: currentPageNumber, // This break ends page N and starts page N+1
             });
 
-            debugLog(`Page break BEFORE block ${i} (overflows): breakHeight=${breakHeight.toFixed(0)}, page ${currentPageNumber}`);
+            debugLog(`Page break BEFORE block ${i} (starts past page): breakHeight=${breakHeight.toFixed(0)}, page ${currentPageNumber}`);
 
             accumulatedBreakHeight += breakHeight;
             currentPageEnd += pageStride;
             currentPageNumber++; // Moving to next page
           }
-        }
+          // Case 2: Block starts on current page but overflows to next
+          else if (adjustedBottom > currentPageEnd) {
+            // Calculate remaining space on current page
+            const spaceOnCurrentPage = currentPageEnd - adjustedTop;
 
-        // Track the bottom of the last block for calculating remaining space
-        lastBlockBottom = adjustedBottom;
+            // If block doesn't fit in remaining space, break before it
+            if (spaceOnCurrentPage < block.height) {
+              // Note: margins are NOT added because footerHeight and headerHeight already represent the margin areas
+              const breakHeight = spaceOnCurrentPage + footerHeight + pageGap + headerHeight;
+
+              breaks.push({
+                key: block.key,
+                height: Math.max(breakHeight, 1),
+                pageNumber: currentPageNumber, // This break ends page N and starts page N+1
+              });
+
+              debugLog(`Page break BEFORE block ${i} (overflows): breakHeight=${breakHeight.toFixed(0)}, page ${currentPageNumber}`);
+
+              accumulatedBreakHeight += breakHeight;
+              currentPageEnd += pageStride;
+              currentPageNumber++; // Moving to next page
+            }
+          }
+
+          // Track the bottom of the last block for calculating remaining space
+          lastBlockBottom = adjustedBottom;
+        }
       }
 
       debugLog('=== Results ===');
@@ -304,6 +387,7 @@ export default function PaginationPlugin({
     pageCount,
     onPageCountChange,
     headerContent,
+    columnCount,
   ]);
 
   // Schedule calculation after editor updates

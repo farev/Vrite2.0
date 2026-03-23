@@ -565,6 +565,7 @@ export default function DocumentPage() {
         onInsertTableReady={handleInsertTableReady}
         onInsertEquationReady={handleInsertEquationReady}
         onApplyFormatReady={handleApplyFormatReady}
+        onActiveFormatKeyChange={setActiveFormatKey}
         onImportReady={handleImportCallbackReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
