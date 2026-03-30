@@ -3,9 +3,146 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileText, Plus, Search, MoreVertical, Trash2, Clock, Upload } from 'lucide-react';
-import { listAllDocuments, getLastModifiedString, type DocumentData } from '@/lib/storage';
+import { listAllDocuments, loadDocumentById, getLastModifiedString, deleteDocument, type DocumentData } from '@/lib/storage';
 import { createClient } from '@/lib/supabase/client';
+import { DOCUMENT_FORMATS } from '@/lib/document-formats';
 import { usePostHog } from 'posthog-js/react';
+
+import React from 'react';
+
+// Maps basic lexical node properties to inline styles or elements
+function renderLexicalNodes(editorStateStr: string): React.ReactNode[] {
+  try {
+    const state = JSON.parse(editorStateStr);
+    const elements: React.ReactNode[] = [];
+    let keyCounter = 0;
+
+    const renderNode = (node: any): React.ReactNode => {
+      const key = `node-${keyCounter++}`;
+
+      if (node.type === 'text') {
+        let style: React.CSSProperties = {};
+        // Lexical formats are bitwise, but let's just handle exact bold format roughly if possible, 
+        // 1=bold, 2=italic, 8=underline (simplified).
+        if (node.format === 1 || node.format === 3) style.fontWeight = 'bold';
+        if (node.format === 2 || node.format === 3) style.fontStyle = 'italic';
+        if (node.format === 8) style.textDecoration = 'underline';
+
+        return <span key={key} style={style}>{node.text}</span>;
+      }
+
+      if (node.type === 'heading') {
+        const children = (node.children || []).map(renderNode);
+        const tag = (node.tag as string) || 'h1'; // h1, h2, etc
+        const style: React.CSSProperties = { margin: '0 0 8px 0' };
+        if (node.format) style.textAlign = node.format; // center, right, etc
+
+        switch (tag) {
+          case 'h1': style.fontSize = '24px'; style.fontWeight = 'bold'; break;
+          case 'h2': style.fontSize = '20px'; style.fontWeight = 'bold'; break;
+          case 'h3': style.fontSize = '16px'; style.fontWeight = 'bold'; break;
+          default: style.fontWeight = 'bold';
+        }
+
+        return React.createElement(tag || 'h1', { key, style }, children);
+      }
+
+      if (node.type === 'paragraph') {
+        const children = (node.children || []).map(renderNode);
+        const style: React.CSSProperties = { margin: '0 0 8px 0', minHeight: '1em' };
+        if (node.format) style.textAlign = node.format; // center, right, etc
+
+        return <div key={key} style={style}>{children}</div>;
+      }
+
+      // Fallback for root or unknown grouping nodes
+      if (node.children) {
+        return <React.Fragment key={key}>{(node.children as any[]).map(renderNode)}</React.Fragment>;
+      }
+
+      return null;
+    };
+
+    if (state.root) {
+      elements.push(renderNode(state.root));
+    }
+    return elements;
+  } catch (e) {
+    return [];
+  }
+}
+
+function DocumentPreviewContent({ doc }: { doc: DocumentData }) {
+  const [content, setContent] = useState<React.ReactNode[] | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [previewFormatKey, setPreviewFormatKey] = useState<string | undefined>(doc.formatKey);
+
+  useEffect(() => {
+    // Known empty state we use for lists
+    const emptyState = '{"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}}';
+
+    setPreviewFormatKey(doc.formatKey);
+
+    if (doc.editorState && doc.editorState !== emptyState) {
+      setContent(renderLexicalNodes(doc.editorState));
+      setIsLoading(false);
+    } else if (doc.id) {
+      // It's empty (likely Google Drive list optimization), fetch it!
+      let isMounted = true;
+      loadDocumentById(doc.id).then(fullDoc => {
+        if (isMounted) {
+          setPreviewFormatKey(fullDoc?.formatKey ?? doc.formatKey);
+          if (fullDoc && fullDoc.editorState && fullDoc.editorState !== emptyState) {
+            setContent(renderLexicalNodes(fullDoc.editorState));
+          } else {
+            setContent([]);
+          }
+          setIsLoading(false);
+        }
+      }).catch(() => {
+        if (isMounted) setIsLoading(false);
+      });
+      return () => { isMounted = false; };
+    } else {
+      setContent([]);
+      setIsLoading(false);
+    }
+  }, [doc]);
+
+  if (isLoading || content === null) {
+    return (
+      <div className="doc-preview-content">
+        <div className="doc-preview-line"></div>
+        <div className="doc-preview-line"></div>
+        <div className="doc-preview-line short"></div>
+      </div>
+    );
+  }
+
+  const formatPreset = previewFormatKey ? DOCUMENT_FORMATS[previewFormatKey] : undefined;
+  const useTwoColumns = formatPreset?.columns === 2;
+
+  return (
+    <div className="doc-preview-text-container">
+      <div
+        className="doc-preview-text"
+        style={{
+          columnCount: useTwoColumns ? 2 : 1,
+          columnGap: formatPreset?.columnGap ?? '0in',
+          ...(useTwoColumns ? { columnFill: 'auto' as const } : {}),
+        }}
+      >
+        {content.length > 0 ? content : (
+          <div className="doc-preview-content">
+            <div className="doc-preview-line"></div>
+            <div className="doc-preview-line"></div>
+            <div className="doc-preview-line short"></div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function HomePage() {
   const [documents, setDocuments] = useState<DocumentData[]>([]);
@@ -13,6 +150,8 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [userEmail, setUserEmail] = useState<string>('');
   const [isLoadingRef, setIsLoadingRef] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -65,9 +204,10 @@ export default function HomePage() {
     }
   };
 
-  const handleCreateDocument = () => {
+  const handleCreateDocument = (format?: string) => {
     posthog.capture('document_created', { type: 'blank' });
-    router.push('/document/new');
+    const query = format ? `?format=${format}` : '';
+    router.push(`/document/new${query}`);
   };
 
   const handleImportFile = async (file: File) => {
@@ -103,6 +243,25 @@ export default function HomePage() {
     router.push(`/document/${documentId}`);
   };
 
+  const handleDeleteDocument = (e: React.MouseEvent, doc: DocumentData) => {
+    e.stopPropagation();
+    setDeleteTarget({ id: doc.id!, title: doc.title || 'Untitled Document' });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await deleteDocument(deleteTarget.id);
+      setDocuments(prev => prev.filter(d => d.id !== deleteTarget.id));
+    } catch (err) {
+      console.error('[HomePage] Delete failed:', err);
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.push('/login');
@@ -118,11 +277,10 @@ export default function HomePage() {
       <header className="homepage-header">
         <div className="homepage-header-left">
           <div className="homepage-logo">
-            <FileText size={32} />
-            <span className="homepage-logo-text">Vrite</span>
+            <img src="/vibewrite-logo.png" alt="VibeWrite Logo" className="h-8 object-contain" />
           </div>
         </div>
-        
+
         <div className="homepage-header-center">
           <div className="homepage-search">
             <Search size={20} />
@@ -155,12 +313,54 @@ export default function HomePage() {
           <div className="homepage-template-gallery">
             <button
               className="homepage-template-card"
-              onClick={handleCreateDocument}
+              onClick={() => handleCreateDocument()}
             >
-              <div className="homepage-template-preview">
-                <Plus size={48} />
+              <div className="homepage-template-preview blank-template">
+                <Plus size={48} className="text-blue-500" />
               </div>
-              <span className="homepage-template-label">Blank</span>
+              <span className="homepage-template-label">Blank document</span>
+            </button>
+            <button
+              className="homepage-template-card"
+              onClick={() => handleCreateDocument('ieee')}
+            >
+              <div className="homepage-template-preview document-template">
+                <div className="template-lines">
+                  <div className="tl-title"></div>
+                  <div className="tl-line"></div>
+                  <div className="tl-line"></div>
+                  <div className="tl-line short"></div>
+                </div>
+              </div>
+              <span className="homepage-template-label">IEEE Format</span>
+            </button>
+            <button
+              className="homepage-template-card"
+              onClick={() => handleCreateDocument('apa7')}
+            >
+              <div className="homepage-template-preview document-template">
+                <div className="template-lines">
+                  <div className="tl-title"></div>
+                  <div className="tl-line"></div>
+                  <div className="tl-line"></div>
+                  <div className="tl-line"></div>
+                </div>
+              </div>
+              <span className="homepage-template-label">APA Format</span>
+            </button>
+            <button
+              className="homepage-template-card"
+              onClick={() => handleCreateDocument('mla9')}
+            >
+              <div className="homepage-template-preview document-template">
+                <div className="template-lines">
+                  <div className="tl-title"></div>
+                  <div className="tl-line"></div>
+                  <div className="tl-line"></div>
+                  <div className="tl-line"></div>
+                </div>
+              </div>
+              <span className="homepage-template-label">MLA Format</span>
             </button>
             <button
               className="homepage-template-card"
@@ -217,7 +417,7 @@ export default function HomePage() {
               {!searchQuery && (
                 <button
                   className="homepage-empty-button"
-                  onClick={handleCreateDocument}
+                  onClick={() => handleCreateDocument()}
                 >
                   <Plus size={20} />
                   Create Document
@@ -232,31 +432,52 @@ export default function HomePage() {
                   className="homepage-document-card"
                   onClick={() => handleOpenDocument(doc.id!)}
                 >
-                  <div className="homepage-document-icon">
-                    <FileText size={24} />
+                  <div className="homepage-document-preview">
+                    <DocumentPreviewContent doc={doc} />
+                      <button
+                        className="homepage-document-delete-btn"
+                        onClick={(e) => handleDeleteDocument(e, doc)}
+                        title="Delete document"
+                      >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
-                  <div className="homepage-document-info">
-                    <h3 className="homepage-document-title">{doc.title}</h3>
-                    <div className="homepage-document-meta">
-                      <Clock size={14} />
-                      <span>Opened {getLastModifiedString(doc.lastModified)}</span>
+                  <div className="homepage-document-info-bottom">
+                    <h3 className="homepage-document-title">{doc.title || 'Untitled Document'}</h3>
+                    <div className="homepage-document-meta-row">
+                      <div className="homepage-document-icon-small">
+                        <FileText size={16} color="#2563eb" />
+                      </div>
+                      <div className="homepage-document-meta">
+                        <span>Opened {getLastModifiedString(doc.lastModified)}</span>
+                      </div>
                     </div>
                   </div>
-                  <button
-                    className="homepage-document-menu"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // TODO: Implement document menu (rename, delete, etc.)
-                    }}
-                  >
-                    <MoreVertical size={20} />
-                  </button>
                 </div>
               ))}
             </div>
           )}
         </section>
       </main>
+
+      {deleteTarget && (
+        <div className="delete-modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="delete-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="delete-modal-title">Delete document?</h3>
+            <p className="delete-modal-body">
+              &ldquo;<span className="delete-modal-docname">{deleteTarget.title}</span>&rdquo; will be permanently deleted.
+            </p>
+            <div className="delete-modal-actions">
+              <button className="delete-modal-cancel" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
+                Cancel
+              </button>
+              <button className="delete-modal-confirm" onClick={confirmDelete} disabled={isDeleting}>
+                {isDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

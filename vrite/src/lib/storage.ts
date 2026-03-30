@@ -20,6 +20,7 @@ export interface DocumentData {
   id?: string;
   title: string;
   editorState: string; // Lexical editor state as JSON string (required)
+  formatKey?: string; // Active document format preset (e.g. 'ieee', 'apa7')
   lastModified: number;
   aiAttachments?: DocumentAttachment[];
   _drivePermissionsFallback?: boolean; // true when saved to Supabase due to missing Drive scopes
@@ -54,7 +55,7 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
   try {
     // Use Google Drive client
     const driveClient = new GoogleDriveClient(accessToken);
-    const file = await driveClient.saveDocument(data.id || null, data.title, data.editorState, data.aiAttachments);
+    const file = await driveClient.saveDocument(data.id || null, data.title, data.editorState, data.formatKey, data.aiAttachments);
 
     return {
       id: file.id,
@@ -106,12 +107,13 @@ export async function loadDocument(): Promise<DocumentData | null> {
 
     const mostRecent = files[0];
     console.log('[Storage] Loading document:', mostRecent.id);
-    const { editorState, metadata, aiAttachments } = await driveClient.getDocument(mostRecent.id);
+    const { editorState, formatKey, metadata, aiAttachments } = await driveClient.getDocument(mostRecent.id);
 
     return {
       id: metadata.id,
       title: metadata.name.replace('.vrite.json', ''), // Remove .vrite.json extension for display
       editorState,
+      formatKey,
       lastModified: new Date(metadata.modifiedTime).getTime(),
       aiAttachments,
     };
@@ -249,12 +251,13 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
 
   try {
     const driveClient = new GoogleDriveClient(accessToken);
-    const { editorState, metadata, aiAttachments } = await driveClient.getDocument(documentId);
+    const { editorState, formatKey, metadata, aiAttachments } = await driveClient.getDocument(documentId);
 
     return {
       id: metadata.id,
       title: metadata.name.replace('.vrite.json', ''),
       editorState,
+      formatKey,
       lastModified: new Date(metadata.modifiedTime).getTime(),
       aiAttachments,
     };
@@ -265,6 +268,41 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
 }
 
 export { AUTO_SAVE_INTERVAL };
+
+/**
+ * Delete a document from cloud storage (Google Drive) or Supabase database
+ */
+export async function deleteDocument(documentId: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session) {
+    console.error('[Storage] No session — cannot delete');
+    return;
+  }
+
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId);
+
+  if (session.user.is_anonymous || isUUID) {
+    console.log('[Storage] Deleting from Supabase database');
+    const { error } = await supabase.from('documents').delete().eq('id', documentId);
+    if (error) throw new Error(`Failed to delete from Supabase: ${error.message}`);
+    return;
+  }
+
+  const accessToken = await getActiveDriveToken();
+
+  if (!accessToken) {
+    console.log('[Storage] No Drive token — deleting from Supabase database');
+    const { error } = await supabase.from('documents').delete().eq('id', documentId);
+    if (error) throw new Error(`Failed to delete from Supabase: ${error.message}`);
+    return;
+  }
+
+  console.log('[Storage] Deleting from Google Drive');
+  const driveClient = new GoogleDriveClient(accessToken);
+  await driveClient.deleteFile(documentId);
+}
 
 /**
  * Probe whether the current session has Google Drive access.

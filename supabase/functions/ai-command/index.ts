@@ -516,6 +516,10 @@ interface CommandRequest {
     width: number;
     height: number;
   }>;
+  context_file_ids?: Array<{
+    file_id: string;
+    filename: string;
+  }>;
   stream?: boolean;
   previous_response_id?: string;
 }
@@ -763,6 +767,7 @@ async function handleStreamingRequest(
   instruction: string,
   openaiConfig: any,
   previous_response_id?: string,
+  context_file_ids?: Array<{ file_id: string; filename: string }>,
 ): Promise<Response> {
   console.log('[ai-command] Handling streaming request (Responses API with web search)');
 
@@ -771,12 +776,32 @@ async function handleStreamingRequest(
 
   // Always send full input — previous_response_id still benefits from server-side KV cache
   // (sending only the last message would fail if the prior response ended with a tool call)
-  const fullInput: ResponseInput[] = messages
-    .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system')
-    .map(msg => ({
+  const filteredMessages = messages
+    .filter(msg => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system');
+
+  const fullInput: ResponseInput[] = filteredMessages.map((msg, idx) => {
+    // For the last user message, attach file references if any
+    const isLastUserMessage = msg.role === 'user' &&
+      idx === filteredMessages.length - 1;
+
+    if (isLastUserMessage && context_file_ids && context_file_ids.length > 0) {
+      return {
+        role: msg.role as 'user',
+        content: [
+          { type: 'input_text' as const, text: msg.content },
+          ...context_file_ids.map(f => ({
+            type: 'input_file' as const,
+            file_id: f.file_id,
+          })),
+        ],
+      };
+    }
+
+    return {
       role: msg.role as 'user' | 'assistant' | 'system',
       content: msg.content,
-    }));
+    };
+  });
 
   // Start stream processing in background
   (async () => {
@@ -989,7 +1014,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { document, instruction, conversation_history, context_snippets, context_images, stream = false, previous_response_id } = requestData;
+    const { document, instruction, conversation_history, context_snippets, context_images, context_file_ids, stream = false, previous_response_id } = requestData;
 
     console.log('[ai-command] Request data received:');
     console.log('  - Document blocks:', document?.blocks?.length || 0);
@@ -1079,6 +1104,13 @@ NOTE: Only use replace_block to replace an existing image if the user explicitly
       console.log('[ai-command] Added', context_images.length, 'context images');
     }
 
+    // Build context for uploaded reference files
+    let contextFilesText = '';
+    if (context_file_ids && context_file_ids.length > 0) {
+      contextFilesText = `The user has uploaded ${context_file_ids.length} reference document(s): ${context_file_ids.map(f => f.filename).join(', ')}. Use these as context for the writing task. Common scenarios include: assignment instructions, rubrics, style guides, or source materials. Do NOT insert uploaded document content into the editor — use it as reference context only.\n\n`;
+      console.log('[ai-command] Added', context_file_ids.length, 'reference file IDs');
+    }
+
     // Check if document is blank or nearly blank
     const isBlank = document.blocks.length === 0 || (
       document.blocks.length === 1 &&
@@ -1091,21 +1123,23 @@ NOTE: Only use replace_block to replace an existing image if the user explicitly
 
     console.log('[ai-command] Document is blank:', isBlank);
 
-    messages.push({
-      role: 'user',
-      content: `${contextText}${contextImagesText}Document (Lexical JSON):
+    const userMessageText = `${contextText}${contextImagesText}${contextFilesText}Document (Lexical JSON):
 ${docJson}${blankNote}
 
 User instruction: ${instruction}
 
-Use the edit_document tool to make changes, then provide reasoning and summary.`,
+Use the edit_document tool to make changes, then provide reasoning and summary.`;
+
+    messages.push({
+      role: 'user',
+      content: userMessageText,
     });
     console.log('[ai-command] Total messages prepared:', messages.length);
 
     // Branch based on streaming mode
     if (stream) {
       console.log('[ai-command] Using streaming mode');
-      return await handleStreamingRequest(messages, instruction, openaiConfig, previous_response_id);
+      return await handleStreamingRequest(messages, instruction, openaiConfig, previous_response_id, context_file_ids);
     } else {
       console.log('[ai-command] Using non-streaming mode');
       const response = await handleNonStreamingRequest(messages, openaiConfig);

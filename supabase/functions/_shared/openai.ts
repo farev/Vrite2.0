@@ -182,9 +182,13 @@ export type ResponseTool =
   | { type: 'web_search_preview' }
   | { type: 'function'; name: string; description: string; parameters: Record<string, unknown> };
 
+export type ResponseContentPart =
+  | { type: 'input_text'; text: string }
+  | { type: 'input_file'; file_id: string };
+
 export interface ResponseInput {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | ResponseContentPart[];
 }
 
 export async function createResponseStream(

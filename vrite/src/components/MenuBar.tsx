@@ -11,12 +11,15 @@ import {
   ChevronDown,
   Image as ImageIcon,
   Table,
+  Layout,
+  Trash2,
   MessageSquare,
   Upload,
 } from 'lucide-react';
 import Image from 'next/image';
 import { getLastModifiedString } from '../lib/storage';
 import UserProfile from './auth/UserProfile';
+import { DOCUMENT_FORMATS } from '../lib/document-formats';
 
 interface MenuBarProps {
   onNewDocument: () => void;
@@ -24,6 +27,7 @@ interface MenuBarProps {
   onExportDocument: (format: 'pdf' | 'docx' | 'txt') => void;
   onPrint: () => void;
   onBackToHome?: () => void;
+  onDeleteDocument?: () => void;
   documentTitle: string;
   onTitleChange: (title: string) => void;
   lastSaved: number | null;
@@ -32,6 +36,8 @@ interface MenuBarProps {
   onInsertImage?: () => void;
   onInsertTable?: (rows: number, columns: number) => void;
   onInsertEquation?: () => void;
+  onApplyFormat?: (formatKey: string) => void;
+  activeFormatKey?: string;
   onImportDocument?: (file: File) => void;
   isImporting?: boolean;
 }
@@ -42,6 +48,7 @@ export default function MenuBar({
   onExportDocument,
   onPrint,
   onBackToHome,
+  onDeleteDocument,
   documentTitle,
   onTitleChange,
   lastSaved,
@@ -50,10 +57,12 @@ export default function MenuBar({
   onInsertImage,
   onInsertTable,
   onInsertEquation,
+  onApplyFormat,
+  activeFormatKey,
   onImportDocument,
   isImporting,
 }: MenuBarProps) {
-  type DropdownKey = 'file' | 'export' | 'import' | 'insert' | 'table' | 'feedback';
+  type DropdownKey = 'file' | 'export' | 'import' | 'insert' | 'table' | 'format' | 'feedback';
   const [openDropdown, setOpenDropdown] = useState<DropdownKey | null>(null);
   const posthog = usePostHog();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -312,6 +321,15 @@ export default function MenuBar({
                     Print
                     <span className="menu-shortcut">Ctrl+P</span>
                   </button>
+                  {onDeleteDocument && (
+                    <>
+                      <div className="menu-dropdown-divider" />
+                      <button className="menu-dropdown-item menu-dropdown-item-danger" onClick={() => { onDeleteDocument(); setOpenDropdown(null); }}>
+                        <Trash2 size={16} />
+                        Delete document
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -396,7 +414,36 @@ export default function MenuBar({
             </div>
 
             <div className="menu-item">
-              <button className="menu-button">Format</button>
+              <button
+                className={`menu-button${openDropdown === 'format' ? ' active' : ''}`}
+                onClick={() => toggleDropdown('format')}
+              >
+                Format
+              </button>
+              {openDropdown === 'format' && (
+                <div className="menu-dropdown">
+                  <div className="menu-dropdown-section-label">Document Format</div>
+                  {Object.entries(DOCUMENT_FORMATS).map(([key, preset]) => (
+                    <button
+                      key={key}
+                      className={`menu-dropdown-item format-preset-item${activeFormatKey === key ? ' active' : ''}`}
+                      onClick={() => {
+                        onApplyFormat?.(key);
+                        setOpenDropdown(null);
+                      }}
+                    >
+                      <Layout size={14} className="menu-dropdown-item-icon" />
+                      <span className="format-preset-label">
+                        <span className="format-preset-name">{preset.label}</span>
+                        <span className="format-preset-desc">{preset.description}</span>
+                      </span>
+                      {preset.columns === 2 && (
+                        <span className="format-preset-badge">2 col</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="menu-item">

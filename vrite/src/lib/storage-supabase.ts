@@ -16,6 +16,7 @@ export interface DocumentData {
   id?: string;
   title: string;
   editorState: string;
+  formatKey?: string;
   lastModified: number;
   aiAttachments?: DocumentAttachment[];
 }
@@ -50,17 +51,18 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
 
     if (isUUID) {
       // Update existing Supabase document
-      const updatePayload: Record<string, unknown> = {
-        title: data.title,
-        editor_state: JSON.parse(data.editorState),
-        last_modified: new Date().toISOString(),
-      };
-      if (data.aiAttachments) {
-        updatePayload.storage_metadata = { ai_attachments: data.aiAttachments };
-      }
+      const storageMetadata: Record<string, unknown> = {};
+      if (data.formatKey) storageMetadata.formatKey = data.formatKey;
+      if (data.aiAttachments) storageMetadata.ai_attachments = data.aiAttachments;
+
       const { data: updatedDoc, error } = await supabase
         .from('documents')
-        .update(updatePayload)
+        .update({
+          title: data.title,
+          editor_state: JSON.parse(data.editorState),
+          storage_metadata: Object.keys(storageMetadata).length > 0 ? storageMetadata : null,
+          last_modified: new Date().toISOString(),
+        })
         .eq('id', data.id)
         .eq('user_id', userId) // Security: only update own documents
         .select()
@@ -77,25 +79,27 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
         id: updatedDoc.id,
         title: updatedDoc.title,
         editorState: JSON.stringify(updatedDoc.editor_state),
+        formatKey: updatedDoc.storage_metadata?.formatKey || undefined,
         lastModified: new Date(updatedDoc.last_modified).getTime(),
       };
     } else {
       // Create new document (no ID, temp ID, or any non-UUID ID)
       console.log('[SupabaseStorage] Creating new document (replacing temp ID if present)');
 
-      const insertPayload: Record<string, unknown> = {
-        user_id: userId,
-        title: data.title,
-        editor_state: JSON.parse(data.editorState),
-        storage_provider: 'supabase',
-        last_modified: new Date().toISOString(),
-      };
-      if (data.aiAttachments) {
-        insertPayload.storage_metadata = { ai_attachments: data.aiAttachments };
-      }
+      const insertStorageMetadata: Record<string, unknown> = {};
+      if (data.formatKey) insertStorageMetadata.formatKey = data.formatKey;
+      if (data.aiAttachments) insertStorageMetadata.ai_attachments = data.aiAttachments;
+
       const { data: newDoc, error } = await supabase
         .from('documents')
-        .insert(insertPayload)
+        .insert({
+          user_id: userId,
+          title: data.title,
+          editor_state: JSON.parse(data.editorState),
+          storage_provider: 'supabase',
+          storage_metadata: Object.keys(insertStorageMetadata).length > 0 ? insertStorageMetadata : null,
+          last_modified: new Date().toISOString(),
+        })
         .select()
         .single();
 
@@ -110,6 +114,7 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
         id: newDoc.id,
         title: newDoc.title,
         editorState: JSON.stringify(newDoc.editor_state),
+        formatKey: newDoc.storage_metadata?.formatKey || undefined,
         lastModified: new Date(newDoc.last_modified).getTime(),
       };
     }
@@ -156,6 +161,7 @@ export async function loadDocumentFromSupabase(documentId: string): Promise<Docu
       id: doc.id,
       title: doc.title,
       editorState: JSON.stringify(doc.editor_state),
+      formatKey: doc.storage_metadata?.formatKey || undefined,
       lastModified: new Date(doc.last_modified).getTime(),
       aiAttachments: doc.storage_metadata?.ai_attachments || undefined,
     };
@@ -182,7 +188,7 @@ export async function listDocumentsFromSupabase(): Promise<DocumentData[]> {
   try {
     const { data: docs, error } = await supabase
       .from('documents')
-      .select('id, title, editor_state, last_modified')
+      .select('id, title, editor_state, last_modified, storage_metadata')
       .eq('user_id', session.user.id)
       .eq('is_deleted', false)
       .order('last_modified', { ascending: false });
@@ -195,7 +201,8 @@ export async function listDocumentsFromSupabase(): Promise<DocumentData[]> {
     return (docs || []).map(doc => ({
       id: doc.id,
       title: doc.title,
-      editorState: '{"root":{"children":[],"direction":null,"format":"","indent":0,"type":"root","version":1}}', // Empty editor state for list view
+      editorState: JSON.stringify(doc.editor_state),
+      formatKey: doc.storage_metadata?.formatKey || undefined,
       lastModified: new Date(doc.last_modified).getTime(),
     }));
   } catch (error) {

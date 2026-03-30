@@ -114,6 +114,18 @@ export function getCurrentDocumentId(): string | null {
 }
 
 /**
+ * Delete a temporary document from localStorage
+ */
+export function deleteTemporaryDocument(id: string): void {
+  const key = `${TEMP_DOC_PREFIX}${id}`;
+  localStorage.removeItem(key);
+  const current = localStorage.getItem(CURRENT_DOC_KEY);
+  if (current === id) {
+    localStorage.removeItem(CURRENT_DOC_KEY);
+  }
+}
+
+/**
  * List all temporary documents, sorted by last modified (newest first)
  */
 export function listTemporaryDocuments(): TemporaryDocument[] {

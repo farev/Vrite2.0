@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import MenuBar from '@/components/MenuBar';
 import { createClient } from '@/lib/supabase/client';
-import { loadDocumentById, loadTemporaryDocument } from '@/lib/storage';
+import { loadDocumentById, loadTemporaryDocument, deleteDocument } from '@/lib/storage';
+import { deleteTemporaryDocument } from '@/lib/storage-anonymous';
+import { DOCUMENT_FORMATS } from '@/lib/document-formats';
 import { useAuth } from '@/contexts/AuthContext';
 
 const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), { 
@@ -24,11 +26,16 @@ export default function DocumentPage() {
   const insertImageCallbackRef = useRef<(() => void) | null>(null);
   const insertTableCallbackRef = useRef<((rows: number, columns: number) => void) | null>(null);
   const insertEquationCallbackRef = useRef<(() => void) | null>(null);
+  const applyFormatCallbackRef = useRef<((formatKey: string) => void) | null>(null);
+  const [activeFormatKey, setActiveFormatKey] = useState<string>('default');
   const importCallbackRef = useRef<((html: string, title: string) => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const supabase = createClient();
   const { showSignupModal } = useAuth();
 
@@ -79,6 +86,22 @@ export default function DocumentPage() {
     insertEquationCallbackRef.current = callback;
   }, []);
 
+  const handleApplyFormatReady = useCallback((callback: (formatKey: string) => void) => {
+    applyFormatCallbackRef.current = callback;
+    const format = searchParams.get('format');
+    if (format && DOCUMENT_FORMATS[format]) {
+      callback(format);
+      setActiveFormatKey(format);
+    }
+  }, [searchParams]);
+
+  const handleApplyFormat = useCallback((formatKey: string) => {
+    setActiveFormatKey(formatKey);
+    if (applyFormatCallbackRef.current) {
+      applyFormatCallbackRef.current(formatKey);
+    }
+  }, []);
+
   const handleImportCallbackReady = useCallback((callback: (html: string, title: string) => void) => {
     importCallbackRef.current = callback;
   }, []);
@@ -118,7 +141,6 @@ export default function DocumentPage() {
       setIsImporting(false);
     }
   }, [router]);
-
   useEffect(() => {
     const id = params.id as string;
     const isTempDoc = id.startsWith('temp-');
@@ -260,6 +282,28 @@ export default function DocumentPage() {
 
   const handleBackToHome = () => {
     router.push('/');
+  };
+
+  const handleDeleteDocument = () => {
+    setDeleteTarget({ id: params.id as string, title: documentTitle });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.id.startsWith('temp-')) {
+        deleteTemporaryDocument(deleteTarget.id);
+      } else {
+        await deleteDocument(deleteTarget.id);
+      }
+      router.push('/');
+    } catch (err) {
+      console.error('[DocumentPage] Delete failed:', err);
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
   };
 
   const handleSaveDocument = () => {
@@ -458,6 +502,7 @@ export default function DocumentPage() {
         onExportDocument={handleExportDocument}
         onPrint={handlePrint}
         onBackToHome={handleBackToHome}
+        onDeleteDocument={handleDeleteDocument}
         documentTitle={documentTitle}
         onTitleChange={setDocumentTitle}
         lastSaved={lastSaved}
@@ -478,9 +523,29 @@ export default function DocumentPage() {
             insertEquationCallbackRef.current();
           }
         }}
+        onApplyFormat={handleApplyFormat}
+        activeFormatKey={activeFormatKey}
         onImportDocument={handleImportDocument}
         isImporting={isImporting}
       />
+      {deleteTarget && (
+        <div className="delete-modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="delete-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="delete-modal-title">Delete document?</h3>
+            <p className="delete-modal-body">
+              &ldquo;<span className="delete-modal-docname">{deleteTarget.title}</span>&rdquo; will be permanently deleted.
+            </p>
+            <div className="delete-modal-actions">
+              <button className="delete-modal-cancel" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
+                Cancel
+              </button>
+              <button className="delete-modal-confirm" onClick={confirmDelete} disabled={isDeleting}>
+                {isDeleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {isImporting && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30">
           <div className="rounded-lg bg-white px-4 py-3 shadow-lg">
@@ -499,6 +564,8 @@ export default function DocumentPage() {
         onInsertImageReady={handleInsertImageReady}
         onInsertTableReady={handleInsertTableReady}
         onInsertEquationReady={handleInsertEquationReady}
+        onApplyFormatReady={handleApplyFormatReady}
+        onActiveFormatKeyChange={setActiveFormatKey}
         onImportReady={handleImportCallbackReady}
         initialDocumentId={documentId}
         onDocumentIdChange={handleDocumentIdChange}
