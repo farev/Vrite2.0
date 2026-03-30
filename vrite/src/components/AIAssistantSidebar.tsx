@@ -12,7 +12,9 @@ import {
   Paperclip,
   AtSign,
   Globe,
-  ExternalLink
+  ExternalLink,
+  Loader2,
+  FileText,
 } from 'lucide-react';
 import type { SimplifiedDocument } from '@/lib/lexicalSerializer';
 import type { LexicalChange } from '@/lib/lexicalChangeApplicator';
@@ -97,10 +99,17 @@ interface ContextImage {
   height: number;
 }
 
+export interface DocumentAttachment {
+  fileId: string;      // OpenAI file_id (e.g., "file-abc123")
+  filename: string;
+  sizeBytes: number;
+  uploadedAt: number;  // timestamp
+}
+
 interface RenderedInputContext {
   contextSnippets: ContextSnippet[];
   selectedContextImages: ContextImage[];
-  attachmentNames: string[];
+  documentAttachments: DocumentAttachment[];
   addedLinks: string[];
   contextImages: ContextImage[];
 }
@@ -123,6 +132,8 @@ interface AIAssistantSidebarProps {
   onClearContextSnippets?: () => void;
   onClearEditorSelection?: () => void;
   onChatFocusChange?: (isFocused: boolean) => void;
+  initialAttachments?: DocumentAttachment[];
+  onAttachmentsChange?: (attachments: DocumentAttachment[]) => void;
 }
 
 // Scale image dimensions to reasonable display size while preserving aspect ratio
@@ -148,6 +159,12 @@ function scaleToDisplaySize(width: number, height: number): { width: number; hei
 
 const INPUT_CONTEXT_COLLAPSE_DURATION_MS = 240;
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function AIAssistantSidebar({
   isOpen,
   onToggle,
@@ -164,7 +181,9 @@ export default function AIAssistantSidebar({
   onRemoveSelectedImage,
   onClearContextSnippets,
   onClearEditorSelection,
-  onChatFocusChange
+  onChatFocusChange,
+  initialAttachments,
+  onAttachmentsChange,
 }: AIAssistantSidebarProps) {
   const { isAuthenticated, isAnonymous, sessionToken, showSignupModal } = useAuth();
   const posthog = usePostHog();
@@ -182,13 +201,14 @@ export default function AIAssistantSidebar({
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
   const [linkInputValue, setLinkInputValue] = useState('');
-  const [attachmentNames, setAttachmentNames] = useState<string[]>([]);
+  const [documentAttachments, setDocumentAttachments] = useState<DocumentAttachment[]>(initialAttachments || []);
+  const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
   const [addedLinks, setAddedLinks] = useState<string[]>([]);
   const [contextImages, setContextImages] = useState<ContextImage[]>([]);
   const [renderedInputContext, setRenderedInputContext] = useState<RenderedInputContext>({
     contextSnippets,
     selectedContextImages,
-    attachmentNames,
+    documentAttachments: initialAttachments || [],
     addedLinks,
     contextImages,
   });
@@ -538,24 +558,20 @@ export default function AIAssistantSidebar({
       const endpoint = `${supabaseUrl}/functions/v1/ai-command`;
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+      const snippetsAndLinks = [
+        ...contextSnippets.map((snippet) => snippet.text),
+        ...addedLinks.map((link) => `Link: ${link}`)
+      ];
+
       const requestBody = {
         document: simplifiedDocument,
         instruction,
         conversation_history: conversationHistory,
-        context_snippets: (
-          [
-            ...contextSnippets.map((snippet) => snippet.text),
-            ...attachmentNames.map((name) => `Attachment: ${name}`),
-            ...addedLinks.map((link) => `Link: ${link}`)
-          ]
-        ).length > 0
-          ? [
-              ...contextSnippets.map((snippet) => snippet.text),
-              ...attachmentNames.map((name) => `Attachment: ${name}`),
-              ...addedLinks.map((link) => `Link: ${link}`)
-            ]
-          : undefined,
+        context_snippets: snippetsAndLinks.length > 0 ? snippetsAndLinks : undefined,
         context_images: [...contextImages, ...selectedContextImages].length > 0 ? [...contextImages, ...selectedContextImages] : undefined,
+        context_file_ids: documentAttachments.length > 0
+          ? documentAttachments.map(att => ({ file_id: att.fileId, filename: att.filename }))
+          : undefined,
         stream: true, // Enable streaming by default
         ...(lastResponseIdRef.current && { previous_response_id: lastResponseIdRef.current }),
       };
@@ -657,7 +673,7 @@ export default function AIAssistantSidebar({
     } finally {
       setIsLoading(false);
     }
-  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, contextImages, selectedContextImages, attachmentNames, addedLinks, handleStreamingResponse]);
+  }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, contextImages, selectedContextImages, documentAttachments, addedLinks, handleStreamingResponse]);
 
   // Automatic AI onboarding for anonymous users
   useEffect(() => {
@@ -711,7 +727,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
   const handleSendMessage = async () => {
     const hasTypedMessage = inputMessage.trim().length > 0;
-    const hasAddedContext = attachmentNames.length > 0 || addedLinks.length > 0 || contextSnippets.length > 0 || contextImages.length > 0 || selectedContextImages.length > 0;
+    const hasAddedContext = documentAttachments.length > 0 || addedLinks.length > 0 || contextSnippets.length > 0 || contextImages.length > 0 || selectedContextImages.length > 0;
     if ((!hasTypedMessage && !hasAddedContext) || isLoading) return;
 
     posthog.capture('ai_command_submitted', {
@@ -813,10 +829,76 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
           console.error('[AIAssistant] Failed to process image:', file.name, err);
         }
       } else {
-        // Non-image files (PDFs, CSVs) - keep existing behavior
-        setAttachmentNames((prev) =>
-          prev.includes(file.name) ? prev : [...prev, file.name]
-        );
+        // Non-image files — upload to OpenAI via file-upload edge function
+        const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+        const MAX_ATTACHMENTS = 5;
+
+        if (file.size > MAX_FILE_SIZE) {
+          console.error('[AIAssistant] File too large:', file.name, file.size);
+          alert(`File "${file.name}" is too large. Maximum size is 25MB.`);
+          continue;
+        }
+
+        if (documentAttachments.length >= MAX_ATTACHMENTS) {
+          alert(`Maximum ${MAX_ATTACHMENTS} reference files allowed.`);
+          continue;
+        }
+
+        // Skip if already attached
+        if (documentAttachments.some(att => att.filename === file.name)) {
+          continue;
+        }
+
+        // Show uploading state
+        setUploadingFiles(prev => new Set(prev).add(file.name));
+
+        // Upload in background (don't await in loop to allow parallel uploads)
+        (async () => {
+          try {
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+            const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+            const formData = new FormData();
+            formData.append('file', file, file.name);
+
+            const response = await fetch(`${supabaseUrl}/functions/v1/file-upload`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${sessionToken}`,
+                'apikey': anonKey || '',
+              },
+              body: formData,
+            });
+
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+              throw new Error(error.error || `Upload failed: ${response.status}`);
+            }
+
+            const result = await response.json();
+            const newAttachment: DocumentAttachment = {
+              fileId: result.file_id,
+              filename: result.filename,
+              sizeBytes: result.bytes,
+              uploadedAt: Date.now(),
+            };
+
+            setDocumentAttachments(prev => {
+              const updated = [...prev, newAttachment];
+              onAttachmentsChange?.(updated);
+              return updated;
+            });
+            console.log('[AIAssistant] File uploaded successfully:', result.file_id);
+          } catch (err) {
+            console.error('[AIAssistant] File upload failed:', file.name, err);
+            alert(`Failed to upload "${file.name}": ${err instanceof Error ? err.message : 'Unknown error'}`);
+          } finally {
+            setUploadingFiles(prev => {
+              const next = new Set(prev);
+              next.delete(file.name);
+              return next;
+            });
+          }
+        })();
       }
     }
 
@@ -837,8 +919,12 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
     setIsAddMenuOpen(false);
   };
 
-  const removeAttachmentName = (name: string) => {
-    setAttachmentNames((prev) => prev.filter((item) => item !== name));
+  const removeDocumentAttachment = (fileId: string) => {
+    setDocumentAttachments(prev => {
+      const updated = prev.filter(att => att.fileId !== fileId);
+      onAttachmentsChange?.(updated);
+      return updated;
+    });
   };
 
   const removeAddedLink = (link: string) => {
@@ -848,7 +934,8 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
   const hasAnyInputContext =
     contextSnippets.length > 0 ||
     selectedContextImages.length > 0 ||
-    attachmentNames.length > 0 ||
+    documentAttachments.length > 0 ||
+    uploadingFiles.size > 0 ||
     addedLinks.length > 0 ||
     contextImages.length > 0;
 
@@ -861,7 +948,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
       setRenderedInputContext({
         contextSnippets,
         selectedContextImages,
-        attachmentNames,
+        documentAttachments,
         addedLinks,
         contextImages,
       });
@@ -876,7 +963,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
       setRenderedInputContext({
         contextSnippets: [],
         selectedContextImages: [],
-        attachmentNames: [],
+        documentAttachments: [],
         addedLinks: [],
         contextImages: [],
       });
@@ -886,7 +973,8 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
     hasAnyInputContext,
     contextSnippets,
     selectedContextImages,
-    attachmentNames,
+    documentAttachments,
+    uploadingFiles,
     addedLinks,
     contextImages,
   ]);
@@ -900,12 +988,13 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
   }, []);
 
   const inputContextForRender = hasAnyInputContext
-    ? { contextSnippets, selectedContextImages, attachmentNames, addedLinks, contextImages }
+    ? { contextSnippets, selectedContextImages, documentAttachments, addedLinks, contextImages }
     : renderedInputContext;
   const hasRenderedInputContext =
     inputContextForRender.contextSnippets.length > 0 ||
     inputContextForRender.selectedContextImages.length > 0 ||
-    inputContextForRender.attachmentNames.length > 0 ||
+    inputContextForRender.documentAttachments.length > 0 ||
+    uploadingFiles.size > 0 ||
     inputContextForRender.addedLinks.length > 0 ||
     inputContextForRender.contextImages.length > 0;
 
@@ -1112,26 +1201,42 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                             </button>
                           </div>
                         ))}
-                        {inputContextForRender.attachmentNames.map((name) => (
+                        {inputContextForRender.documentAttachments.map((att) => (
                           <div
-                            key={name}
-                            className="ai-context-chip ai-context-chip-selected ai-context-chip-overlay-remove ai-attachment-chip !inline-flex !w-fit !self-start !justify-start !gap-0 !rounded-full !px-2.5 !py-1.5"
+                            key={att.fileId}
+                            className="ai-context-chip ai-context-chip-selected ai-context-chip-overlay-remove ai-attachment-chip !inline-flex !w-fit !self-start !justify-start !gap-1 !rounded-full !px-2.5 !py-1.5"
                             style={{ maxWidth: 'clamp(180px, 45%, 280px)' }}
                           >
+                            <FileText size={14} className="flex-shrink-0 opacity-60" />
                             <span
-                              title={name}
+                              title={`${att.filename} (${formatFileSize(att.sizeBytes)})`}
                               className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap !leading-4"
                             >
-                              {name}
+                              {att.filename}
+                            </span>
+                            <span className="flex-shrink-0 text-[10px] opacity-50">
+                              {formatFileSize(att.sizeBytes)}
                             </span>
                             <button
                               type="button"
                               className="ai-context-chip-remove"
-                              onClick={() => removeAttachmentName(name)}
+                              onClick={() => removeDocumentAttachment(att.fileId)}
                               aria-label="Remove attachment"
                             >
                               <X size={14} />
                             </button>
+                          </div>
+                        ))}
+                        {[...uploadingFiles].map((name) => (
+                          <div
+                            key={`uploading-${name}`}
+                            className="ai-context-chip ai-context-chip-selected ai-attachment-chip !inline-flex !w-fit !self-start !justify-start !gap-1 !rounded-full !px-2.5 !py-1.5 opacity-60"
+                            style={{ maxWidth: 'clamp(180px, 45%, 280px)' }}
+                          >
+                            <Loader2 size={14} className="flex-shrink-0 animate-spin" />
+                            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap !leading-4">
+                              {name}
+                            </span>
                           </div>
                         ))}
                         {inputContextForRender.addedLinks.map((link) => (
@@ -1267,7 +1372,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,.pdf,.csv"
+                accept="image/*,.pdf,.docx,.doc,.txt,.md,.json"
                 multiple
                 className="ai-hidden-file-input"
                 onChange={handleFilesSelected}
@@ -1277,7 +1382,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
               <button
                 onClick={handleSendMessage}
-                disabled={(inputMessage.trim().length === 0 && attachmentNames.length === 0 && addedLinks.length === 0 && contextSnippets.length === 0) || isLoading}
+                disabled={(inputMessage.trim().length === 0 && documentAttachments.length === 0 && addedLinks.length === 0 && contextSnippets.length === 0) || isLoading}
                 className="ai-send-btn"
                 title="Send message"
               >

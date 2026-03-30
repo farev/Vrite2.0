@@ -229,7 +229,7 @@ export class GoogleDriveClient {
   /**
    * Get a specific document's content and metadata
    */
-  async getDocument(fileId: string): Promise<{ editorState: string; metadata: DriveFile }> {
+  async getDocument(fileId: string): Promise<{ editorState: string; metadata: DriveFile; aiAttachments?: Array<{ fileId: string; filename: string; sizeBytes: number; uploadedAt: number }> }> {
     console.log('[GoogleDrive] Fetching document:', fileId);
 
     try {
@@ -273,8 +273,9 @@ export class GoogleDriveClient {
       // Parse the Vrite document structure
       const vriteDoc = JSON.parse(content);
       const editorState = JSON.stringify(vriteDoc.editorState);
+      const aiAttachments = vriteDoc.aiAttachments || undefined;
 
-      return { editorState, metadata };
+      return { editorState, metadata, aiAttachments };
     } catch (error) {
       console.error('[GoogleDrive] Get document error:', error);
       throw error;
@@ -287,12 +288,13 @@ export class GoogleDriveClient {
   async saveDocument(
     fileId: string | null,
     title: string,
-    editorState: string
+    editorState: string,
+    aiAttachments?: Array<{ fileId: string; filename: string; sizeBytes: number; uploadedAt: number }>
   ): Promise<DriveFile> {
     if (fileId) {
-      return await this.updateFile(fileId, editorState, title);
+      return await this.updateFile(fileId, editorState, title, aiAttachments);
     } else {
-      return await this.createFile(title, editorState);
+      return await this.createFile(title, editorState, aiAttachments);
     }
   }
 
@@ -300,7 +302,7 @@ export class GoogleDriveClient {
    * Create a new file in Google Drive
    * First checks if a file with the same name exists to avoid duplicates
    */
-  async createFile(title: string, editorState: string): Promise<DriveFile> {
+  async createFile(title: string, editorState: string, aiAttachments?: Array<{ fileId: string; filename: string; sizeBytes: number; uploadedAt: number }>): Promise<DriveFile> {
     try {
       const fileName = title.endsWith('.vrite.json') ? title : `${title}.vrite.json`;
 
@@ -337,12 +339,15 @@ export class GoogleDriveClient {
       const closeDelimiter = `\r\n--${boundary}--`;
 
       // Create the Vrite document structure
-      const vriteDoc = {
+      const vriteDoc: Record<string, unknown> = {
         version: '1.0',
         title: title,
         editorState: JSON.parse(editorState),
         lastModified: Date.now(),
       };
+      if (aiAttachments && aiAttachments.length > 0) {
+        vriteDoc.aiAttachments = aiAttachments;
+      }
 
       const metadata: DriveFileMetadata = {
         name: fileName,
@@ -389,7 +394,7 @@ export class GoogleDriveClient {
   /**
    * Update an existing file's content and optionally rename it
    */
-  async updateFile(fileId: string, editorState: string, newTitle?: string): Promise<DriveFile> {
+  async updateFile(fileId: string, editorState: string, newTitle?: string, aiAttachments?: Array<{ fileId: string; filename: string; sizeBytes: number; uploadedAt: number }>): Promise<DriveFile> {
     try {
       let fileName: string | undefined;
       let shouldRename = false;
@@ -466,12 +471,15 @@ export class GoogleDriveClient {
       }
 
       // Create the Vrite document structure
-      const vriteDoc = {
+      const vriteDoc: Record<string, unknown> = {
         version: '1.0',
         title: newTitle || 'Untitled',
         editorState: JSON.parse(editorState),
         lastModified: Date.now(),
       };
+      if (aiAttachments && aiAttachments.length > 0) {
+        vriteDoc.aiAttachments = aiAttachments;
+      }
 
       // Update content
       const updateResponse = await fetch(
