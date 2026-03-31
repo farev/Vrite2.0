@@ -213,6 +213,13 @@ export default function AIAssistantSidebar({
     contextImages,
   });
 
+  // Sync attachments when document finishes loading (initialAttachments arrives after mount)
+  useEffect(() => {
+    if (initialAttachments && initialAttachments.length > 0) {
+      setDocumentAttachments(initialAttachments);
+    }
+  }, [initialAttachments]);
+
   const hasTriggeredOnboardingRef = useRef(false);
   const onboardingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const inputContextCollapseTimerRef = useRef<NodeJS.Timeout | null>(null);
