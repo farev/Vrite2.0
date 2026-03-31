@@ -15,6 +15,8 @@ const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), {
 });
 
 const DRIVE_PERMISSION_PROMPT_KEY = 'vrite_drive_permission_prompt_shown';
+const PENDING_IMPORT_KEY = 'vrite_import_pending';
+const PENDING_AI_PROMPT_KEY = 'vrite_initial_ai_prompt';
 
 export default function DocumentPage() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
@@ -31,6 +33,7 @@ export default function DocumentPage() {
   const importCallbackRef = useRef<((html: string, title: string) => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const [initialAIPrompt, setInitialAIPrompt] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const router = useRouter();
@@ -104,6 +107,35 @@ export default function DocumentPage() {
 
   const handleImportCallbackReady = useCallback((callback: (html: string, title: string) => void) => {
     importCallbackRef.current = callback;
+  }, []);
+
+  const applyPendingNewDocumentState = useCallback(() => {
+    setInitialAIPrompt(null);
+
+    const pendingImport = sessionStorage.getItem(PENDING_IMPORT_KEY);
+    if (pendingImport) {
+      sessionStorage.removeItem(PENDING_IMPORT_KEY);
+      try {
+        const { html, title } = JSON.parse(pendingImport) as { html: string; title: string };
+        // Wait briefly for the editor to mount and register its import handler
+        setTimeout(() => {
+          if (importCallbackRef.current) {
+            importCallbackRef.current(html, title);
+          }
+        }, 500);
+      } catch {
+        console.warn('[DocumentPage] Failed to parse pending import data');
+      }
+    }
+
+    const pendingPrompt = sessionStorage.getItem(PENDING_AI_PROMPT_KEY);
+    if (pendingPrompt) {
+      sessionStorage.removeItem(PENDING_AI_PROMPT_KEY);
+      const trimmedPrompt = pendingPrompt.trim();
+      if (trimmedPrompt) {
+        setInitialAIPrompt(trimmedPrompt);
+      }
+    }
   }, []);
 
   const handleImportDocument = useCallback(async (file: File) => {
@@ -192,23 +224,8 @@ export default function DocumentPage() {
       const isTempDoc = id.startsWith('temp-');
 
       if (id === 'new') {
-        // New document — check for a pending import
-        const pending = sessionStorage.getItem('vrite_import_pending');
-        if (pending) {
-          sessionStorage.removeItem('vrite_import_pending');
-          try {
-            const { html, title } = JSON.parse(pending) as { html: string; title: string };
-            // Wait briefly for the editor to mount and register its import handler
-            setTimeout(() => {
-              if (importCallbackRef.current) {
-                importCallbackRef.current(html, title);
-              }
-            }, 500);
-          } catch {
-            console.warn('[DocumentPage] Failed to parse pending import data');
-          }
-        }
         setDocumentId(null);
+        applyPendingNewDocumentState();
         setIsLoading(false);
         return;
       }
@@ -221,16 +238,19 @@ export default function DocumentPage() {
           // Load temporary document from localStorage
           const tempDoc = loadTemporaryDocument(id);
           if (tempDoc) {
+            setInitialAIPrompt(null);
             setDocumentTitle(tempDoc.title);
             setLastSaved(tempDoc.lastModified);
           } else {
             console.log('[DocumentPage] New temporary document');
             // New temporary document - let editor initialize it
+            applyPendingNewDocumentState();
           }
         } else if (isAuthenticated) {
           // Load cloud document (requires authentication)
           const doc = await loadDocumentById(id);
           if (doc) {
+            setInitialAIPrompt(null);
             setDocumentTitle(doc.title);
             setLastSaved(doc.lastModified);
           } else {
@@ -251,7 +271,7 @@ export default function DocumentPage() {
     if (isAuthenticated !== null) {
       loadDocumentData();
     }
-  }, [params.id, isAuthenticated, router]);
+  }, [applyPendingNewDocumentState, params.id, isAuthenticated, router]);
 
   // Show loading state while checking authentication or loading document
   if (isAuthenticated === null || isLoading) {
@@ -568,6 +588,7 @@ export default function DocumentPage() {
         onActiveFormatKeyChange={setActiveFormatKey}
         onImportReady={handleImportCallbackReady}
         initialDocumentId={documentId}
+        initialAIPrompt={initialAIPrompt}
         onDocumentIdChange={handleDocumentIdChange}
         isAuthenticated={isAuthenticated}
       />

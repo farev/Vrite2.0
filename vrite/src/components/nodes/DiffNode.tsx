@@ -198,7 +198,7 @@ function DiffComponent({
             />
           </span>
         </span>
-        <span className="diff-inline-actions">
+        <span className="diff-inline-actions" data-onboarding-target="inline-diff-actions">
           <button
             onClick={(e) => {
               e.preventDefault();
@@ -249,7 +249,7 @@ function DiffComponent({
             )}
           </span>
         </span>
-        <span className="diff-inline-actions">
+        <span className="diff-inline-actions" data-onboarding-target="inline-diff-actions">
           <button
             onClick={(e) => {
               e.preventDefault();
@@ -330,7 +330,7 @@ function DiffComponent({
         })}
         </span>
         {/* Block-level accept/reject — accepts/rejects all remaining changes at once */}
-        <span className="diff-word-actions">
+        <span className="diff-word-actions" data-onboarding-target="inline-diff-actions">
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReject(nodeKey); }}
             className="diff-block-btn diff-block-reject"
@@ -356,7 +356,7 @@ function DiffComponent({
       <span className="diff-inline-body">
         <span className="diff-inline-text" style={textStyle}>{text}</span>
       </span>
-      <span className="diff-inline-actions">
+      <span className="diff-inline-actions" data-onboarding-target="inline-diff-actions">
         <button
           onClick={(e) => {
             e.preventDefault();

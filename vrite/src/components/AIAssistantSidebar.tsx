@@ -109,6 +109,7 @@ interface AIAssistantSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   getSimplifiedDocument: () => SimplifiedDocument;
+  initialPrompt?: string | null;
   onApplyLexicalChanges?: (changes: LexicalChange[], contextImages?: Array<{ filename: string; data: string; width: number; height: number }>) => void;
   // Legacy props for backward compatibility with Delta-based changes
   documentContent?: string;
@@ -152,6 +153,7 @@ export default function AIAssistantSidebar({
   isOpen,
   onToggle,
   getSimplifiedDocument,
+  initialPrompt = null,
   onApplyLexicalChanges,
   documentContent,
   onApplyChanges,
@@ -194,6 +196,8 @@ export default function AIAssistantSidebar({
   });
 
   const hasTriggeredOnboardingRef = useRef(false);
+  const hasTriggeredInitialPromptRef = useRef(false);
+  const previousInitialPromptRef = useRef<string | null>(null);
   const onboardingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const inputContextCollapseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -659,10 +663,46 @@ export default function AIAssistantSidebar({
     }
   }, [sessionToken, isAuthenticated, isAnonymous, messages, getSimplifiedDocument, onApplyLexicalChanges, showSignupModal, contextSnippets, contextImages, selectedContextImages, attachmentNames, addedLinks, handleStreamingResponse]);
 
+  useEffect(() => {
+    const normalizedPrompt = initialPrompt?.trim() || null;
+
+    if (previousInitialPromptRef.current !== normalizedPrompt) {
+      previousInitialPromptRef.current = normalizedPrompt;
+      hasTriggeredInitialPromptRef.current = false;
+    }
+  }, [initialPrompt]);
+
+  useEffect(() => {
+    const normalizedPrompt = initialPrompt?.trim();
+
+    if (!normalizedPrompt || !sessionToken || hasTriggeredInitialPromptRef.current) {
+      return;
+    }
+
+    hasTriggeredInitialPromptRef.current = true;
+    messageIdCounterRef.current += 1;
+
+    setMessages(prev => [
+      ...prev,
+      {
+        id: `initial-prompt-${Date.now()}-${messageIdCounterRef.current}`,
+        type: 'user',
+        content: normalizedPrompt,
+        timestamp: new Date(),
+      },
+    ]);
+
+    void triggerAIRequest(normalizedPrompt, false);
+  }, [initialPrompt, sessionToken, triggerAIRequest]);
+
   // Automatic AI onboarding for anonymous users
   useEffect(() => {
     // Only set timer once
     if (hasTriggeredOnboardingRef.current || onboardingTimerRef.current) {
+      return;
+    }
+
+    if (initialPrompt?.trim()) {
       return;
     }
 
@@ -707,7 +747,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
       console.log('[AIAssistant] Onboarding timer set, will fire in 0.5 seconds');
     }
-  }, [isAuthenticated, sessionToken, triggerAIRequest]);
+  }, [initialPrompt, isAuthenticated, sessionToken, triggerAIRequest]);
 
   const handleSendMessage = async () => {
     const hasTypedMessage = inputMessage.trim().length > 0;
@@ -910,7 +950,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
     inputContextForRender.contextImages.length > 0;
 
   return (
-    <div className="ai-sidebar-shell">
+    <div className="ai-sidebar-shell" data-onboarding-target="assistant-sidebar">
       <div className={`ai-sidebar ${isOpen ? 'ai-sidebar-open' : 'ai-sidebar-closed'}`}>
         <div className="ai-sidebar-header">
           <div className="ai-sidebar-title">
@@ -1037,7 +1077,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
           </div>
 
           {isDiffModeActive && (
-            <div className="ai-diff-actions">
+            <div className="ai-diff-actions" data-onboarding-target="diff-actions">
               <div className="diff-mode-actions">
                 <button
                   onClick={() => { posthog.capture('ai_diff_rejected'); onRejectAllChanges?.(); }}

@@ -25,6 +25,7 @@ interface DiffPluginProps {
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
   onAnyAccepted?: () => void;
+  onAnyResolved?: () => void;
   onDiffNodesDetected?: () => void;
 }
 
@@ -34,6 +35,7 @@ export default function DiffPlugin({
   onDiffComplete,
   onAllResolved,
   onAnyAccepted,
+  onAnyResolved,
   onDiffNodesDetected,
 }: DiffPluginProps) {
   const [editor] = useLexicalComposerContext();
@@ -136,14 +138,16 @@ export default function DiffPlugin({
       });
       if (didAccept) {
         onAnyAccepted?.();
+        onAnyResolved?.();
       }
     },
-    [editor, checkAllResolved, onAnyAccepted]
+    [editor, checkAllResolved, onAnyAccepted, onAnyResolved]
   );
 
   // Handle rejecting a diff node
   const handleReject = useCallback(
     (nodeKey: NodeKey) => {
+      let didResolve = false;
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
@@ -163,6 +167,7 @@ export default function DiffPlugin({
               // Replacement - restore original text
               const textNode = $createTextNode(originalText);
               node.replace(textNode);
+              didResolve = true;
             } else {
               // New content with no original - remove entirely
               node.remove();
@@ -170,21 +175,27 @@ export default function DiffPlugin({
               if (parent && parent.getTextContent().trim() === '') {
                 parent.remove();
               }
+              didResolve = true;
             }
           } else {
             // Deletion - restore the deleted content
             if (originalText) {
               const textNode = $createTextNode(originalText);
               node.replace(textNode);
+              didResolve = true;
             } else {
               node.remove();
+              didResolve = true;
             }
           }
         }
         checkAllResolved();
       });
+      if (didResolve) {
+        onAnyResolved?.();
+      }
     },
-    [editor, checkAllResolved]
+    [editor, checkAllResolved, onAnyResolved]
   );
 
   // Handle resolving a diff node with a custom (partially-accepted) text
@@ -202,8 +213,9 @@ export default function DiffPlugin({
         checkAllResolved();
       });
       onAnyAccepted?.();
+      onAnyResolved?.();
     },
-    [editor, checkAllResolved, onAnyAccepted]
+    [editor, checkAllResolved, onAnyAccepted, onAnyResolved]
   );
 
   // Set up callbacks on the DiffNode class

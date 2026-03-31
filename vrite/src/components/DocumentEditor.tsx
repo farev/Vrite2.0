@@ -146,6 +146,159 @@ const createInitialConfig = (savedEditorState?: string) => ({
   editorState: savedEditorState,
 });
 
+type GuidedOnboardingStep = 'assistant' | 'diff' | 'formatting';
+
+interface SpotlightRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+function GuidedOnboardingOverlay({
+  step,
+  targetRect,
+  onDismiss,
+}: {
+  step: GuidedOnboardingStep;
+  targetRect: SpotlightRect | null;
+  onDismiss: () => void;
+}) {
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
+  const spotlight = targetRect
+    ? {
+        top: Math.max(8, targetRect.top - 12),
+        left: Math.max(8, targetRect.left - 12),
+        width: Math.max(0, targetRect.width + 24),
+        height: Math.max(0, targetRect.height + 24),
+      }
+    : null;
+
+  const stepCopy: Record<GuidedOnboardingStep, { label: string; title: string; body: string; hint: string }> = {
+    assistant: {
+      label: 'Step 1 of 3',
+      title: 'The assistant is drafting your first document',
+      body: 'Keep your focus here while the AI turns your prompt into editable content inside the document.',
+      hint: 'This step advances automatically when the draft is ready.',
+    },
+    diff: {
+      label: 'Step 2 of 3',
+      title: 'Review the proposed changes',
+      body: 'Use these inline controls to accept or reject each suggested change directly in the document.',
+      hint: 'The tour moves on after you finish reviewing the draft.',
+    },
+    formatting: {
+      label: 'Step 3 of 3',
+      title: 'Polish the document with formatting tools',
+      body: 'These controls let you style text, adjust layout, and fine-tune the document after the AI pass.',
+      hint: 'You are ready to keep editing on your own.',
+    },
+  };
+
+  const content = stepCopy[step];
+  const calloutStyle: CSSProperties =
+    step === 'formatting'
+      ? {
+          position: 'fixed',
+          top: spotlight ? Math.min(viewportHeight - 220, spotlight.top + spotlight.height + 20) : 24,
+          left: 24,
+          width: 'min(360px, calc(100vw - 48px))',
+          zIndex: 151,
+        }
+      : {
+          position: 'fixed',
+          left: 24,
+          bottom: 24,
+          width: 'min(360px, calc(100vw - 48px))',
+          zIndex: 151,
+        };
+
+  return (
+    <>
+      <div className="pointer-events-none fixed inset-0 z-[140]">
+        {spotlight ? (
+          <>
+            <div
+              className="pointer-events-auto absolute bg-black/70"
+              style={{ top: 0, left: 0, width: '100%', height: spotlight.top }}
+            />
+            <div
+              className="pointer-events-auto absolute bg-black/70"
+              style={{
+                top: spotlight.top,
+                left: 0,
+                width: spotlight.left,
+                height: spotlight.height,
+              }}
+            />
+            <div
+              className="pointer-events-auto absolute bg-black/70"
+              style={{
+                top: spotlight.top,
+                left: spotlight.left + spotlight.width,
+                width: Math.max(0, viewportWidth - spotlight.left - spotlight.width),
+                height: spotlight.height,
+              }}
+            />
+            <div
+              className="pointer-events-auto absolute bg-black/70"
+              style={{
+                top: spotlight.top + spotlight.height,
+                left: 0,
+                width: '100%',
+                height: Math.max(0, viewportHeight - spotlight.top - spotlight.height),
+              }}
+            />
+            <div
+              className="pointer-events-none absolute rounded-3xl border-2 border-white/90 shadow-[0_0_0_9999px_rgba(0,0,0,0)]"
+              style={{
+                top: spotlight.top,
+                left: spotlight.left,
+                width: spotlight.width,
+                height: spotlight.height,
+                boxShadow: '0 0 0 1px rgba(255,255,255,0.14), 0 24px 80px rgba(15, 23, 42, 0.45)',
+              }}
+            />
+          </>
+        ) : (
+          <div className="pointer-events-auto absolute inset-0 bg-black/70" />
+        )}
+      </div>
+
+      <div
+        className="pointer-events-auto rounded-3xl border border-white/10 bg-zinc-950/96 p-5 text-white shadow-2xl backdrop-blur"
+        style={calloutStyle}
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
+          {content.label}
+        </p>
+        <h3 className="mt-3 text-lg font-semibold">{content.title}</h3>
+        <p className="mt-2 text-sm leading-6 text-zinc-300">{content.body}</p>
+        <p className="mt-3 text-sm text-zinc-400">{content.hint}</p>
+        <div className="mt-5 flex items-center gap-3">
+          {step === 'formatting' ? (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="rounded-full bg-white px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-zinc-200"
+            >
+              Finish tour
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
+          >
+            {step === 'formatting' ? 'Dismiss' : 'Skip tour'}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ToolbarPlugin({ onAIToggle }: { onAIToggle?: () => void }) {
   const [editor] = useLexicalComposerContext();
   const [isBold, setIsBold] = useState(false);
@@ -422,6 +575,7 @@ interface DocumentEditorProps {
   onLastSavedChange: (timestamp: number) => void;
   onSaveCallbackReady?: (callback: () => void) => void;
   initialDocumentId?: string | null;
+  initialAIPrompt?: string | null;
   onDocumentIdChange?: (id: string) => void;
   isAuthenticated: boolean;
   onInsertImageReady?: (handler: () => void) => void;
@@ -446,6 +600,7 @@ export default function DocumentEditor({
   onLastSavedChange,
   onSaveCallbackReady,
   initialDocumentId,
+  initialAIPrompt,
   onDocumentIdChange,
   isAuthenticated,
   onInsertImageReady,
@@ -533,6 +688,9 @@ export default function DocumentEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [showDrivePermissionsToast, setShowDrivePermissionsToast] = useState(false);
+  const [guidedOnboardingStep, setGuidedOnboardingStep] = useState<GuidedOnboardingStep | null>(null);
+  const [guidedOnboardingRect, setGuidedOnboardingRect] = useState<SpotlightRect | null>(null);
+  const [guidedDiffReviewCount, setGuidedDiffReviewCount] = useState(0);
   const isDocumentEmpty = useMemo(() => {
     if (!editorState) return true;
     let empty = true;
@@ -545,6 +703,8 @@ export default function DocumentEditor({
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
   const autoTitleTriggeredRef = useRef(false);
+  const toolbarOnboardingRef = useRef<HTMLDivElement | null>(null);
+  const assistantOnboardingRef = useRef<HTMLDivElement | null>(null);
   const autoTitleInFlightRef = useRef(false);
   const autoTitleDocIdentityRef = useRef<string | null>(null);
   const autoTitleLocalIdRef = useRef(
@@ -1406,6 +1566,19 @@ export default function DocumentEditor({
     });
   }, [triggerAutoTitleIfEligible]);
 
+  const handleDiffResolvedForOnboarding = useCallback(() => {
+    if (guidedOnboardingStep !== 'diff') {
+      return;
+    }
+
+    setGuidedDiffReviewCount((current) => {
+      if (current >= 2) {
+        return current;
+      }
+      return current + 1;
+    });
+  }, [guidedOnboardingStep]);
+
   // Re-enable diff mode if DiffNodes reappear (e.g., after undo)
   const handleDiffNodesDetected = useCallback(() => {
     if (!isDiffModeActive) {
@@ -1745,6 +1918,121 @@ export default function DocumentEditor({
     };
   }, []);
 
+  const dismissGuidedOnboarding = useCallback(() => {
+    setGuidedOnboardingStep(null);
+    setGuidedOnboardingRect(null);
+    setGuidedDiffReviewCount(0);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (!initialAIPrompt?.trim()) {
+      return;
+    }
+
+    setGuidedDiffReviewCount(0);
+    setGuidedOnboardingStep('assistant');
+  }, [initialAIPrompt]);
+
+  useEffect(() => {
+    if (guidedOnboardingStep === 'assistant' && isDiffModeActive) {
+      setGuidedDiffReviewCount(0);
+      setGuidedOnboardingStep('diff');
+    }
+  }, [guidedOnboardingStep, isDiffModeActive]);
+
+  useEffect(() => {
+    if (guidedOnboardingStep === 'diff' && !isDiffModeActive) {
+      setGuidedDiffReviewCount(0);
+      setGuidedOnboardingStep('formatting');
+    }
+  }, [guidedOnboardingStep, isDiffModeActive]);
+
+  const getGuidedOnboardingTarget = useCallback(() => {
+    if (guidedOnboardingStep === 'assistant') {
+      return assistantOnboardingRef.current;
+    }
+
+    if (guidedOnboardingStep === 'diff') {
+      if (guidedDiffReviewCount >= 2) {
+        return document.querySelector('[data-onboarding-target="diff-actions"]') as HTMLElement | null;
+      }
+      return document.querySelector('[data-onboarding-target="inline-diff-actions"]') as HTMLElement | null;
+    }
+
+    if (guidedOnboardingStep === 'formatting') {
+      return toolbarOnboardingRef.current;
+    }
+
+    return null;
+  }, [guidedOnboardingStep, guidedDiffReviewCount]);
+
+  useEffect(() => {
+    if (!guidedOnboardingStep) {
+      return;
+    }
+
+    const updateSpotlight = () => {
+      const target = getGuidedOnboardingTarget();
+      if (!target) {
+        setGuidedOnboardingRect(null);
+        return;
+      }
+
+      const rect = target.getBoundingClientRect();
+      setGuidedOnboardingRect({
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+
+    updateSpotlight();
+
+    window.addEventListener('resize', updateSpotlight);
+    window.addEventListener('scroll', updateSpotlight, true);
+
+    let mutationObserver: MutationObserver | null = null;
+    if (guidedOnboardingStep === 'diff') {
+      const editorRoot =
+        (document.querySelector('.document-content-editable') as HTMLElement | null) ?? document.body;
+      mutationObserver = new MutationObserver(() => {
+        updateSpotlight();
+      });
+      mutationObserver.observe(editorRoot, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateSpotlight);
+      window.removeEventListener('scroll', updateSpotlight, true);
+      mutationObserver?.disconnect();
+    };
+  }, [getGuidedOnboardingTarget, guidedOnboardingStep, isAISidebarOpen, isDiffModeActive]);
+
+  useEffect(() => {
+    if (!guidedOnboardingStep) {
+      return;
+    }
+
+    const target = getGuidedOnboardingTarget();
+    if (!target) {
+      return;
+    }
+
+    target.scrollIntoView({
+      block: guidedOnboardingStep === 'formatting' ? 'nearest' : 'center',
+      inline: 'nearest',
+      behavior: 'smooth',
+    });
+  }, [getGuidedOnboardingTarget, guidedOnboardingStep]);
+
   const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
   const lexicalComposerKey = useMemo(
@@ -1766,15 +2054,17 @@ export default function DocumentEditor({
         <div className="document-main-column">
           <LexicalComposer key={lexicalComposerKey} initialConfig={initialConfig}>
             <div className="document-main-stack">
-              <FormattingToolbar
-                onAIToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
-                documentMargins={documentMargins}
-                onMarginsChange={handleMarginsChange}
-                onFormatDocument={handleFormatDocument}
-                pageSize={pageSize}
-                onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
-                activeEditor={activeHFEditor}
-              />
+              <div ref={toolbarOnboardingRef}>
+                <FormattingToolbar
+                  onAIToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
+                  documentMargins={documentMargins}
+                  onMarginsChange={handleMarginsChange}
+                  onFormatDocument={handleFormatDocument}
+                  pageSize={pageSize}
+                  onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
+                  activeEditor={activeHFEditor}
+                />
+              </div>
               
               <div
                 className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
@@ -1886,6 +2176,7 @@ export default function DocumentEditor({
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
                     onAnyAccepted={handleDiffAccepted}
+                    onAnyResolved={handleDiffResolvedForOnboarding}
                     onDiffNodesDetected={handleDiffNodesDetected}
                   />
                   <SpellCheckPlugin />
@@ -1896,24 +2187,27 @@ export default function DocumentEditor({
           </LexicalComposer>
         </div>
 
-        <AIAssistantSidebar
-          isOpen={isAISidebarOpen}
-          onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
-          getSimplifiedDocument={getSimplifiedDocument}
-          onApplyLexicalChanges={handleApplyLexicalChanges}
-          onApplyChanges={handleApplyChanges}
-          documentContent=""
-          contextSnippets={contextSnippets}
-          selectedContextImages={selectedContextImages}
-          onRemoveContextSnippet={handleRemoveContextSnippet}
-          onRemoveSelectedImage={handleRemoveSelectedImage}
-          onClearContextSnippets={handleClearContextSnippets}
-          onClearEditorSelection={handleClearEditorSelection}
-          onChatFocusChange={handleChatFocusChange}
-          isDiffModeActive={isDiffModeActive}
-          onAcceptAllChanges={handleAcceptAllChanges}
-          onRejectAllChanges={handleRejectAllChanges}
-        />
+        <div ref={assistantOnboardingRef}>
+          <AIAssistantSidebar
+            isOpen={isAISidebarOpen}
+            onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
+            getSimplifiedDocument={getSimplifiedDocument}
+            initialPrompt={initialAIPrompt}
+            onApplyLexicalChanges={handleApplyLexicalChanges}
+            onApplyChanges={handleApplyChanges}
+            documentContent=""
+            contextSnippets={contextSnippets}
+            selectedContextImages={selectedContextImages}
+            onRemoveContextSnippet={handleRemoveContextSnippet}
+            onRemoveSelectedImage={handleRemoveSelectedImage}
+            onClearContextSnippets={handleClearContextSnippets}
+            onClearEditorSelection={handleClearEditorSelection}
+            onChatFocusChange={handleChatFocusChange}
+            isDiffModeActive={isDiffModeActive}
+            onAcceptAllChanges={handleAcceptAllChanges}
+            onRejectAllChanges={handleRejectAllChanges}
+          />
+        </div>
       </div>
 
       <DiffViewer
@@ -1939,6 +2233,14 @@ export default function DocumentEditor({
             showSignupModal('permissions-missing');
           }}
           onDismiss={() => setShowDrivePermissionsToast(false)}
+        />
+      )}
+
+      {guidedOnboardingStep && (
+        <GuidedOnboardingOverlay
+          step={guidedOnboardingStep}
+          targetRect={guidedOnboardingRect}
+          onDismiss={dismissGuidedOnboarding}
         />
       )}
     </div>
