@@ -47,7 +47,7 @@ import {
   Redo,
   Sparkles,
 } from 'lucide-react';
-import AIAssistantSidebar, { type ContextSnippet } from './AIAssistantSidebar';
+import AIAssistantSidebar, { type ContextSnippet, type DocumentAttachment } from './AIAssistantSidebar';
 import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
 import GuidedCoachmark from './onboarding/GuidedCoachmark';
@@ -547,6 +547,7 @@ export default function DocumentEditor({
   const [contextSnippets, setContextSnippets] = useState<ContextSnippet[]>([]);
   const [selectedContextImages, setSelectedContextImages] = useState<Array<{ filename: string; data: string; width: number; height: number }>>([]);
   const [isDocumentAtTop, setIsDocumentAtTop] = useState(true);
+  const [aiAttachments, setAiAttachments] = useState<DocumentAttachment[]>([]);
   const [isChatFocused, setIsChatFocused] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -970,6 +971,7 @@ export default function DocumentEditor({
         editorState: JSON.stringify({ ...editorState.toJSON(), __hf__: headerFooterSettings }),
         formatKey: activeFormatKey !== DEFAULT_FORMAT_KEY ? activeFormatKey : undefined,
         lastModified: Date.now(),
+        aiAttachments: aiAttachments.length > 0 ? aiAttachments : undefined,
       };
 
       const savedDoc = await saveDocument(documentData);
@@ -1189,6 +1191,12 @@ export default function DocumentEditor({
                 const root = $getRoot();
                 root.clear();
               });
+            }
+
+            // Restore AI attachments if present
+            if (savedDoc.aiAttachments && savedDoc.aiAttachments.length > 0) {
+              setAiAttachments(savedDoc.aiAttachments);
+              console.log('[Editor] Restored', savedDoc.aiAttachments.length, 'AI attachments');
             }
 
             // Restore document format preset (sync MenuBar + layout); default if none stored
@@ -1740,6 +1748,11 @@ export default function DocumentEditor({
     setIsChatFocused(isFocused);
   }, []);
 
+  const handleAttachmentsChange = useCallback((attachments: DocumentAttachment[]) => {
+    setAiAttachments(attachments);
+    setHasUnsavedChanges(true);
+  }, []);
+
   // Automatically sync selected text and images to AI context
   useEffect(() => {
     const normalized = selectionInfo.text.trim();
@@ -2206,6 +2219,8 @@ export default function DocumentEditor({
             }
             requiredGuidedDiffReviews={REQUIRED_GUIDED_DIFF_REVIEWS}
             guidedDiffReviewCount={guidedDiffReviewCount}
+            initialAttachments={aiAttachments}
+            onAttachmentsChange={handleAttachmentsChange}
           />
         </div>
       </div>

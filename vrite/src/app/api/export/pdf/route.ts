@@ -311,6 +311,7 @@ function buildHtmlDocument(payload: ExportPayload, useServerFonts: boolean): str
     /* Hide editor-only artifacts */
     .autocomplete-ghost-text { display: none !important; }
     .diff-word-actions, .diff-inline-actions { display: none !important; }
+    .equation-edit-btn { display: none !important; }
 
     /* Remove top margin from first element */
     body > *:first-child { margin-top: 0 !important; }

@@ -9,12 +9,20 @@ import { getActiveDriveToken } from './get-drive-token';
 import * as anonymousStorage from './storage-anonymous';
 import * as supabaseStorage from './storage-supabase';
 
+export interface DocumentAttachment {
+  fileId: string;      // OpenAI file_id (e.g., "file-abc123")
+  filename: string;
+  sizeBytes: number;
+  uploadedAt: number;  // timestamp
+}
+
 export interface DocumentData {
   id?: string;
   title: string;
   editorState: string; // Lexical editor state as JSON string (required)
   formatKey?: string; // Active document format preset (e.g. 'ieee', 'apa7')
   lastModified: number;
+  aiAttachments?: DocumentAttachment[];
   _drivePermissionsFallback?: boolean; // true when saved to Supabase due to missing Drive scopes
 }
 
@@ -47,13 +55,14 @@ export async function saveDocument(data: DocumentData): Promise<DocumentData> {
   try {
     // Use Google Drive client
     const driveClient = new GoogleDriveClient(accessToken);
-    const file = await driveClient.saveDocument(data.id || null, data.title, data.editorState, data.formatKey);
+    const file = await driveClient.saveDocument(data.id || null, data.title, data.editorState, data.formatKey, data.aiAttachments);
 
     return {
       id: file.id,
       title: file.name.replace('.vrite.json', ''), // Remove .vrite.json extension for display
       editorState: data.editorState,
       lastModified: new Date(file.modifiedTime).getTime(),
+      aiAttachments: data.aiAttachments,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -98,13 +107,15 @@ export async function loadDocument(): Promise<DocumentData | null> {
 
     const mostRecent = files[0];
     console.log('[Storage] Loading document:', mostRecent.id);
-    const { editorState, metadata } = await driveClient.getDocument(mostRecent.id);
+    const { editorState, formatKey, metadata, aiAttachments } = await driveClient.getDocument(mostRecent.id);
 
     return {
       id: metadata.id,
       title: metadata.name.replace('.vrite.json', ''), // Remove .vrite.json extension for display
       editorState,
+      formatKey,
       lastModified: new Date(metadata.modifiedTime).getTime(),
+      aiAttachments,
     };
   } catch (error) {
     console.error('[Storage] Load from Google Drive failed:', error);
@@ -240,7 +251,7 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
 
   try {
     const driveClient = new GoogleDriveClient(accessToken);
-    const { editorState, formatKey, metadata } = await driveClient.getDocument(documentId);
+    const { editorState, formatKey, metadata, aiAttachments } = await driveClient.getDocument(documentId);
 
     return {
       id: metadata.id,
@@ -248,6 +259,7 @@ export async function loadDocumentById(documentId: string): Promise<DocumentData
       editorState,
       formatKey,
       lastModified: new Date(metadata.modifiedTime).getTime(),
+      aiAttachments,
     };
   } catch (error) {
     console.error('[Storage] Load from Google Drive failed:', error);

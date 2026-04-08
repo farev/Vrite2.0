@@ -5,12 +5,20 @@
 
 import { createClient } from './supabase/client';
 
+export interface DocumentAttachment {
+  fileId: string;
+  filename: string;
+  sizeBytes: number;
+  uploadedAt: number;
+}
+
 export interface DocumentData {
   id?: string;
   title: string;
   editorState: string;
   formatKey?: string;
   lastModified: number;
+  aiAttachments?: DocumentAttachment[];
 }
 
 /**
@@ -43,12 +51,16 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
 
     if (isUUID) {
       // Update existing Supabase document
+      const storageMetadata: Record<string, unknown> = {};
+      if (data.formatKey) storageMetadata.formatKey = data.formatKey;
+      if (data.aiAttachments) storageMetadata.ai_attachments = data.aiAttachments;
+
       const { data: updatedDoc, error } = await supabase
         .from('documents')
         .update({
           title: data.title,
           editor_state: JSON.parse(data.editorState),
-          storage_metadata: data.formatKey ? { formatKey: data.formatKey } : null,
+          storage_metadata: Object.keys(storageMetadata).length > 0 ? storageMetadata : null,
           last_modified: new Date().toISOString(),
         })
         .eq('id', data.id)
@@ -74,6 +86,10 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
       // Create new document (no ID, temp ID, or any non-UUID ID)
       console.log('[SupabaseStorage] Creating new document (replacing temp ID if present)');
 
+      const insertStorageMetadata: Record<string, unknown> = {};
+      if (data.formatKey) insertStorageMetadata.formatKey = data.formatKey;
+      if (data.aiAttachments) insertStorageMetadata.ai_attachments = data.aiAttachments;
+
       const { data: newDoc, error } = await supabase
         .from('documents')
         .insert({
@@ -81,7 +97,7 @@ export async function saveDocumentToSupabase(data: DocumentData): Promise<Docume
           title: data.title,
           editor_state: JSON.parse(data.editorState),
           storage_provider: 'supabase',
-          storage_metadata: data.formatKey ? { formatKey: data.formatKey } : null,
+          storage_metadata: Object.keys(insertStorageMetadata).length > 0 ? insertStorageMetadata : null,
           last_modified: new Date().toISOString(),
         })
         .select()
@@ -147,6 +163,7 @@ export async function loadDocumentFromSupabase(documentId: string): Promise<Docu
       editorState: JSON.stringify(doc.editor_state),
       formatKey: doc.storage_metadata?.formatKey || undefined,
       lastModified: new Date(doc.last_modified).getTime(),
+      aiAttachments: doc.storage_metadata?.ai_attachments || undefined,
     };
   } catch (error) {
     console.error('[SupabaseStorage] Load error:', error);
