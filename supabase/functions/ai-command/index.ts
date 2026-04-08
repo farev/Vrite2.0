@@ -508,6 +508,7 @@ interface SimplifiedDocument {
 interface CommandRequest {
   document: SimplifiedDocument;
   instruction: string;
+  initial_request_profile?: 'landing_specialized';
   conversation_history?: Array<{ role: string; content: string }>;
   context_snippets?: string[];
   context_images?: Array<{
@@ -518,6 +519,16 @@ interface CommandRequest {
   }>;
   stream?: boolean;
   previous_response_id?: string;
+}
+
+const DEFAULT_EDIT_MODEL = 'gpt-5-mini';
+const DEFAULT_LANDING_SPECIALIZED_MODEL = 'gpt-5-nano';
+
+function getRequestEditModel(initialRequestProfile?: CommandRequest['initial_request_profile']): string {
+  if (initialRequestProfile === 'landing_specialized') {
+    return Deno.env.get('OPENAI_LANDING_SPECIALIZED_MODEL') || DEFAULT_LANDING_SPECIALIZED_MODEL;
+  }
+  return DEFAULT_EDIT_MODEL;
 }
 
 interface CommandResponse {
@@ -762,6 +773,7 @@ async function handleStreamingRequest(
   messages: ChatMessage[],
   instruction: string,
   openaiConfig: any,
+  editModel: string,
   previous_response_id?: string,
 ): Promise<Response> {
   console.log('[ai-command] Handling streaming request (Responses API with web search)');
@@ -785,7 +797,7 @@ async function handleStreamingRequest(
       try {
         const tOpenAI = Date.now();
         openaiStream = await createResponseStream(openaiConfig, {
-          model: 'gpt-5-mini',
+          model: editModel,
           input: fullInput,
           tools: [WEB_SEARCH_TOOL, EDIT_DOCUMENT_TOOL_RESPONSES],
           max_output_tokens: 128000,
@@ -799,7 +811,7 @@ async function handleStreamingRequest(
           // Chaining failed (expired/invalid ID) — retry with full context
           console.warn('[ai-command] Response chaining failed, retrying with full context');
           openaiStream = await createResponseStream(openaiConfig, {
-            model: 'gpt-5-mini',
+            model: editModel,
             input: fullInput,
             tools: [WEB_SEARCH_TOOL, EDIT_DOCUMENT_TOOL_RESPONSES],
             max_output_tokens: 128000,
@@ -839,13 +851,14 @@ async function handleStreamingRequest(
 
 async function handleNonStreamingRequest(
   messages: ChatMessage[],
-  openaiConfig: any
+  openaiConfig: any,
+  editModel: string
 ): Promise<Response> {
   console.log('[ai-command] Handling non-streaming request');
 
   // Make OpenAI API call
   const response = await createChatCompletion(openaiConfig, {
-    model: 'gpt-5-mini',
+    model: editModel,
     messages,
     tools: [EDIT_DOCUMENT_TOOL],
     tool_choice: 'auto',
@@ -989,13 +1002,25 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { document, instruction, conversation_history, context_snippets, context_images, stream = false, previous_response_id } = requestData;
+    const {
+      document,
+      instruction,
+      initial_request_profile,
+      conversation_history,
+      context_snippets,
+      context_images,
+      stream = false,
+      previous_response_id
+    } = requestData;
+    const editModel = getRequestEditModel(initial_request_profile);
 
     console.log('[ai-command] Request data received:');
     console.log('  - Document blocks:', document?.blocks?.length || 0);
     console.log('  - Instruction:', instruction?.substring(0, 100) || 'MISSING');
     console.log('  - Conversation history length:', conversation_history?.length || 0);
     console.log('  - Context snippets:', context_snippets?.length || 0);
+    console.log('  - Initial request profile:', initial_request_profile || 'none');
+    console.log('  - Selected edit model:', editModel);
     console.log('  - Stream mode:', stream);
     console.log('  - Previous response ID:', previous_response_id || 'none (first turn)');
 
@@ -1105,10 +1130,10 @@ Use the edit_document tool to make changes, then provide reasoning and summary.`
     // Branch based on streaming mode
     if (stream) {
       console.log('[ai-command] Using streaming mode');
-      return await handleStreamingRequest(messages, instruction, openaiConfig, previous_response_id);
+      return await handleStreamingRequest(messages, instruction, openaiConfig, editModel, previous_response_id);
     } else {
       console.log('[ai-command] Using non-streaming mode');
-      const response = await handleNonStreamingRequest(messages, openaiConfig);
+      const response = await handleNonStreamingRequest(messages, openaiConfig, editModel);
       console.log('[ai-command] ✅ Request completed successfully');
       console.log('=== AI Command Function Completed ===');
       return response;

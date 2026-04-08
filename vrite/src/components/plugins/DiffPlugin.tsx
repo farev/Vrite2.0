@@ -72,7 +72,6 @@ export default function DiffPlugin({
   // Handle accepting a diff node
   const handleAccept = useCallback(
     (nodeKey: NodeKey) => {
-      let didAccept = false;
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
@@ -88,7 +87,6 @@ export default function DiffPlugin({
             if (parent && parent.getTextContent().trim() === '') {
               parent.remove();
             }
-            didAccept = true;
           } else {
             // For additions/replacements, check if it's an image
             if (nodeData.imageData) {
@@ -110,7 +108,6 @@ export default function DiffPlugin({
               if (parent) {
                 parent.replace(imageNode);
               }
-              didAccept = true;
             } else if (nodeData.equationData) {
               // Create an inline EquationNode (all equations are inline now)
               const equationNode = $createEquationNode(
@@ -120,7 +117,6 @@ export default function DiffPlugin({
 
               // Replace the DiffNode with the inline EquationNode
               node.replace(equationNode);
-              didAccept = true;
             } else {
               // Regular text replacement
               const textNode = $createTextNode(text);
@@ -130,16 +126,17 @@ export default function DiffPlugin({
               // Replace the DiffNode with the new TextNode
               // The parent element already has the new alignment set (from createBlockNodeWithDiff)
               node.replace(textNode);
-              didAccept = true;
             }
           }
         }
         checkAllResolved();
       });
-      if (didAccept) {
-        onAnyAccepted?.();
-        onAnyResolved?.();
-      }
+      // Callbacks are called unconditionally — handleAccept is only invoked from
+      // a DiffNode's click handler, so the node is guaranteed to exist.
+      // (The previous guard used a flag set inside the async editor.update() callback,
+      // which always read as false before the deferred mutation ran.)
+      onAnyAccepted?.();
+      onAnyResolved?.();
     },
     [editor, checkAllResolved, onAnyAccepted, onAnyResolved]
   );
@@ -147,7 +144,6 @@ export default function DiffPlugin({
   // Handle rejecting a diff node
   const handleReject = useCallback(
     (nodeKey: NodeKey) => {
-      let didResolve = false;
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
@@ -167,7 +163,6 @@ export default function DiffPlugin({
               // Replacement - restore original text
               const textNode = $createTextNode(originalText);
               node.replace(textNode);
-              didResolve = true;
             } else {
               // New content with no original - remove entirely
               node.remove();
@@ -175,25 +170,24 @@ export default function DiffPlugin({
               if (parent && parent.getTextContent().trim() === '') {
                 parent.remove();
               }
-              didResolve = true;
             }
           } else {
             // Deletion - restore the deleted content
             if (originalText) {
               const textNode = $createTextNode(originalText);
               node.replace(textNode);
-              didResolve = true;
             } else {
               node.remove();
-              didResolve = true;
             }
           }
         }
         checkAllResolved();
       });
-      if (didResolve) {
-        onAnyResolved?.();
-      }
+      // Callback called unconditionally — handleReject is only invoked from a
+      // DiffNode's click handler, so the node is guaranteed to exist.
+      // (The previous guard used a flag set inside the async editor.update() callback,
+      // which always read as false before the deferred mutation ran.)
+      onAnyResolved?.();
     },
     [editor, checkAllResolved, onAnyResolved]
   );

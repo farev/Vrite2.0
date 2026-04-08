@@ -20,6 +20,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePostHog } from 'posthog-js/react';
 import { compressImageToBase64 } from './nodes/ImageNode';
+import WelcomeCard from './onboarding/WelcomeCard';
 
 interface Message {
   id: string;
@@ -110,6 +111,7 @@ interface AIAssistantSidebarProps {
   onToggle: () => void;
   getSimplifiedDocument: () => SimplifiedDocument;
   initialPrompt?: string | null;
+  initialPromptMode?: 'idea' | 'improve_existing' | null;
   onApplyLexicalChanges?: (changes: LexicalChange[], contextImages?: Array<{ filename: string; data: string; width: number; height: number }>) => void;
   // Legacy props for backward compatibility with Delta-based changes
   documentContent?: string;
@@ -117,6 +119,10 @@ interface AIAssistantSidebarProps {
   isDiffModeActive?: boolean;
   onAcceptAllChanges?: () => void;
   onRejectAllChanges?: () => void;
+  shouldGateBulkDiffActions?: boolean;
+  canUseBulkDiffActions?: boolean;
+  requiredGuidedDiffReviews?: number;
+  guidedDiffReviewCount?: number;
   contextSnippets?: ContextSnippet[];
   selectedContextImages?: Array<{ filename: string; data: string; width: number; height: number }>;
   onRemoveContextSnippet?: (id: string) => void;
@@ -124,6 +130,9 @@ interface AIAssistantSidebarProps {
   onClearContextSnippets?: () => void;
   onClearEditorSelection?: () => void;
   onChatFocusChange?: (isFocused: boolean) => void;
+  showWelcomeCard?: boolean;
+  onStartWelcomeOnboarding?: () => void;
+  onSkipWelcomeOnboarding?: () => void;
 }
 
 // Scale image dimensions to reasonable display size while preserving aspect ratio
@@ -148,25 +157,60 @@ function scaleToDisplaySize(width: number, height: number): { width: number; hei
 }
 
 const INPUT_CONTEXT_COLLAPSE_DURATION_MS = 240;
+type InitialRequestProfile = 'landing_specialized';
+
+function buildSpecializedInitialInstruction(
+  mode: 'idea' | 'improve_existing',
+  userPrompt: string
+): string {
+  const sharedFeatureGuidance =
+    'Also, if it naturally improves clarity, include at least one equation or table to showcase capabilities. Do not force equations or tables when they are not appropriate.';
+
+  if (mode === 'idea') {
+    return [
+      'Create a polished, well-structured document based on the idea below.',
+      'Use clear headings and concise paragraphs, and make the result practical and readable.',
+      sharedFeatureGuidance,
+      '',
+      `User idea: ${userPrompt}`,
+    ].join('\n');
+  }
+
+  return [
+    'Improve this document based on the request below while preserving intent and structure.',
+    'Focus on clarity, flow, and overall quality, and keep edits practical.',
+    sharedFeatureGuidance,
+    '',
+    `User request: ${userPrompt}`,
+  ].join('\n');
+}
 
 export default function AIAssistantSidebar({
   isOpen,
   onToggle,
   getSimplifiedDocument,
   initialPrompt = null,
+  initialPromptMode = null,
   onApplyLexicalChanges,
   documentContent,
   onApplyChanges,
   isDiffModeActive = false,
   onAcceptAllChanges,
   onRejectAllChanges,
+  shouldGateBulkDiffActions = false,
+  canUseBulkDiffActions = true,
+  requiredGuidedDiffReviews = 3,
+  guidedDiffReviewCount = 0,
   contextSnippets = [],
   selectedContextImages = [],
   onRemoveContextSnippet,
   onRemoveSelectedImage,
   onClearContextSnippets,
   onClearEditorSelection,
-  onChatFocusChange
+  onChatFocusChange,
+  showWelcomeCard = false,
+  onStartWelcomeOnboarding,
+  onSkipWelcomeOnboarding,
 }: AIAssistantSidebarProps) {
   const { isAuthenticated, isAnonymous, sessionToken, showSignupModal } = useAuth();
   const posthog = usePostHog();
@@ -195,10 +239,8 @@ export default function AIAssistantSidebar({
     contextImages,
   });
 
-  const hasTriggeredOnboardingRef = useRef(false);
   const hasTriggeredInitialPromptRef = useRef(false);
   const previousInitialPromptRef = useRef<string | null>(null);
-  const onboardingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const inputContextCollapseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -396,11 +438,7 @@ export default function AIAssistantSidebar({
                     : msg
                 ));
 
-                // Increment usage count for anonymous users
-                if (isAnonymous && !isOnboarding) {
-                  const count = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
-                  sessionStorage.setItem('vrite_ai_usage_count', String(count + 1));
-                }
+                // Usage count tracking removed - unlimited AI usage for all users
                 break;
 
               case 'error':
@@ -466,7 +504,11 @@ export default function AIAssistantSidebar({
   }, []);
 
   // Helper function to trigger AI requests (both onboarding and user-initiated)
-  const triggerAIRequest = useCallback(async (instruction: string, isOnboarding = false) => {
+  const triggerAIRequest = useCallback(async (
+    instruction: string,
+    isOnboarding = false,
+    initialRequestProfile?: InitialRequestProfile
+  ) => {
     setIsLoading(true);
 
     // Generate unique message ID with counter to prevent duplicates
@@ -505,28 +547,7 @@ export default function AIAssistantSidebar({
         isOnboarding,
       });
 
-      // Rate limiting for anonymous users (only for user-initiated requests)
-      if (isAnonymous && !isOnboarding) {
-        const usageCount = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
-
-        if (usageCount >= 3) {
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === loadingMessage.id
-                ? {
-                    ...msg,
-                    content: 'You\'ve reached the limit for anonymous AI usage. Sign in for unlimited access!',
-                    isLoading: false,
-                  }
-                : msg
-            )
-          );
-          setIsLoading(false);
-          posthog.capture('ai_rate_limit_hit');
-          showSignupModal('ai-limit-reached');
-          return;
-        }
-      }
+      // Rate limiting removed - unlimited AI usage for all users
 
       // Get document and conversation history
       const simplifiedDocument = getSimplifiedDocument();
@@ -545,6 +566,7 @@ export default function AIAssistantSidebar({
       const requestBody = {
         document: simplifiedDocument,
         instruction,
+        ...(initialRequestProfile && { initial_request_profile: initialRequestProfile }),
         conversation_history: conversationHistory,
         context_snippets: (
           [
@@ -617,11 +639,7 @@ export default function AIAssistantSidebar({
 
         const data = await response.json();
 
-        // Increment anonymous usage count (only for user-initiated requests)
-        if (isAnonymous && !isOnboarding) {
-          const currentCount = parseInt(sessionStorage.getItem('vrite_ai_usage_count') || '0');
-          sessionStorage.setItem('vrite_ai_usage_count', String(currentCount + 1));
-        }
+        // Usage count tracking removed - unlimited AI usage for all users
 
         // Handle response
         if (data.type === 'lexical_changes' && data.changes && data.changes.length > 0) {
@@ -692,62 +710,38 @@ export default function AIAssistantSidebar({
       },
     ]);
 
-    void triggerAIRequest(normalizedPrompt, false);
-  }, [initialPrompt, sessionToken, triggerAIRequest]);
+    const mode = initialPromptMode === 'idea' ? 'idea' : 'improve_existing';
+    const specializedInstruction = buildSpecializedInitialInstruction(mode, normalizedPrompt);
 
-  // Automatic AI onboarding for anonymous users
-  useEffect(() => {
-    // Only set timer once
-    if (hasTriggeredOnboardingRef.current || onboardingTimerRef.current) {
+    void triggerAIRequest(specializedInstruction, false, 'landing_specialized');
+  }, [initialPrompt, initialPromptMode, sessionToken, triggerAIRequest]);
+
+  const handleStartWelcomeOnboarding = useCallback(async () => {
+    if (isLoading) {
       return;
     }
 
-    if (initialPrompt?.trim()) {
-      return;
-    }
+    const onboardingPrompt = [
+      'Create a polished starter draft directly in the document.',
+      'Use a short title, 2 concise section headings, and 3 practical bullet points.',
+      'Keep the writing clear and professional, with one creative flourish.',
+      'If appropriate, include one simple table or equation to showcase advanced formatting.',
+    ].join(' ');
 
-    const hasSeenOnboarding = typeof window !== 'undefined' && localStorage.getItem('vrite_has_seen_onboarding');
+    onStartWelcomeOnboarding?.();
+    messageIdCounterRef.current += 1;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `welcome-start-${Date.now()}-${messageIdCounterRef.current}`,
+        type: 'user',
+        content: 'Generate my first draft.',
+        timestamp: new Date(),
+      },
+    ]);
 
-    if (!hasSeenOnboarding && isAuthenticated === false && sessionToken) {
-      hasTriggeredOnboardingRef.current = true;
-
-      // Trigger onboarding after a short delay to let the editor load
-      onboardingTimerRef.current = setTimeout(async () => {
-        const onboardingPrompt = `Please introduce yourself to the user and explain your capabilities as an AI writing assistant. Format this nicely in the document. Include:
-- Who you are (an AI assistant for writing and editing)
-- Key capabilities (formatting, editing, content generation, document styling)
-- How to use you (highlight text, use keyboard shortcuts, ask questions)
-- What makes you special (real-time collaboration, intelligent suggestions)
-
-Keep it concise, friendly, and well-formatted with headings and bullet points.`;
-
-        // Add welcome message to chat
-        messageIdCounterRef.current += 1;
-        setMessages(prev => [
-          ...prev,
-          {
-            id: `onboarding-welcome-${Date.now()}-${messageIdCounterRef.current}`,
-            type: 'assistant',
-            content: '👋 Welcome! Let me introduce myself...',
-            timestamp: new Date(),
-          },
-        ]);
-
-        // Trigger AI request
-        await triggerAIRequest(onboardingPrompt, true);
-
-        // Mark onboarding as seen
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('vrite_has_seen_onboarding', 'true');
-        }
-
-        // Clear the ref after firing
-        onboardingTimerRef.current = null;
-      }, 500);
-
-      console.log('[AIAssistant] Onboarding timer set, will fire in 0.5 seconds');
-    }
-  }, [initialPrompt, isAuthenticated, sessionToken, triggerAIRequest]);
+    await triggerAIRequest(onboardingPrompt, false, 'landing_specialized');
+  }, [isLoading, onStartWelcomeOnboarding, triggerAIRequest]);
 
   const handleSendMessage = async () => {
     const hasTypedMessage = inputMessage.trim().length > 0;
@@ -948,6 +942,8 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
     inputContextForRender.attachmentNames.length > 0 ||
     inputContextForRender.addedLinks.length > 0 ||
     inputContextForRender.contextImages.length > 0;
+  const bulkDiffActionsLocked = shouldGateBulkDiffActions && !canUseBulkDiffActions;
+  const remainingGuidedDiffReviews = Math.max(0, requiredGuidedDiffReviews - guidedDiffReviewCount);
 
   return (
     <div className="ai-sidebar-shell" data-onboarding-target="assistant-sidebar">
@@ -1090,6 +1086,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
                 <button
                   onClick={() => { posthog.capture('ai_diff_accepted'); onAcceptAllChanges?.(); }}
                   className="diff-mode-btn diff-mode-accept-all"
+                  data-onboarding-target="accept-all"
                   title="Accept all changes"
                 >
                   <Check size={16} />
@@ -1101,7 +1098,7 @@ Keep it concise, friendly, and well-formatted with headings and bullet points.`;
 
           {/* Input */}
           <div className="ai-input-container">
-            <div className="ai-input-shell">
+            <div className="ai-input-shell" data-onboarding-target="assistant-input">
               <div className={`ai-input-context-collapse ${hasAnyInputContext ? 'ai-input-context-collapse-open' : ''}`}>
                 <div className="ai-input-context-collapse-inner">
                   {hasRenderedInputContext && (

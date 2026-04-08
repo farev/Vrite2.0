@@ -50,6 +50,7 @@ import {
 import AIAssistantSidebar, { type ContextSnippet } from './AIAssistantSidebar';
 import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
+import GuidedCoachmark from './onboarding/GuidedCoachmark';
 import DiffPlugin from './plugins/DiffPlugin';
 import ClipboardPlugin from './plugins/ClipboardPlugin';
 import AutocompletePlugin from './plugins/AutocompletePlugin';
@@ -89,6 +90,7 @@ import type { LexicalChange } from '../lib/lexicalChangeApplicator';
 import { useAuth } from '../contexts/AuthContext';
 import { useDocumentSync } from '../hooks/useDocumentSync';
 import { createClient } from '@/lib/supabase/client';
+import { usePostHog } from 'posthog-js/react';
 
 const theme = {
   root: 'document-editor-root',
@@ -146,157 +148,16 @@ const createInitialConfig = (savedEditorState?: string) => ({
   editorState: savedEditorState,
 });
 
-type GuidedOnboardingStep = 'assistant' | 'diff' | 'formatting';
+type OnboardingStage = 'welcome' | 'firstDiff' | 'formattingHint' | 'done';
+const REQUIRED_GUIDED_DIFF_REVIEWS = 2;
+const ONBOARDING_STATE_KEY = 'vrite_onboarding_v2_state';
+const ONBOARDING_STATE_VERSION = 2;
 
 interface SpotlightRect {
   top: number;
   left: number;
   width: number;
   height: number;
-}
-
-function GuidedOnboardingOverlay({
-  step,
-  targetRect,
-  onDismiss,
-}: {
-  step: GuidedOnboardingStep;
-  targetRect: SpotlightRect | null;
-  onDismiss: () => void;
-}) {
-  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
-  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
-  const spotlight = targetRect
-    ? {
-        top: Math.max(8, targetRect.top - 12),
-        left: Math.max(8, targetRect.left - 12),
-        width: Math.max(0, targetRect.width + 24),
-        height: Math.max(0, targetRect.height + 24),
-      }
-    : null;
-
-  const stepCopy: Record<GuidedOnboardingStep, { label: string; title: string; body: string; hint: string }> = {
-    assistant: {
-      label: 'Step 1 of 3',
-      title: 'The assistant is drafting your first document',
-      body: 'Keep your focus here while the AI turns your prompt into editable content inside the document.',
-      hint: 'This step advances automatically when the draft is ready.',
-    },
-    diff: {
-      label: 'Step 2 of 3',
-      title: 'Review the proposed changes',
-      body: 'Use these inline controls to accept or reject each suggested change directly in the document.',
-      hint: 'The tour moves on after you finish reviewing the draft.',
-    },
-    formatting: {
-      label: 'Step 3 of 3',
-      title: 'Polish the document with formatting tools',
-      body: 'These controls let you style text, adjust layout, and fine-tune the document after the AI pass.',
-      hint: 'You are ready to keep editing on your own.',
-    },
-  };
-
-  const content = stepCopy[step];
-  const calloutStyle: CSSProperties =
-    step === 'formatting'
-      ? {
-          position: 'fixed',
-          top: spotlight ? Math.min(viewportHeight - 220, spotlight.top + spotlight.height + 20) : 24,
-          left: 24,
-          width: 'min(360px, calc(100vw - 48px))',
-          zIndex: 151,
-        }
-      : {
-          position: 'fixed',
-          left: 24,
-          bottom: 24,
-          width: 'min(360px, calc(100vw - 48px))',
-          zIndex: 151,
-        };
-
-  return (
-    <>
-      <div className="pointer-events-none fixed inset-0 z-[140]">
-        {spotlight ? (
-          <>
-            <div
-              className="pointer-events-auto absolute bg-black/70"
-              style={{ top: 0, left: 0, width: '100%', height: spotlight.top }}
-            />
-            <div
-              className="pointer-events-auto absolute bg-black/70"
-              style={{
-                top: spotlight.top,
-                left: 0,
-                width: spotlight.left,
-                height: spotlight.height,
-              }}
-            />
-            <div
-              className="pointer-events-auto absolute bg-black/70"
-              style={{
-                top: spotlight.top,
-                left: spotlight.left + spotlight.width,
-                width: Math.max(0, viewportWidth - spotlight.left - spotlight.width),
-                height: spotlight.height,
-              }}
-            />
-            <div
-              className="pointer-events-auto absolute bg-black/70"
-              style={{
-                top: spotlight.top + spotlight.height,
-                left: 0,
-                width: '100%',
-                height: Math.max(0, viewportHeight - spotlight.top - spotlight.height),
-              }}
-            />
-            <div
-              className="pointer-events-none absolute rounded-3xl border-2 border-white/90 shadow-[0_0_0_9999px_rgba(0,0,0,0)]"
-              style={{
-                top: spotlight.top,
-                left: spotlight.left,
-                width: spotlight.width,
-                height: spotlight.height,
-                boxShadow: '0 0 0 1px rgba(255,255,255,0.14), 0 24px 80px rgba(15, 23, 42, 0.45)',
-              }}
-            />
-          </>
-        ) : (
-          <div className="pointer-events-auto absolute inset-0 bg-black/70" />
-        )}
-      </div>
-
-      <div
-        className="pointer-events-auto rounded-3xl border border-white/10 bg-zinc-950/96 p-5 text-white shadow-2xl backdrop-blur"
-        style={calloutStyle}
-      >
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">
-          {content.label}
-        </p>
-        <h3 className="mt-3 text-lg font-semibold">{content.title}</h3>
-        <p className="mt-2 text-sm leading-6 text-zinc-300">{content.body}</p>
-        <p className="mt-3 text-sm text-zinc-400">{content.hint}</p>
-        <div className="mt-5 flex items-center gap-3">
-          {step === 'formatting' ? (
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="rounded-full bg-white px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-zinc-200"
-            >
-              Finish tour
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
-          >
-            {step === 'formatting' ? 'Dismiss' : 'Skip tour'}
-          </button>
-        </div>
-      </div>
-    </>
-  );
 }
 
 function ToolbarPlugin({ onAIToggle }: { onAIToggle?: () => void }) {
@@ -576,6 +437,7 @@ interface DocumentEditorProps {
   onSaveCallbackReady?: (callback: () => void) => void;
   initialDocumentId?: string | null;
   initialAIPrompt?: string | null;
+  initialPromptMode?: 'idea' | 'improve_existing' | null;
   onDocumentIdChange?: (id: string) => void;
   isAuthenticated: boolean;
   onInsertImageReady?: (handler: () => void) => void;
@@ -601,6 +463,7 @@ export default function DocumentEditor({
   onSaveCallbackReady,
   initialDocumentId,
   initialAIPrompt,
+  initialPromptMode = null,
   onDocumentIdChange,
   isAuthenticated,
   onInsertImageReady,
@@ -611,6 +474,7 @@ export default function DocumentEditor({
   onImportReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
+  const posthog = usePostHog();
   const supabase = useMemo(() => createClient(), []);
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
 
@@ -688,9 +552,10 @@ export default function DocumentEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [showDrivePermissionsToast, setShowDrivePermissionsToast] = useState(false);
-  const [guidedOnboardingStep, setGuidedOnboardingStep] = useState<GuidedOnboardingStep | null>(null);
+  const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>('done');
   const [guidedOnboardingRect, setGuidedOnboardingRect] = useState<SpotlightRect | null>(null);
   const [guidedDiffReviewCount, setGuidedDiffReviewCount] = useState(0);
+  const [hasUsedGuidedAcceptAll, setHasUsedGuidedAcceptAll] = useState(false);
   const isDocumentEmpty = useMemo(() => {
     if (!editorState) return true;
     let empty = true;
@@ -707,6 +572,7 @@ export default function DocumentEditor({
   const assistantOnboardingRef = useRef<HTMLDivElement | null>(null);
   const autoTitleInFlightRef = useRef(false);
   const autoTitleDocIdentityRef = useRef<string | null>(null);
+  const onboardingTelemetryRef = useRef<Record<string, boolean>>({});
   const autoTitleLocalIdRef = useRef(
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
@@ -1567,17 +1433,23 @@ export default function DocumentEditor({
   }, [triggerAutoTitleIfEligible]);
 
   const handleDiffResolvedForOnboarding = useCallback(() => {
-    if (guidedOnboardingStep !== 'diff') {
-      return;
-    }
-
+    // NOTE: Do NOT close over `onboardingStage` here. The DiffNode React
+    // components capture `handleAccept`/`handleReject` at render time (when
+    // Lexical first inserts the diff nodes). By the time the user clicks
+    // Accept/Reject, `onboardingStage` has already transitioned from 'welcome'
+    // to 'firstDiff' — but the stale closure would still see 'welcome' and
+    // bail out, so the counter would never increment. Keeping this callback
+    // dep-free (stable) ensures the DiffNodes always hold the correct version.
     setGuidedDiffReviewCount((current) => {
-      if (current >= 2) {
+      if (current >= REQUIRED_GUIDED_DIFF_REVIEWS) {
         return current;
+      }
+      if (current === 0) {
+        posthog.capture('onboarding_first_diff_reviewed');
       }
       return current + 1;
     });
-  }, [guidedOnboardingStep]);
+  }, [posthog]);
 
   // Re-enable diff mode if DiffNodes reappear (e.g., after undo)
   const handleDiffNodesDetected = useCallback(() => {
@@ -1918,60 +1790,167 @@ export default function DocumentEditor({
     };
   }, []);
 
-  const dismissGuidedOnboarding = useCallback(() => {
-    setGuidedOnboardingStep(null);
+  const markOnboardingCompleted = useCallback((reason: 'completed' | 'skipped') => {
+    setOnboardingStage('done');
     setGuidedOnboardingRect(null);
     setGuidedDiffReviewCount(0);
-  }, []);
+    setHasUsedGuidedAcceptAll(false);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(
+        ONBOARDING_STATE_KEY,
+        JSON.stringify({
+          version: ONBOARDING_STATE_VERSION,
+          status: reason,
+          updatedAt: Date.now(),
+        })
+      );
+    }
+
+    posthog.capture(reason === 'completed' ? 'onboarding_completed' : 'onboarding_skipped', {
+      source: 'editor',
+    });
+  }, [posthog]);
+
+  const handleSkipOnboarding = useCallback(() => {
+    markOnboardingCompleted('skipped');
+  }, [markOnboardingCompleted]);
+
+  const handleFinishOnboarding = useCallback(() => {
+    markOnboardingCompleted('completed');
+  }, [markOnboardingCompleted]);
+
+  const handleStartWelcomeOnboarding = useCallback(() => {
+    if (onboardingStage !== 'welcome') {
+      return;
+    }
+    setGuidedDiffReviewCount(0);
+    setHasUsedGuidedAcceptAll(false);
+    setOnboardingStage('firstDiff');
+    posthog.capture('onboarding_welcome_cta_clicked');
+  }, [onboardingStage, posthog]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    if (!initialAIPrompt?.trim()) {
+    const shouldForceGuidedOnboarding = Boolean(initialAIPrompt?.trim());
+    if (shouldForceGuidedOnboarding) {
+      // Landing-driven AI runs should always show the guided spotlight flow.
+      setOnboardingStage('welcome');
+      setGuidedDiffReviewCount(0);
+      setHasUsedGuidedAcceptAll(false);
       return;
     }
 
+    try {
+      const raw = localStorage.getItem(ONBOARDING_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { version?: number; status?: string };
+        if (
+          parsed.version === ONBOARDING_STATE_VERSION &&
+          (parsed.status === 'completed' || parsed.status === 'skipped')
+        ) {
+          setOnboardingStage('done');
+          return;
+        }
+      }
+    } catch {
+      // If parsing fails, treat as first run and continue.
+    }
+
+    setOnboardingStage(initialAIPrompt?.trim() ? 'firstDiff' : 'welcome');
     setGuidedDiffReviewCount(0);
-    setGuidedOnboardingStep('assistant');
+    setHasUsedGuidedAcceptAll(false);
   }, [initialAIPrompt]);
 
   useEffect(() => {
-    if (guidedOnboardingStep === 'assistant' && isDiffModeActive) {
-      setGuidedDiffReviewCount(0);
-      setGuidedOnboardingStep('diff');
+    // For landing-driven runs, keep step 1 visible until AI has produced a diff,
+    // then advance into the guided diff-review step.
+    if (
+      onboardingStage === 'welcome' &&
+      Boolean(initialAIPrompt?.trim()) &&
+      isDiffModeActive
+    ) {
+      setOnboardingStage('firstDiff');
     }
-  }, [guidedOnboardingStep, isDiffModeActive]);
+  }, [initialAIPrompt, isDiffModeActive, onboardingStage]);
 
   useEffect(() => {
-    if (guidedOnboardingStep === 'diff' && !isDiffModeActive) {
-      setGuidedDiffReviewCount(0);
-      setGuidedOnboardingStep('formatting');
+    if (
+      onboardingStage === 'firstDiff' &&
+      guidedDiffReviewCount >= REQUIRED_GUIDED_DIFF_REVIEWS &&
+      hasUsedGuidedAcceptAll &&
+      !isDiffModeActive
+    ) {
+      setOnboardingStage('formattingHint');
+      return;
     }
-  }, [guidedOnboardingStep, isDiffModeActive]);
+  }, [guidedDiffReviewCount, hasUsedGuidedAcceptAll, isDiffModeActive, onboardingStage]);
+
+  useEffect(() => {
+    if (onboardingStage !== 'formattingHint') {
+      return;
+    }
+    const target = toolbarOnboardingRef.current;
+    if (!target) {
+      return;
+    }
+
+    const handleFirstFormattingInteraction = () => {
+      posthog.capture('onboarding_formatting_interaction');
+      markOnboardingCompleted('completed');
+    };
+
+    target.addEventListener('click', handleFirstFormattingInteraction, { once: true });
+    return () => {
+      target.removeEventListener('click', handleFirstFormattingInteraction);
+    };
+  }, [markOnboardingCompleted, onboardingStage, posthog]);
+
+  useEffect(() => {
+    if (onboardingStage === 'done') {
+      return;
+    }
+    if (onboardingTelemetryRef.current[onboardingStage]) {
+      return;
+    }
+    onboardingTelemetryRef.current[onboardingStage] = true;
+    posthog.capture('onboarding_stage_shown', { stage: onboardingStage });
+  }, [onboardingStage, posthog]);
 
   const getGuidedOnboardingTarget = useCallback(() => {
-    if (guidedOnboardingStep === 'assistant') {
+    if (onboardingStage === 'welcome') {
       return assistantOnboardingRef.current;
     }
 
-    if (guidedOnboardingStep === 'diff') {
-      if (guidedDiffReviewCount >= 2) {
-        return document.querySelector('[data-onboarding-target="diff-actions"]') as HTMLElement | null;
+    if (onboardingStage === 'firstDiff') {
+      if (guidedDiffReviewCount >= REQUIRED_GUIDED_DIFF_REVIEWS) {
+        return (
+          (document.querySelector('[data-onboarding-target="accept-all"]') as HTMLElement | null) ??
+          (document.querySelector('[data-onboarding-target="diff-actions"]') as HTMLElement | null)
+        );
       }
-      return document.querySelector('[data-onboarding-target="inline-diff-actions"]') as HTMLElement | null;
+      return (
+        (document.querySelector('[data-onboarding-target="inline-diff-actions"]') as HTMLElement | null) ??
+        assistantOnboardingRef.current
+      );
     }
 
-    if (guidedOnboardingStep === 'formatting') {
+    if (onboardingStage === 'formattingHint') {
       return toolbarOnboardingRef.current;
     }
 
     return null;
-  }, [guidedOnboardingStep, guidedDiffReviewCount]);
+  }, [guidedDiffReviewCount, onboardingStage]);
 
   useEffect(() => {
-    if (!guidedOnboardingStep) {
+    if (
+      onboardingStage !== 'welcome' &&
+      onboardingStage !== 'firstDiff' &&
+      onboardingStage !== 'formattingHint'
+    ) {
       return;
     }
 
@@ -1997,7 +1976,7 @@ export default function DocumentEditor({
     window.addEventListener('scroll', updateSpotlight, true);
 
     let mutationObserver: MutationObserver | null = null;
-    if (guidedOnboardingStep === 'diff') {
+    if (onboardingStage === 'firstDiff') {
       const editorRoot =
         (document.querySelector('.document-content-editable') as HTMLElement | null) ?? document.body;
       mutationObserver = new MutationObserver(() => {
@@ -2014,10 +1993,14 @@ export default function DocumentEditor({
       window.removeEventListener('scroll', updateSpotlight, true);
       mutationObserver?.disconnect();
     };
-  }, [getGuidedOnboardingTarget, guidedOnboardingStep, isAISidebarOpen, isDiffModeActive]);
+  }, [getGuidedOnboardingTarget, onboardingStage, isAISidebarOpen]);
 
   useEffect(() => {
-    if (!guidedOnboardingStep) {
+    if (
+      onboardingStage !== 'welcome' &&
+      onboardingStage !== 'firstDiff' &&
+      onboardingStage !== 'formattingHint'
+    ) {
       return;
     }
 
@@ -2027,11 +2010,18 @@ export default function DocumentEditor({
     }
 
     target.scrollIntoView({
-      block: guidedOnboardingStep === 'formatting' ? 'nearest' : 'center',
+      block: onboardingStage === 'formattingHint' ? 'nearest' : 'center',
       inline: 'nearest',
       behavior: 'smooth',
     });
-  }, [getGuidedOnboardingTarget, guidedOnboardingStep]);
+  }, [getGuidedOnboardingTarget, onboardingStage]);
+
+  const handleGuidedAcceptAllChanges = useCallback(() => {
+    if (onboardingStage === 'firstDiff') {
+      setHasUsedGuidedAcceptAll(true);
+    }
+    handleAcceptAllChanges();
+  }, [handleAcceptAllChanges, onboardingStage]);
 
   const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
@@ -2054,7 +2044,7 @@ export default function DocumentEditor({
         <div className="document-main-column">
           <LexicalComposer key={lexicalComposerKey} initialConfig={initialConfig}>
             <div className="document-main-stack">
-              <div ref={toolbarOnboardingRef}>
+              <div ref={toolbarOnboardingRef} data-onboarding-target="formatting-toolbar">
                 <FormattingToolbar
                   onAIToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
                   documentMargins={documentMargins}
@@ -2193,6 +2183,7 @@ export default function DocumentEditor({
             onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
             getSimplifiedDocument={getSimplifiedDocument}
             initialPrompt={initialAIPrompt}
+            initialPromptMode={initialPromptMode}
             onApplyLexicalChanges={handleApplyLexicalChanges}
             onApplyChanges={handleApplyChanges}
             documentContent=""
@@ -2203,9 +2194,18 @@ export default function DocumentEditor({
             onClearContextSnippets={handleClearContextSnippets}
             onClearEditorSelection={handleClearEditorSelection}
             onChatFocusChange={handleChatFocusChange}
+            showWelcomeCard={onboardingStage === 'welcome'}
+            onStartWelcomeOnboarding={handleStartWelcomeOnboarding}
+            onSkipWelcomeOnboarding={handleSkipOnboarding}
             isDiffModeActive={isDiffModeActive}
-            onAcceptAllChanges={handleAcceptAllChanges}
+            onAcceptAllChanges={handleGuidedAcceptAllChanges}
             onRejectAllChanges={handleRejectAllChanges}
+            shouldGateBulkDiffActions={onboardingStage === 'firstDiff'}
+            canUseBulkDiffActions={
+              onboardingStage !== 'firstDiff' || guidedDiffReviewCount >= REQUIRED_GUIDED_DIFF_REVIEWS
+            }
+            requiredGuidedDiffReviews={REQUIRED_GUIDED_DIFF_REVIEWS}
+            guidedDiffReviewCount={guidedDiffReviewCount}
           />
         </div>
       </div>
@@ -2236,11 +2236,14 @@ export default function DocumentEditor({
         />
       )}
 
-      {guidedOnboardingStep && (
-        <GuidedOnboardingOverlay
-          step={guidedOnboardingStep}
+      {(onboardingStage === 'welcome' || onboardingStage === 'firstDiff' || onboardingStage === 'formattingHint') && (
+        <GuidedCoachmark
+          stage={onboardingStage}
           targetRect={guidedOnboardingRect}
-          onDismiss={dismissGuidedOnboarding}
+          guidedDiffReviewCount={guidedDiffReviewCount}
+          requiredGuidedDiffReviews={REQUIRED_GUIDED_DIFF_REVIEWS}
+          onSkip={handleSkipOnboarding}
+          onFinish={handleFinishOnboarding}
         />
       )}
     </div>
