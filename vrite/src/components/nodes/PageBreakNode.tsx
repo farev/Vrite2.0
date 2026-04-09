@@ -19,6 +19,7 @@ export type SerializedPageBreakNode = Spread<
     footerText?: string;
     headerText?: string;
     showPageNumbers?: boolean;
+    totalPages?: number;
   },
   SerializedLexicalNode
 >;
@@ -32,6 +33,7 @@ function PageBreakComponent({
   pageGap,
   currentPage,
   nextPage,
+  totalPages,
   footerEditorState,
   headerEditorState,
   showPageNumbers,
@@ -47,6 +49,7 @@ function PageBreakComponent({
   pageGap: number;
   currentPage: number;
   nextPage: number;
+  totalPages: number;
   footerEditorState: string;
   headerEditorState: string;
   showPageNumbers: boolean;
@@ -88,6 +91,11 @@ function PageBreakComponent({
           onEditingChange={(editing) => { if (!editing) setForceEditFooter(false); }}
           forceEdit={forceEditFooter}
         />
+        {showPageNumbers && (
+          <div className="page-break-page-number" aria-label={`Page ${currentPage} of ${totalPages}`}>
+            {currentPage} of {totalPages}
+          </div>
+        )}
       </div>
 
       {/* Gray gap - visual page separation (24px) */}
@@ -123,6 +131,7 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
   __footerText: string;
   __headerText: string;
   __showPageNumbers: boolean;
+  __totalPages: number;
 
   static getType(): string {
     return 'page-break';
@@ -135,6 +144,7 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
       node.__footerText,
       node.__headerText,
       node.__showPageNumbers,
+      node.__totalPages,
       node.__key
     );
   }
@@ -145,6 +155,7 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
     footerText: string = '',
     headerText: string = '',
     showPageNumbers: boolean = true,
+    totalPages: number = 1,
     key?: NodeKey
   ) {
     super(key);
@@ -153,6 +164,7 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
     this.__footerText = footerText;
     this.__headerText = headerText;
     this.__showPageNumbers = showPageNumbers;
+    this.__totalPages = totalPages;
   }
 
   createDOM(_config: EditorConfig): HTMLElement {
@@ -169,19 +181,21 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
       serializedNode.pageNumber || 1,
       serializedNode.footerText || '',
       serializedNode.headerText || '',
-      serializedNode.showPageNumbers !== false
+      serializedNode.showPageNumbers !== false,
+      1 // totalPages: always reset to 1; PaginationPlugin corrects it on first render
     );
   }
 
   exportJSON(): SerializedPageBreakNode {
     return {
       type: 'page-break',
-      version: 4, // Bumped version for rich text headers/footers
+      version: 4,
       height: this.__height,
       pageNumber: this.__pageNumber,
       footerText: this.__footerText,
       headerText: this.__headerText,
       showPageNumbers: this.__showPageNumbers,
+      totalPages: this.__totalPages,
     };
   }
 
@@ -203,6 +217,15 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
 
   getShowPageNumbers(): boolean {
     return this.__showPageNumbers;
+  }
+
+  getTotalPages(): number {
+    return this.__totalPages;
+  }
+
+  setTotalPages(total: number): void {
+    const writable = this.getWritable();
+    writable.__totalPages = total;
   }
 
   setFooterText(text: string): void {
@@ -288,6 +311,7 @@ export class PageBreakNode extends DecoratorNode<JSX.Element> {
         pageGap={pageGap}
         currentPage={currentPage}
         nextPage={nextPage}
+        totalPages={this.__totalPages}
         footerEditorState={this.__footerText}
         headerEditorState={this.__headerText}
         showPageNumbers={this.__showPageNumbers}
@@ -305,9 +329,10 @@ export function $createPageBreakNode(
   pageNumber: number = 1,
   footerText: string = '',
   headerText: string = '',
-  showPageNumbers: boolean = true
+  showPageNumbers: boolean = true,
+  totalPages: number = 1
 ): PageBreakNode {
-  return new PageBreakNode(height, pageNumber, footerText, headerText, showPageNumbers);
+  return new PageBreakNode(height, pageNumber, footerText, headerText, showPageNumbers, totalPages);
 }
 
 export function $isPageBreakNode(node: LexicalNode | null | undefined): node is PageBreakNode {

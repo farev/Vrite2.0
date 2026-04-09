@@ -508,7 +508,7 @@ export default function DocumentEditor({
     headerEnabled: false,
     headerEditorState: null as string | null,
     footerEnabled: false,
-    footerShowPageNumber: false,
+    footerShowPageNumber: true,
     footerEditorState: null as string | null,
   });
   const [activeHFEditor, setActiveHFEditor] = useState<LexicalEditor | null>(null);
@@ -1861,6 +1861,7 @@ export default function DocumentEditor({
                       onEditorFocus={(editor) => setActiveHFEditor(editor)}
                       onEditorBlur={() => setActiveHFEditor(null)}
                       onEditingChange={setIsEditingHF}
+                      showPageNumbers={headerFooterSettings.footerShowPageNumber}
                     />
                   </div>
 
@@ -1890,6 +1891,7 @@ export default function DocumentEditor({
                     onPageCountChange={setPageCount}
                     disabled={false}
                     headerContent={headerFooterSettings.headerEditorState || ''}
+                    showPageNumbers={headerFooterSettings.footerShowPageNumber}
                   />
 
                   {/* DiffPlugin - Inserts diff nodes directly into the editor */}

@@ -14,6 +14,7 @@ interface SimpleFooterEditorProps {
   onEditorFocus?: (editor: LexicalEditor) => void;
   onEditorBlur?: () => void;
   onEditingChange?: (editing: boolean) => void;
+  showPageNumbers?: boolean;
 }
 
 export function SimpleFooterEditor({
@@ -26,6 +27,7 @@ export function SimpleFooterEditor({
   onEditorFocus,
   onEditorBlur,
   onEditingChange,
+  showPageNumbers = false,
 }: SimpleFooterEditorProps) {
   const [forceEdit, setForceEdit] = useState(false);
 
@@ -47,6 +49,11 @@ export function SimpleFooterEditor({
         }}
         forceEdit={forceEdit}
       />
+      {showPageNumbers && (
+        <div className="page-break-page-number" aria-label={`Page ${pageCount} of ${pageCount}`}>
+          {pageCount} of {pageCount}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,1 @@
+SELECT vault.create_secret('sk-your-openai-api-key', 'openai_api_key');
