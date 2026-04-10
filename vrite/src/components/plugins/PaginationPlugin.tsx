@@ -21,6 +21,7 @@ interface PaginationPluginProps {
   onPageCountChange?: (count: number) => void;
   disabled?: boolean;
   headerContent?: string; // Default header for newly created page breaks (template from page 1)
+  showPageNumbers?: boolean; // Whether to show page numbers on newly created page breaks
 }
 
 // Enable for debugging
@@ -47,6 +48,7 @@ export default function PaginationPlugin({
   onPageCountChange,
   disabled = false,
   headerContent = '', // Default header for newly created page breaks
+  showPageNumbers = false, // Default off — enabled via DocumentEditor settings
 }: PaginationPluginProps) {
   const [editor] = useLexicalComposerContext();
   const [pageCount, setPageCount] = useState(1);
@@ -309,8 +311,8 @@ export default function PaginationPlugin({
       const newPageCount = breaks.length + 1;
       debugLog('New page count:', newPageCount);
 
-      // Create signature to detect changes (include headerContent so header template changes trigger updates)
-      const signature = `${headerContent}|${breaks.map((b) => `${b.key}:${Math.round(b.height)}`).join('|')}`;
+      // Create signature to detect changes (include headerContent and showPageNumbers so changes trigger updates)
+      const signature = `${headerContent}|${showPageNumbers}|${breaks.map((b) => `${b.key}:${Math.round(b.height)}`).join('|')}`;
 
       // If nothing changed, just update page count if needed
       if (signature === lastSignatureRef.current) {
@@ -331,13 +333,14 @@ export default function PaginationPlugin({
 
           // Capture each existing page break's header/footer content before removing it,
           // keyed by page number so it can be restored to the new node at the same position.
-          const savedContent = new Map<number, { headerText: string; footerText: string }>();
+          const savedContent = new Map<number, { headerText: string; footerText: string; showPageNumbers: boolean }>();
           let removedCount = 0;
           root.getChildren().forEach((node) => {
             if ($isPageBreakNode(node)) {
               savedContent.set(node.getPageNumber(), {
                 headerText: node.getHeaderText(),
                 footerText: node.getFooterText(),
+                showPageNumbers: node.getShowPageNumbers(),
               });
               node.remove();
               removedCount++;
@@ -355,9 +358,10 @@ export default function PaginationPlugin({
               const pageBreak = $createPageBreakNode(
                 Math.round(breakItem.height),
                 breakItem.pageNumber,
-                existing?.footerText ?? '',            // preserve custom footer or empty
-                existing?.headerText ?? headerContent, // preserve custom header or use template
-                true
+                existing?.footerText ?? '',                     // preserve custom footer or empty
+                existing?.headerText ?? headerContent,          // preserve custom header or use template
+                existing?.showPageNumbers ?? showPageNumbers,   // preserve per-page toggle or use global setting
+                newPageCount                                    // totalPages — always current
               );
               targetNode.insertBefore(pageBreak);
               debugLog('Inserted page break before:', breakItem.key, 'page:', breakItem.pageNumber);
@@ -388,6 +392,7 @@ export default function PaginationPlugin({
     onPageCountChange,
     headerContent,
     columnCount,
+    showPageNumbers,
   ]);
 
   // Schedule calculation after editor updates

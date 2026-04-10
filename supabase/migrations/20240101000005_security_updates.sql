@@ -21,5 +21,6 @@ CREATE POLICY "Service role can manage rate limits" ON public.rate_limits
   FOR ALL USING (auth.jwt() ->> 'role' = 'service_role');
 
 -- Users can manage their own rate limit records
+DROP POLICY IF EXISTS "Users can manage own rate limits" ON public.rate_limits;
 CREATE POLICY "Users can manage own rate limits" ON public.rate_limits
   FOR ALL USING (auth.uid() = user_id);
