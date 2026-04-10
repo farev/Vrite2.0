@@ -75,6 +75,9 @@ export default function GuidedCoachmark({
           ) as HTMLElement | null;
           if (sidebarShell) targetElements.push(sidebarShell);
         } else {
+          // Elevate the document scroll container so users can scroll to find diffs
+          const scrollContainer = document.querySelector('.document-editor-scroll') as HTMLElement | null;
+          if (scrollContainer) targetElements.push(scrollContainer);
           // Apply to ALL inline diff action buttons, not just the first one
           const elements = document.querySelectorAll('[data-onboarding-target="inline-diff-actions"]');
           elements.forEach((el) => {

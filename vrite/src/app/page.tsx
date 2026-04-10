@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { getActiveDriveToken } from '@/lib/get-drive-token';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,6 +19,10 @@ import {
 } from '@/lib/migrate-supabase-to-cloud';
 import { hasEverConnectedDrive } from '@/lib/check-drive-integration';
 import DrivePermissionsToast from '@/components/DrivePermissionsToast';
+
+const HomePage = dynamic(() => import('@/components/HomePage'), {
+  ssr: false
+});
 
 const DRIVE_PERMISSION_TOAST_DISMISSED_KEY = 'vrite_drive_permission_toast_dismissed';
 const PENDING_IMPORT_KEY = 'vrite_import_pending';
@@ -238,13 +243,15 @@ export default function Home() {
         }
 
         // Then, check for Supabase documents (from anonymous session)
-        // Check for old anonymous user_id first (in case of OAuth sign-in with existing account)
+        // Only migrate if there was a previous anonymous session — without an
+        // anonymous_user_id there is nothing to migrate and falling back to
+        // session.user.id would re-upload documents that already live in Drive.
         const anonymousUserId = typeof window !== 'undefined' ? localStorage.getItem('anonymous_user_id') : null;
 
-        if (await hasSupabaseDocuments(anonymousUserId || undefined)) {
+        if (anonymousUserId && await hasSupabaseDocuments(anonymousUserId)) {
           console.log('[Home] Found Supabase documents, starting cloud migration...');
 
-          const docCount = await getSupabaseDocumentCount(anonymousUserId || undefined);
+          const docCount = await getSupabaseDocumentCount(anonymousUserId);
           console.log(`[Home] Found ${docCount} Supabase documents to migrate to cloud`);
 
           // Show migration UI
@@ -259,7 +266,7 @@ export default function Home() {
           const returnPath = typeof window !== 'undefined' ? localStorage.getItem('oauth_return_path') : null;
 
           try {
-            const result = await migrateSupabaseToCloud(anonymousUserId || undefined);
+            const result = await migrateSupabaseToCloud(anonymousUserId);
 
             if (result.success && result.migratedCount > 0) {
               console.log(`[Home] Successfully migrated ${result.migratedCount} documents to cloud`);
@@ -411,6 +418,21 @@ export default function Home() {
           </p>
         </div>
       </div>
+    );
+  }
+
+  // Authenticated users see their document list
+  if (isAuthenticated) {
+    return (
+      <>
+        <HomePage />
+        {showDriveToast && (
+          <DrivePermissionsToast
+            onEnablePermissions={handleEnableDrivePermissions}
+            onDismiss={handleDismissToast}
+          />
+        )}
+      </>
     );
   }
 

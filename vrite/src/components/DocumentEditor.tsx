@@ -2190,7 +2190,7 @@ export default function DocumentEditor({
           </LexicalComposer>
         </div>
 
-        <div ref={assistantOnboardingRef}>
+        <div ref={assistantOnboardingRef} style={{ minHeight: 0, overflow: 'hidden' }}>
           <AIAssistantSidebar
             isOpen={isAISidebarOpen}
             onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
