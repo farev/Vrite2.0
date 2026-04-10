@@ -1,5 +1,5 @@
 /**
- * Utility script to find and remove duplicate documents from Supabase
+ * Utility script to find and remove duplicate docs from Supabase
  * Run with: npx tsx scripts/cleanup-duplicates.ts
  */
 

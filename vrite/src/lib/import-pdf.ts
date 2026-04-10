@@ -90,6 +90,13 @@ function wrapLists(lines: string[]): string {
   return out.join('\n');
 }
 
+function buildParagraphHtml(lines: string[]): string[] {
+  return lines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => `<p>${escapeHtml(line)}</p>`);
+}
+
 export async function importPdf(file: File): Promise<ImportResult> {
   // Dynamic import to avoid SSR / bundle bloat
   const pdfjsLib = await import('pdfjs-dist');
@@ -133,7 +140,17 @@ export async function importPdf(file: File): Promise<ImportResult> {
       allItems.push({ str: item.str, fontSize, fontName: item.fontName, x, y, width: item.width });
     }
 
-    if (allItems.length === 0) continue;
+    if (allItems.length === 0) {
+      const rawLines = (textContent.items as Array<{ str?: string }>)
+        .map((item) => (typeof item.str === 'string' ? item.str.trim() : ''))
+        .filter((text) => text.length > 0);
+
+      if (rawLines.length > 0) {
+        pageHtmlParts.push(buildParagraphHtml(rawLines).join('\n'));
+        warnings.push(`Page ${pageNum}: used plain-text fallback`);
+      }
+      continue;
+    }
 
     // Determine body font size as the statistical mode
     const bodyFontSize = statisticalMode(allItems.map((i) => i.fontSize));
@@ -349,7 +366,15 @@ export async function importPdf(file: File): Promise<ImportResult> {
     pageHtmlParts.push(wrapLists(lineHtmlParts));
   }
 
-  const html = pageHtmlParts.join('\n');
+  const html = pageHtmlParts.join('\n').trim();
+
+  if (!html) {
+    return {
+      html: '<p></p>',
+      title: file.name.replace(/\.pdf$/i, ''),
+      warnings: [...warnings, 'No extractable text found in PDF'],
+    };
+  }
 
   // Extract title from first heading or paragraph
   const parser = new DOMParser();

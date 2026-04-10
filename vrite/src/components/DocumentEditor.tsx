@@ -50,6 +50,7 @@ import {
 import AIAssistantSidebar, { type ContextSnippet, type DocumentAttachment } from './AIAssistantSidebar';
 import FormattingToolbar from './FormattingToolbar';
 import DiffViewer from './DiffViewer';
+import GuidedCoachmark from './onboarding/GuidedCoachmark';
 import DiffPlugin from './plugins/DiffPlugin';
 import ClipboardPlugin from './plugins/ClipboardPlugin';
 import AutocompletePlugin from './plugins/AutocompletePlugin';
@@ -89,6 +90,7 @@ import type { LexicalChange } from '../lib/lexicalChangeApplicator';
 import { useAuth } from '../contexts/AuthContext';
 import { useDocumentSync } from '../hooks/useDocumentSync';
 import { createClient } from '@/lib/supabase/client';
+import { usePostHog } from 'posthog-js/react';
 
 const theme = {
   root: 'document-editor-root',
@@ -145,6 +147,18 @@ const createInitialConfig = (savedEditorState?: string) => ({
   ],
   editorState: savedEditorState,
 });
+
+type OnboardingStage = 'welcome' | 'firstDiff' | 'formattingHint' | 'done';
+const REQUIRED_GUIDED_DIFF_REVIEWS = 2;
+const ONBOARDING_STATE_KEY = 'vrite_onboarding_v2_state';
+const ONBOARDING_STATE_VERSION = 2;
+
+interface SpotlightRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
 
 function ToolbarPlugin({ onAIToggle }: { onAIToggle?: () => void }) {
   const [editor] = useLexicalComposerContext();
@@ -422,6 +436,8 @@ interface DocumentEditorProps {
   onLastSavedChange: (timestamp: number) => void;
   onSaveCallbackReady?: (callback: () => void) => void;
   initialDocumentId?: string | null;
+  initialAIPrompt?: string | null;
+  initialPromptMode?: 'idea' | 'improve_existing' | null;
   onDocumentIdChange?: (id: string) => void;
   isAuthenticated: boolean;
   onInsertImageReady?: (handler: () => void) => void;
@@ -446,6 +462,8 @@ export default function DocumentEditor({
   onLastSavedChange,
   onSaveCallbackReady,
   initialDocumentId,
+  initialAIPrompt,
+  initialPromptMode = null,
   onDocumentIdChange,
   isAuthenticated,
   onInsertImageReady,
@@ -456,6 +474,7 @@ export default function DocumentEditor({
   onImportReady,
 }: DocumentEditorProps) {
   const { showSignupModal, isAnonymous } = useAuth();
+  const posthog = usePostHog();
   const supabase = useMemo(() => createClient(), []);
   const [documentId, setDocumentId] = useState<string | undefined>(initialDocumentId || undefined);
 
@@ -534,6 +553,10 @@ export default function DocumentEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [showDrivePermissionsToast, setShowDrivePermissionsToast] = useState(false);
+  const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>('done');
+  const [guidedOnboardingRect, setGuidedOnboardingRect] = useState<SpotlightRect | null>(null);
+  const [guidedDiffReviewCount, setGuidedDiffReviewCount] = useState(0);
+  const [hasUsedGuidedAcceptAll, setHasUsedGuidedAcceptAll] = useState(false);
   const isDocumentEmpty = useMemo(() => {
     if (!editorState) return true;
     let empty = true;
@@ -546,8 +569,11 @@ export default function DocumentEditor({
   const initialMountRef = useRef(true);
   const hasLoadedDocumentRef = useRef(false);
   const autoTitleTriggeredRef = useRef(false);
+  const toolbarOnboardingRef = useRef<HTMLDivElement | null>(null);
+  const assistantOnboardingRef = useRef<HTMLDivElement | null>(null);
   const autoTitleInFlightRef = useRef(false);
   const autoTitleDocIdentityRef = useRef<string | null>(null);
+  const onboardingTelemetryRef = useRef<Record<string, boolean>>({});
   const autoTitleLocalIdRef = useRef(
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
@@ -1414,6 +1440,25 @@ export default function DocumentEditor({
     });
   }, [triggerAutoTitleIfEligible]);
 
+  const handleDiffResolvedForOnboarding = useCallback(() => {
+    // NOTE: Do NOT close over `onboardingStage` here. The DiffNode React
+    // components capture `handleAccept`/`handleReject` at render time (when
+    // Lexical first inserts the diff nodes). By the time the user clicks
+    // Accept/Reject, `onboardingStage` has already transitioned from 'welcome'
+    // to 'firstDiff' — but the stale closure would still see 'welcome' and
+    // bail out, so the counter would never increment. Keeping this callback
+    // dep-free (stable) ensures the DiffNodes always hold the correct version.
+    setGuidedDiffReviewCount((current) => {
+      if (current >= REQUIRED_GUIDED_DIFF_REVIEWS) {
+        return current;
+      }
+      if (current === 0) {
+        posthog.capture('onboarding_first_diff_reviewed');
+      }
+      return current + 1;
+    });
+  }, [posthog]);
+
   // Re-enable diff mode if DiffNodes reappear (e.g., after undo)
   const handleDiffNodesDetected = useCallback(() => {
     if (!isDiffModeActive) {
@@ -1758,6 +1803,239 @@ export default function DocumentEditor({
     };
   }, []);
 
+  const markOnboardingCompleted = useCallback((reason: 'completed' | 'skipped') => {
+    setOnboardingStage('done');
+    setGuidedOnboardingRect(null);
+    setGuidedDiffReviewCount(0);
+    setHasUsedGuidedAcceptAll(false);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(
+        ONBOARDING_STATE_KEY,
+        JSON.stringify({
+          version: ONBOARDING_STATE_VERSION,
+          status: reason,
+          updatedAt: Date.now(),
+        })
+      );
+    }
+
+    posthog.capture(reason === 'completed' ? 'onboarding_completed' : 'onboarding_skipped', {
+      source: 'editor',
+    });
+  }, [posthog]);
+
+  const handleSkipOnboarding = useCallback(() => {
+    markOnboardingCompleted('skipped');
+  }, [markOnboardingCompleted]);
+
+  const handleFinishOnboarding = useCallback(() => {
+    markOnboardingCompleted('completed');
+  }, [markOnboardingCompleted]);
+
+  const handleStartWelcomeOnboarding = useCallback(() => {
+    if (onboardingStage !== 'welcome') {
+      return;
+    }
+    setGuidedDiffReviewCount(0);
+    setHasUsedGuidedAcceptAll(false);
+    setOnboardingStage('firstDiff');
+    posthog.capture('onboarding_welcome_cta_clicked');
+  }, [onboardingStage, posthog]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const shouldForceGuidedOnboarding = Boolean(initialAIPrompt?.trim());
+    if (shouldForceGuidedOnboarding) {
+      // Landing-driven AI runs should always show the guided spotlight flow.
+      setOnboardingStage('welcome');
+      setGuidedDiffReviewCount(0);
+      setHasUsedGuidedAcceptAll(false);
+      return;
+    }
+
+    try {
+      const raw = localStorage.getItem(ONBOARDING_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { version?: number; status?: string };
+        if (
+          parsed.version === ONBOARDING_STATE_VERSION &&
+          (parsed.status === 'completed' || parsed.status === 'skipped')
+        ) {
+          setOnboardingStage('done');
+          return;
+        }
+      }
+    } catch {
+      // If parsing fails, treat as first run and continue.
+    }
+
+    setOnboardingStage(initialAIPrompt?.trim() ? 'firstDiff' : 'welcome');
+    setGuidedDiffReviewCount(0);
+    setHasUsedGuidedAcceptAll(false);
+  }, [initialAIPrompt]);
+
+  useEffect(() => {
+    // For landing-driven runs, keep step 1 visible until AI has produced a diff,
+    // then advance into the guided diff-review step.
+    if (
+      onboardingStage === 'welcome' &&
+      Boolean(initialAIPrompt?.trim()) &&
+      isDiffModeActive
+    ) {
+      setOnboardingStage('firstDiff');
+    }
+  }, [initialAIPrompt, isDiffModeActive, onboardingStage]);
+
+  useEffect(() => {
+    if (
+      onboardingStage === 'firstDiff' &&
+      guidedDiffReviewCount >= REQUIRED_GUIDED_DIFF_REVIEWS &&
+      hasUsedGuidedAcceptAll &&
+      !isDiffModeActive
+    ) {
+      setOnboardingStage('formattingHint');
+      return;
+    }
+  }, [guidedDiffReviewCount, hasUsedGuidedAcceptAll, isDiffModeActive, onboardingStage]);
+
+  useEffect(() => {
+    if (onboardingStage !== 'formattingHint') {
+      return;
+    }
+    const target = toolbarOnboardingRef.current;
+    if (!target) {
+      return;
+    }
+
+    const handleFirstFormattingInteraction = () => {
+      posthog.capture('onboarding_formatting_interaction');
+      markOnboardingCompleted('completed');
+    };
+
+    target.addEventListener('click', handleFirstFormattingInteraction, { once: true });
+    return () => {
+      target.removeEventListener('click', handleFirstFormattingInteraction);
+    };
+  }, [markOnboardingCompleted, onboardingStage, posthog]);
+
+  useEffect(() => {
+    if (onboardingStage === 'done') {
+      return;
+    }
+    if (onboardingTelemetryRef.current[onboardingStage]) {
+      return;
+    }
+    onboardingTelemetryRef.current[onboardingStage] = true;
+    posthog.capture('onboarding_stage_shown', { stage: onboardingStage });
+  }, [onboardingStage, posthog]);
+
+  const getGuidedOnboardingTarget = useCallback(() => {
+    if (onboardingStage === 'welcome') {
+      return assistantOnboardingRef.current;
+    }
+
+    if (onboardingStage === 'firstDiff') {
+      if (guidedDiffReviewCount >= REQUIRED_GUIDED_DIFF_REVIEWS) {
+        return (
+          (document.querySelector('[data-onboarding-target="accept-all"]') as HTMLElement | null) ??
+          (document.querySelector('[data-onboarding-target="diff-actions"]') as HTMLElement | null)
+        );
+      }
+      return (
+        (document.querySelector('[data-onboarding-target="inline-diff-actions"]') as HTMLElement | null) ??
+        assistantOnboardingRef.current
+      );
+    }
+
+    if (onboardingStage === 'formattingHint') {
+      return toolbarOnboardingRef.current;
+    }
+
+    return null;
+  }, [guidedDiffReviewCount, onboardingStage]);
+
+  useEffect(() => {
+    if (
+      onboardingStage !== 'welcome' &&
+      onboardingStage !== 'firstDiff' &&
+      onboardingStage !== 'formattingHint'
+    ) {
+      return;
+    }
+
+    const updateSpotlight = () => {
+      const target = getGuidedOnboardingTarget();
+      if (!target) {
+        setGuidedOnboardingRect(null);
+        return;
+      }
+
+      const rect = target.getBoundingClientRect();
+      setGuidedOnboardingRect({
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+
+    updateSpotlight();
+
+    window.addEventListener('resize', updateSpotlight);
+    window.addEventListener('scroll', updateSpotlight, true);
+
+    let mutationObserver: MutationObserver | null = null;
+    if (onboardingStage === 'firstDiff') {
+      const editorRoot =
+        (document.querySelector('.document-content-editable') as HTMLElement | null) ?? document.body;
+      mutationObserver = new MutationObserver(() => {
+        updateSpotlight();
+      });
+      mutationObserver.observe(editorRoot, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateSpotlight);
+      window.removeEventListener('scroll', updateSpotlight, true);
+      mutationObserver?.disconnect();
+    };
+  }, [getGuidedOnboardingTarget, onboardingStage, isAISidebarOpen]);
+
+  useEffect(() => {
+    if (
+      onboardingStage !== 'welcome' &&
+      onboardingStage !== 'firstDiff' &&
+      onboardingStage !== 'formattingHint'
+    ) {
+      return;
+    }
+
+    const target = getGuidedOnboardingTarget();
+    if (!target) {
+      return;
+    }
+
+    target.scrollIntoView({
+      block: onboardingStage === 'formattingHint' ? 'nearest' : 'center',
+      inline: 'nearest',
+      behavior: 'smooth',
+    });
+  }, [getGuidedOnboardingTarget, onboardingStage]);
+
+  const handleGuidedAcceptAllChanges = useCallback(() => {
+    if (onboardingStage === 'firstDiff') {
+      setHasUsedGuidedAcceptAll(true);
+    }
+    handleAcceptAllChanges();
+  }, [handleAcceptAllChanges, onboardingStage]);
+
   const aiPanelWidth = isAISidebarOpen ? '380px' : '64px';
   const editorLayoutStyle = { '--ai-panel-width': aiPanelWidth } as CSSProperties;
   const lexicalComposerKey = useMemo(
@@ -1779,15 +2057,17 @@ export default function DocumentEditor({
         <div className="document-main-column">
           <LexicalComposer key={lexicalComposerKey} initialConfig={initialConfig}>
             <div className="document-main-stack">
-              <FormattingToolbar
-                onAIToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
-                documentMargins={documentMargins}
-                onMarginsChange={handleMarginsChange}
-                onFormatDocument={handleFormatDocument}
-                pageSize={pageSize}
-                onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
-                activeEditor={activeHFEditor}
-              />
+              <div ref={toolbarOnboardingRef} data-onboarding-target="formatting-toolbar">
+                <FormattingToolbar
+                  onAIToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
+                  documentMargins={documentMargins}
+                  onMarginsChange={handleMarginsChange}
+                  onFormatDocument={handleFormatDocument}
+                  pageSize={pageSize}
+                  onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
+                  activeEditor={activeHFEditor}
+                />
+              </div>
               
               <div
                 className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
@@ -1899,6 +2179,7 @@ export default function DocumentEditor({
                     onDiffComplete={handleDiffComplete}
                     onAllResolved={handleAllDiffsResolved}
                     onAnyAccepted={handleDiffAccepted}
+                    onAnyResolved={handleDiffResolvedForOnboarding}
                     onDiffNodesDetected={handleDiffNodesDetected}
                   />
                   <SpellCheckPlugin />
@@ -1909,26 +2190,39 @@ export default function DocumentEditor({
           </LexicalComposer>
         </div>
 
-        <AIAssistantSidebar
-          isOpen={isAISidebarOpen}
-          onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
-          getSimplifiedDocument={getSimplifiedDocument}
-          onApplyLexicalChanges={handleApplyLexicalChanges}
-          onApplyChanges={handleApplyChanges}
-          documentContent=""
-          contextSnippets={contextSnippets}
-          selectedContextImages={selectedContextImages}
-          onRemoveContextSnippet={handleRemoveContextSnippet}
-          onRemoveSelectedImage={handleRemoveSelectedImage}
-          onClearContextSnippets={handleClearContextSnippets}
-          onClearEditorSelection={handleClearEditorSelection}
-          onChatFocusChange={handleChatFocusChange}
-          isDiffModeActive={isDiffModeActive}
-          onAcceptAllChanges={handleAcceptAllChanges}
-          onRejectAllChanges={handleRejectAllChanges}
-          initialAttachments={aiAttachments}
-          onAttachmentsChange={handleAttachmentsChange}
-        />
+        <div ref={assistantOnboardingRef}>
+          <AIAssistantSidebar
+            isOpen={isAISidebarOpen}
+            onToggle={() => setIsAISidebarOpen(!isAISidebarOpen)}
+            getSimplifiedDocument={getSimplifiedDocument}
+            initialPrompt={initialAIPrompt}
+            initialPromptMode={initialPromptMode}
+            onApplyLexicalChanges={handleApplyLexicalChanges}
+            onApplyChanges={handleApplyChanges}
+            documentContent=""
+            contextSnippets={contextSnippets}
+            selectedContextImages={selectedContextImages}
+            onRemoveContextSnippet={handleRemoveContextSnippet}
+            onRemoveSelectedImage={handleRemoveSelectedImage}
+            onClearContextSnippets={handleClearContextSnippets}
+            onClearEditorSelection={handleClearEditorSelection}
+            onChatFocusChange={handleChatFocusChange}
+            showWelcomeCard={onboardingStage === 'welcome'}
+            onStartWelcomeOnboarding={handleStartWelcomeOnboarding}
+            onSkipWelcomeOnboarding={handleSkipOnboarding}
+            isDiffModeActive={isDiffModeActive}
+            onAcceptAllChanges={handleGuidedAcceptAllChanges}
+            onRejectAllChanges={handleRejectAllChanges}
+            shouldGateBulkDiffActions={onboardingStage === 'firstDiff'}
+            canUseBulkDiffActions={
+              onboardingStage !== 'firstDiff' || guidedDiffReviewCount >= REQUIRED_GUIDED_DIFF_REVIEWS
+            }
+            requiredGuidedDiffReviews={REQUIRED_GUIDED_DIFF_REVIEWS}
+            guidedDiffReviewCount={guidedDiffReviewCount}
+            initialAttachments={aiAttachments}
+            onAttachmentsChange={handleAttachmentsChange}
+          />
+        </div>
       </div>
 
       <DiffViewer
@@ -1954,6 +2248,17 @@ export default function DocumentEditor({
             showSignupModal('permissions-missing');
           }}
           onDismiss={() => setShowDrivePermissionsToast(false)}
+        />
+      )}
+
+      {(onboardingStage === 'welcome' || onboardingStage === 'firstDiff' || onboardingStage === 'formattingHint') && (
+        <GuidedCoachmark
+          stage={onboardingStage}
+          targetRect={guidedOnboardingRect}
+          guidedDiffReviewCount={guidedDiffReviewCount}
+          requiredGuidedDiffReviews={REQUIRED_GUIDED_DIFF_REVIEWS}
+          onSkip={handleSkipOnboarding}
+          onFinish={handleFinishOnboarding}
         />
       )}
     </div>

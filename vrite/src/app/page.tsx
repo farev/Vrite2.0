@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { getActiveDriveToken } from '@/lib/get-drive-token';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,20 +19,136 @@ import {
 import { hasEverConnectedDrive } from '@/lib/check-drive-integration';
 import DrivePermissionsToast from '@/components/DrivePermissionsToast';
 
-const HomePage = dynamic(() => import('@/components/HomePage'), {
-  ssr: false
-});
-
 const DRIVE_PERMISSION_TOAST_DISMISSED_KEY = 'vrite_drive_permission_toast_dismissed';
+const PENDING_IMPORT_KEY = 'vrite_import_pending';
+const PENDING_AI_PROMPT_KEY = 'vrite_initial_ai_prompt';
+const PENDING_AI_PROMPT_MODE_KEY = 'vrite_initial_ai_prompt_mode';
+const UPLOAD_IMPROVE_PROMPT =
+  'Improve this document for clarity, flow, and overall quality while preserving intent and structure. If it naturally helps readability, include at least one equation or table to showcase capabilities, but do not force them.';
+const HERO_ROLES = ['Engineers', 'Non-writers', 'Students', 'Makers', 'Creators'];
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationMessage, setMigrationMessage] = useState('');
   const [showDriveToast, setShowDriveToast] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [isLaunchingPrompt, setIsLaunchingPrompt] = useState(false);
+  const [typedRole, setTypedRole] = useState('');
+  const [heroRoleIndex, setHeroRoleIndex] = useState(0);
+  const [isDeletingRole, setIsDeletingRole] = useState(false);
   const router = useRouter();
   const supabase = createClient();
   const { showSignupModal } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const secondaryButtonClass =
+    'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md active:translate-y-0 active:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#21A5EF] focus-visible:ring-offset-2';
+  const primaryButtonClass =
+    'inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[#1685CE] bg-[#21A5EF] px-5 py-3.5 text-base font-semibold text-white shadow-sm transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#1685CE] hover:shadow-md active:translate-y-0 active:shadow-sm disabled:cursor-not-allowed disabled:opacity-60';
+
+  useEffect(() => {
+    const currentRole = HERO_ROLES[heroRoleIndex];
+    const typingSpeed = isDeletingRole ? 55 : 95;
+    const holdOnWordMs = 1300;
+    let timeout: ReturnType<typeof setTimeout>;
+
+    if (!isDeletingRole && typedRole === currentRole) {
+      timeout = setTimeout(() => setIsDeletingRole(true), holdOnWordMs);
+    } else if (isDeletingRole && typedRole.length === 0) {
+      timeout = setTimeout(() => {
+        setIsDeletingRole(false);
+        setHeroRoleIndex((prev) => (prev + 1) % HERO_ROLES.length);
+      }, 220);
+    } else {
+      timeout = setTimeout(() => {
+        setTypedRole((prev) =>
+          isDeletingRole
+            ? currentRole.slice(0, Math.max(prev.length - 1, 0))
+            : currentRole.slice(0, prev.length + 1)
+        );
+      }, typingSpeed);
+    }
+
+    return () => clearTimeout(timeout);
+  }, [heroRoleIndex, isDeletingRole, typedRole]);
+
+  const handleLogIn = useCallback(() => {
+    router.push('/login');
+  }, [router]);
+
+  const getNewDocumentPath = useCallback(() => {
+    if (isAuthenticated) {
+      return '/document/new';
+    }
+
+    return `/document/${generateTempId()}`;
+  }, [isAuthenticated]);
+
+  const handleOpenFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelected = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    setIsImporting(true);
+
+    try {
+      let result: { html: string; title: string; warnings: string[] };
+
+      if (ext === 'docx') {
+        const { importDocx } = await import('@/lib/import-docx');
+        result = await importDocx(file);
+      } else if (ext === 'pdf') {
+        const { importPdf } = await import('@/lib/import-pdf');
+        result = await importPdf(file);
+      } else {
+        alert('Unsupported file format. Please select a .docx or .pdf file.');
+        return;
+      }
+
+      if (result.warnings.length > 0) {
+        console.warn('[Landing] Import warnings:', result.warnings);
+      }
+
+      if (!result.html?.trim()) {
+        throw new Error('Imported file contained no usable text');
+      }
+
+      sessionStorage.setItem(
+        PENDING_IMPORT_KEY,
+        JSON.stringify({ html: result.html, title: result.title })
+      );
+      sessionStorage.setItem(PENDING_AI_PROMPT_KEY, UPLOAD_IMPROVE_PROMPT);
+      sessionStorage.setItem(PENDING_AI_PROMPT_MODE_KEY, 'improve_existing');
+      router.push(getNewDocumentPath());
+    } catch (error) {
+      console.error('[Landing] Import failed:', error);
+      alert('Failed to import file. The file may be corrupted or unsupported.');
+    } finally {
+      event.target.value = '';
+      setIsImporting(false);
+    }
+  }, [getNewDocumentPath, router]);
+
+  const handleCreateFromContext = useCallback(() => {
+    const trimmedPrompt = prompt.trim();
+
+    if (!trimmedPrompt) {
+      return;
+    }
+
+    setIsLaunchingPrompt(true);
+    sessionStorage.setItem(PENDING_AI_PROMPT_KEY, trimmedPrompt);
+    sessionStorage.setItem(PENDING_AI_PROMPT_MODE_KEY, 'idea');
+    router.push(getNewDocumentPath());
+  }, [getNewDocumentPath, prompt, router]);
 
   const handleMissingDriveToken = useCallback(async (session: any) => {
     if (typeof window === 'undefined' || !session?.user || session.user.is_anonymous) {
@@ -91,18 +206,10 @@ export default function Home() {
   }, [supabase]);
 
   useEffect(() => {
-    // Check authentication status (but don't redirect)
+    // Check authentication status.
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const signedIn = !!session && !session.user?.is_anonymous;
       setIsAuthenticated(signedIn);
-
-      if (!signedIn) {
-        console.log('[Home] No session - anonymous mode enabled');
-        // For anonymous users, redirect to new temporary document
-        const tempId = generateTempId();
-        router.push(`/document/${tempId}`);
-        return;
-      }
 
       // Check for migration flag
       const needsMigrationCheck =
@@ -203,11 +310,13 @@ export default function Home() {
       }
 
       // Verify cloud storage access for authenticated users
-      if (!session.provider_token) {
-        console.error('[Home] ⚠️ No cloud storage access token!');
-        handleMissingDriveToken(session);
-      } else {
-        console.log('[Home] ✅ User authenticated with cloud storage access');
+      if (session && !session.user?.is_anonymous) {
+        if (!session.provider_token) {
+          console.error('[Home] ⚠️ No cloud storage access token!');
+          handleMissingDriveToken(session);
+        } else {
+          console.log('[Home] ✅ User authenticated with cloud storage access');
+        }
       }
     });
 
@@ -258,7 +367,7 @@ export default function Home() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#21A5EF] mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading...</p>
         </div>
       </div>
@@ -268,14 +377,14 @@ export default function Home() {
   // Show migration UI while documents are being migrated
   if (isMigrating) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-white dark:from-gray-900 dark:to-gray-800">
+      <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center max-w-md px-6">
           {/* Animated icon */}
           <div className="mb-6 relative">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto"></div>
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-[#21A5EF] mx-auto"></div>
             <div className="absolute inset-0 flex items-center justify-center">
               <svg
-                className="w-8 h-8 text-indigo-600"
+                className="w-8 h-8 text-[#21A5EF]"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -305,15 +414,136 @@ export default function Home() {
     );
   }
 
-  // Anonymous users are redirected to editor (handled in useEffect)
-  // Authenticated users see document list
-  if (!isAuthenticated) {
-    return null;
-  }
-
   return (
     <>
-      <HomePage />
+      <main className="relative min-h-screen overflow-hidden bg-white font-sans text-slate-900 antialiased">
+        <div className="relative z-10 flex min-h-screen w-full flex-col">
+          <div className="flex items-center justify-between px-3 pt-3 sm:px-5 sm:pt-4">
+            <div className="flex items-center gap-3">
+              <img
+                src="/vibewrite-logo.png"
+                alt="VibeWrite Logo"
+                className="h-9 w-auto object-contain sm:h-11 md:h-12"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleLogIn}
+              className={`${secondaryButtonClass} group`}
+            >
+              <span>Log in</span>
+              <svg
+                className="h-4 w-4 text-slate-700 transition-transform duration-200 group-hover:translate-x-0.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="flex flex-1 items-start justify-center px-6 pt-2 pb-8 sm:px-8 sm:pt-4">
+            <div className="w-full max-w-[70rem]">
+              <div className="mx-auto mb-6 max-w-3xl text-center">
+                <h1 className="text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl md:text-6xl">
+                  Docs for{' '}
+                  <span className="inline-block text-[#21A5EF]">
+                    {typedRole}
+                    <span className="ml-1 inline-block h-[0.95em] w-[2px] animate-pulse bg-[#21A5EF] align-[-0.08em]" />
+                  </span>
+                </h1>
+              </div>
+
+              <div className="relative">
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenFilePicker}
+                    disabled={isImporting}
+                    className="group flex min-h-[21rem] flex-col rounded-2xl border border-[#b3e0fc] bg-white p-6 text-left shadow-[0_10px_26px_rgba(15,23,42,0.08)] transition-all duration-200 ease-out hover:-translate-y-1 hover:border-[#7ec5f8] hover:shadow-[0_18px_36px_rgba(33,165,239,0.16)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#21A5EF] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <div>
+                      <h2 className="text-2xl font-semibold text-slate-900">
+                        Upload a document
+                      </h2>
+                      <p className="mt-3 text-base leading-6 text-slate-600">
+                        Open a `.docx` or `.pdf` and start editing right away.
+                      </p>
+                    </div>
+                    <div className="mt-6 flex flex-1 flex-col items-center justify-center">
+                      <svg
+                        className="h-24 w-24 text-[#21A5EF] transition-transform duration-200 group-hover:scale-105"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 15.5V18a2 2 0 002 2h12a2 2 0 002-2v-2.5" />
+                      </svg>
+                      <span className="mt-4 text-sm font-medium text-slate-600">
+                        {isImporting ? 'Importing document...' : 'Click anywhere to upload'}
+                      </span>
+                    </div>
+                  </button>
+
+                  <section className="rounded-2xl border border-[#b3e0fc] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.08)] transition-all duration-200 ease-out hover:-translate-y-1 hover:border-[#7ec5f8] hover:shadow-[0_18px_36px_rgba(33,165,239,0.16)] sm:p-6">
+                    <div className="mb-6">
+                      <h2 className="text-2xl font-semibold text-slate-900">
+                        Start from an idea
+                      </h2>
+                      <p className="mt-3 text-base leading-6 text-slate-600">
+                        Type what you want to write, and Vrite will create a first draft in a new document.
+                      </p>
+                    </div>
+
+                    <textarea
+                      value={prompt}
+                      onChange={(event) => setPrompt(event.target.value)}
+                      placeholder="Example: Create a one-page project proposal for an AI writing app focused on students."
+                      rows={6}
+                      className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-base leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#21A5EF] focus:ring-2 focus:ring-[#21A5EF]/20"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={handleCreateFromContext}
+                      disabled={!prompt.trim() || isLaunchingPrompt}
+                      className={`mt-4 ${primaryButtonClass}`}
+                    >
+                      {isLaunchingPrompt ? 'Opening editor...' : 'Create from prompt'}
+                    </button>
+                  </section>
+                </div>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={handleFileSelected}
+                className="hidden"
+              />
+
+              <p className="mt-8 text-center text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 sm:mt-10">
+                Trusted by students at
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center justify-center gap-3 px-2 opacity-70 grayscale sm:gap-5">
+                <img src="/GTlogo.png" alt="Georgia Tech" className="h-16 w-auto object-contain sm:h-20 md:h-24" />
+                <img
+                  src="/UFLogo.png"
+                  alt="University of Florida"
+                  className="h-24 w-auto object-contain sm:h-28 md:h-32"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
       {showDriveToast && (
         <DrivePermissionsToast
           onEnablePermissions={handleEnableDrivePermissions}

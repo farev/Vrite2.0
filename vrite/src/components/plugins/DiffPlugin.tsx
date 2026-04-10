@@ -25,6 +25,7 @@ interface DiffPluginProps {
   onDiffComplete?: () => void;
   onAllResolved?: (finalContent: string) => void;
   onAnyAccepted?: () => void;
+  onAnyResolved?: () => void;
   onDiffNodesDetected?: () => void;
 }
 
@@ -34,6 +35,7 @@ export default function DiffPlugin({
   onDiffComplete,
   onAllResolved,
   onAnyAccepted,
+  onAnyResolved,
   onDiffNodesDetected,
 }: DiffPluginProps) {
   const [editor] = useLexicalComposerContext();
@@ -70,7 +72,6 @@ export default function DiffPlugin({
   // Handle accepting a diff node
   const handleAccept = useCallback(
     (nodeKey: NodeKey) => {
-      let didAccept = false;
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isDiffNode(node)) {
@@ -86,7 +87,6 @@ export default function DiffPlugin({
             if (parent && parent.getTextContent().trim() === '') {
               parent.remove();
             }
-            didAccept = true;
           } else {
             // For additions/replacements, check if it's an image
             if (nodeData.imageData) {
@@ -108,7 +108,6 @@ export default function DiffPlugin({
               if (parent) {
                 parent.replace(imageNode);
               }
-              didAccept = true;
             } else if (nodeData.equationData) {
               // Create an inline EquationNode (all equations are inline now)
               const equationNode = $createEquationNode(
@@ -118,7 +117,6 @@ export default function DiffPlugin({
 
               // Replace the DiffNode with the inline EquationNode
               node.replace(equationNode);
-              didAccept = true;
             } else {
               // Regular text replacement
               const textNode = $createTextNode(text);
@@ -128,17 +126,19 @@ export default function DiffPlugin({
               // Replace the DiffNode with the new TextNode
               // The parent element already has the new alignment set (from createBlockNodeWithDiff)
               node.replace(textNode);
-              didAccept = true;
             }
           }
         }
         checkAllResolved();
       });
-      if (didAccept) {
-        onAnyAccepted?.();
-      }
+      // Callbacks are called unconditionally — handleAccept is only invoked from
+      // a DiffNode's click handler, so the node is guaranteed to exist.
+      // (The previous guard used a flag set inside the async editor.update() callback,
+      // which always read as false before the deferred mutation ran.)
+      onAnyAccepted?.();
+      onAnyResolved?.();
     },
-    [editor, checkAllResolved, onAnyAccepted]
+    [editor, checkAllResolved, onAnyAccepted, onAnyResolved]
   );
 
   // Handle rejecting a diff node
@@ -183,8 +183,13 @@ export default function DiffPlugin({
         }
         checkAllResolved();
       });
+      // Callback called unconditionally — handleReject is only invoked from a
+      // DiffNode's click handler, so the node is guaranteed to exist.
+      // (The previous guard used a flag set inside the async editor.update() callback,
+      // which always read as false before the deferred mutation ran.)
+      onAnyResolved?.();
     },
-    [editor, checkAllResolved]
+    [editor, checkAllResolved, onAnyResolved]
   );
 
   // Handle resolving a diff node with a custom (partially-accepted) text
@@ -202,8 +207,9 @@ export default function DiffPlugin({
         checkAllResolved();
       });
       onAnyAccepted?.();
+      onAnyResolved?.();
     },
-    [editor, checkAllResolved, onAnyAccepted]
+    [editor, checkAllResolved, onAnyAccepted, onAnyResolved]
   );
 
   // Set up callbacks on the DiffNode class

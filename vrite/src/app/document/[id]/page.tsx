@@ -15,6 +15,12 @@ const DocumentEditor = dynamic(() => import('@/components/DocumentEditor'), {
 });
 
 const DRIVE_PERMISSION_PROMPT_KEY = 'vrite_drive_permission_prompt_shown';
+const PENDING_IMPORT_KEY = 'vrite_import_pending';
+const PENDING_AI_PROMPT_KEY = 'vrite_initial_ai_prompt';
+const PENDING_AI_PROMPT_MODE_KEY = 'vrite_initial_ai_prompt_mode';
+type InitialPromptMode = 'idea' | 'improve_existing';
+type PendingImportPayload = { html: string; title: string };
+type QueuedInitialPrompt = { prompt: string; mode: InitialPromptMode };
 
 export default function DocumentPage() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
@@ -31,6 +37,14 @@ export default function DocumentPage() {
   const importCallbackRef = useRef<((html: string, title: string) => void) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const [initialAIPrompt, setInitialAIPrompt] = useState<string | null>(null);
+  const [initialPromptMode, setInitialPromptMode] = useState<InitialPromptMode | null>(null);
+  const [pendingImportPayload, setPendingImportPayload] = useState<PendingImportPayload | null>(null);
+  const [queuedInitialPrompt, setQueuedInitialPrompt] = useState<QueuedInitialPrompt | null>(null);
+  const [isImportCallbackReady, setIsImportCallbackReady] = useState(false);
+  // Guard: sessionStorage is cleared on the first call, so subsequent calls must
+  // not overwrite state that was already successfully read.
+  const hasAppliedPendingStateRef = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const router = useRouter();
@@ -104,7 +118,81 @@ export default function DocumentPage() {
 
   const handleImportCallbackReady = useCallback((callback: (html: string, title: string) => void) => {
     importCallbackRef.current = callback;
+    setIsImportCallbackReady(true);
   }, []);
+
+  const applyPendingNewDocumentState = useCallback(() => {
+    // Prevent a second invocation from clearing state that was already read.
+    // sessionStorage keys are removed on the first call, so any subsequent call
+    // would incorrectly reset initialAIPrompt back to null.
+    if (hasAppliedPendingStateRef.current) {
+      return;
+    }
+    hasAppliedPendingStateRef.current = true;
+
+    setPendingImportPayload(null);
+    setQueuedInitialPrompt(null);
+
+    const pendingImport = sessionStorage.getItem(PENDING_IMPORT_KEY);
+    let hasQueuedImport = false;
+    if (pendingImport) {
+      try {
+        const { html, title } = JSON.parse(pendingImport) as { html: string; title: string };
+        if (typeof html === 'string' && typeof title === 'string') {
+          hasQueuedImport = true;
+          setPendingImportPayload({ html, title });
+        } else {
+          sessionStorage.removeItem(PENDING_IMPORT_KEY);
+        }
+      } catch {
+        console.warn('[DocumentPage] Failed to parse pending import data');
+        sessionStorage.removeItem(PENDING_IMPORT_KEY);
+      }
+    }
+
+    const pendingPrompt = sessionStorage.getItem(PENDING_AI_PROMPT_KEY);
+    const pendingPromptMode = sessionStorage.getItem(PENDING_AI_PROMPT_MODE_KEY);
+    if (pendingPrompt) {
+      const trimmedPrompt = pendingPrompt.trim();
+      if (trimmedPrompt) {
+        const mode =
+          pendingPromptMode === 'idea' || pendingPromptMode === 'improve_existing'
+            ? pendingPromptMode
+            : 'improve_existing';
+        if (hasQueuedImport) {
+          setQueuedInitialPrompt({ prompt: trimmedPrompt, mode });
+        } else {
+          setInitialAIPrompt(trimmedPrompt);
+          setInitialPromptMode(mode);
+          sessionStorage.removeItem(PENDING_AI_PROMPT_KEY);
+          sessionStorage.removeItem(PENDING_AI_PROMPT_MODE_KEY);
+        }
+      } else {
+        sessionStorage.removeItem(PENDING_AI_PROMPT_KEY);
+        sessionStorage.removeItem(PENDING_AI_PROMPT_MODE_KEY);
+      }
+    } else {
+      sessionStorage.removeItem(PENDING_AI_PROMPT_MODE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isImportCallbackReady || !pendingImportPayload || !importCallbackRef.current) {
+      return;
+    }
+
+    importCallbackRef.current(pendingImportPayload.html, pendingImportPayload.title);
+    setPendingImportPayload(null);
+    sessionStorage.removeItem(PENDING_IMPORT_KEY);
+
+    if (queuedInitialPrompt) {
+      setInitialAIPrompt(queuedInitialPrompt.prompt);
+      setInitialPromptMode(queuedInitialPrompt.mode);
+      setQueuedInitialPrompt(null);
+      sessionStorage.removeItem(PENDING_AI_PROMPT_KEY);
+      sessionStorage.removeItem(PENDING_AI_PROMPT_MODE_KEY);
+    }
+  }, [isImportCallbackReady, pendingImportPayload, queuedInitialPrompt]);
 
   const handleImportDocument = useCallback(async (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
@@ -126,12 +214,16 @@ export default function DocumentPage() {
         console.warn('[Import] Warnings:', result.warnings);
       }
 
+      if (!result.html?.trim()) {
+        throw new Error('Imported file contained no usable text');
+      }
+
       // If the editor import handler is ready (same page), use it directly
       if (importCallbackRef.current) {
         importCallbackRef.current(result.html, result.title);
       } else {
         // Otherwise hand off via sessionStorage and navigate to new doc
-        sessionStorage.setItem('vrite_import_pending', JSON.stringify({ html: result.html, title: result.title }));
+        sessionStorage.setItem(PENDING_IMPORT_KEY, JSON.stringify({ html: result.html, title: result.title }));
         router.push('/document/new');
       }
     } catch (error) {
@@ -192,23 +284,8 @@ export default function DocumentPage() {
       const isTempDoc = id.startsWith('temp-');
 
       if (id === 'new') {
-        // New document — check for a pending import
-        const pending = sessionStorage.getItem('vrite_import_pending');
-        if (pending) {
-          sessionStorage.removeItem('vrite_import_pending');
-          try {
-            const { html, title } = JSON.parse(pending) as { html: string; title: string };
-            // Wait briefly for the editor to mount and register its import handler
-            setTimeout(() => {
-              if (importCallbackRef.current) {
-                importCallbackRef.current(html, title);
-              }
-            }, 500);
-          } catch {
-            console.warn('[DocumentPage] Failed to parse pending import data');
-          }
-        }
         setDocumentId(null);
+        applyPendingNewDocumentState();
         setIsLoading(false);
         return;
       }
@@ -221,16 +298,19 @@ export default function DocumentPage() {
           // Load temporary document from localStorage
           const tempDoc = loadTemporaryDocument(id);
           if (tempDoc) {
+            setInitialAIPrompt(null);
             setDocumentTitle(tempDoc.title);
             setLastSaved(tempDoc.lastModified);
           } else {
             console.log('[DocumentPage] New temporary document');
             // New temporary document - let editor initialize it
+            applyPendingNewDocumentState();
           }
         } else if (isAuthenticated) {
           // Load cloud document (requires authentication)
           const doc = await loadDocumentById(id);
           if (doc) {
+            setInitialAIPrompt(null);
             setDocumentTitle(doc.title);
             setLastSaved(doc.lastModified);
           } else {
@@ -251,7 +331,7 @@ export default function DocumentPage() {
     if (isAuthenticated !== null) {
       loadDocumentData();
     }
-  }, [params.id, isAuthenticated, router]);
+  }, [applyPendingNewDocumentState, params.id, isAuthenticated, router]);
 
   // Show loading state while checking authentication or loading document
   if (isAuthenticated === null || isLoading) {
@@ -568,6 +648,8 @@ export default function DocumentPage() {
         onActiveFormatKeyChange={setActiveFormatKey}
         onImportReady={handleImportCallbackReady}
         initialDocumentId={documentId}
+        initialAIPrompt={initialAIPrompt}
+        initialPromptMode={initialPromptMode}
         onDocumentIdChange={handleDocumentIdChange}
         isAuthenticated={isAuthenticated}
       />
