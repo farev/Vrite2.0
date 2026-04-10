@@ -333,14 +333,13 @@ export default function PaginationPlugin({
 
           // Capture each existing page break's header/footer content before removing it,
           // keyed by page number so it can be restored to the new node at the same position.
-          const savedContent = new Map<number, { headerText: string; footerText: string; showPageNumbers: boolean }>();
+          const savedContent = new Map<number, { headerText: string; footerText: string }>();
           let removedCount = 0;
           root.getChildren().forEach((node) => {
             if ($isPageBreakNode(node)) {
               savedContent.set(node.getPageNumber(), {
                 headerText: node.getHeaderText(),
                 footerText: node.getFooterText(),
-                showPageNumbers: node.getShowPageNumbers(),
               });
               node.remove();
               removedCount++;
@@ -360,7 +359,7 @@ export default function PaginationPlugin({
                 breakItem.pageNumber,
                 existing?.footerText ?? '',                     // preserve custom footer or empty
                 existing?.headerText ?? headerContent,          // preserve custom header or use template
-                existing?.showPageNumbers ?? showPageNumbers,   // preserve per-page toggle or use global setting
+                showPageNumbers,                                // always use global setting — it's document-level, not per-page
                 newPageCount                                    // totalPages — always current
               );
               targetNode.insertBefore(pageBreak);

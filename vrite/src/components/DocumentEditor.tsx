@@ -1787,8 +1787,15 @@ export default function DocumentEditor({
                 pageSize={pageSize}
                 onPageSizeChange={(size) => setPageSize(size as keyof typeof PAGE_SIZES)}
                 activeEditor={activeHFEditor}
+                showPageNumbers={headerFooterSettings.footerShowPageNumber}
+                onPageNumbersToggle={() =>
+                  setHeaderFooterSettings(prev => ({
+                    ...prev,
+                    footerShowPageNumber: !prev.footerShowPageNumber,
+                  }))
+                }
               />
-              
+
               <div
                 className={`document-editor-scroll${isDocumentAtTop ? ' is-at-top' : ''}`}
                 onScroll={handleDocumentScroll}

@@ -56,6 +56,7 @@ import {
   Pipette,
   List,
   ListOrdered,
+  Hash,
 } from 'lucide-react';
 
 interface FormattingToolbarProps {
@@ -71,6 +72,8 @@ interface FormattingToolbarProps {
   pageSize?: string;
   onPageSizeChange?: (size: string) => void;
   activeEditor?: LexicalEditor | null;
+  showPageNumbers?: boolean;
+  onPageNumbersToggle?: () => void;
 }
 
 const TEXT_COLOR_SWATCHES = [
@@ -201,6 +204,8 @@ export default function FormattingToolbar({
   pageSize = 'letter',
   onPageSizeChange,
   activeEditor: activeEditorProp,
+  showPageNumbers = false,
+  onPageNumbersToggle,
 }: FormattingToolbarProps) {
   const [mainEditor] = useLexicalComposerContext();
   const editor = activeEditorProp || mainEditor;
@@ -1833,6 +1838,15 @@ export default function FormattingToolbar({
                   </div>
                 )}
               </div>
+
+              <button
+                type="button"
+                className={`toolbar-button ${showPageNumbers ? 'active' : ''}`}
+                onClick={onPageNumbersToggle}
+                title={showPageNumbers ? 'Hide page numbers' : 'Show page numbers'}
+              >
+                <Hash size={18} />
+              </button>
 
               <div className="toolbar-dropdown">
                 <button
